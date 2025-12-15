@@ -139,12 +139,20 @@ void MQTTManager::disconnect(void) {
 }
 
 void MQTTManager::loadConfig(void) {
-    if (!prefs.begin(MQTT_NVS_NAMESPACE, true)) {  // Read-only
-        Serial.println("[MQTT] ERROR: Failed to open NVS for reading config");
+    // Try to open NVS namespace (read-only)
+    if (!prefs.begin(MQTT_NVS_NAMESPACE, true)) {
+        // Namespace doesn't exist yet (first boot) - use defaults
+        Serial.println("[MQTT] No configuration found in NVS, using defaults");
         enabled = false;
+        broker = "";
+        port = MQTT_DEFAULT_PORT;
+        username = "";
+        password = "";
+        topic_prefix = "sensors/esp32";
         return;
     }
 
+    // Read configuration from NVS
     enabled = prefs.getBool(MQTT_ENABLED_KEY, false);
     broker = prefs.getString(MQTT_BROKER_KEY, "");
     port = prefs.getUShort(MQTT_PORT_KEY, MQTT_DEFAULT_PORT);

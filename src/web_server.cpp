@@ -4,7 +4,8 @@ DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
     : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
       webServer(WIFI_WEB_SERVER_PORT), ethServer(nullptr),
       dnsActive(false), ethServerActive(false),
-      ethernetIP(0, 0, 0, 0), ethernetConnected(false) {
+      ethernetIP(0, 0, 0, 0), ethernetConnected(false),
+      adminPassword(""), lastFailedAttempt(0), failedAttempts(0) {
 }
 
 void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr) {
@@ -15,29 +16,46 @@ void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* 
 
 // Start web server and DNS (if in AP mode)
 void DeviceWebServer::begin(void) {
-    // Setup WiFi WebServer routes
-    webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
-    webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
-    webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
-    webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
-    webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
-    webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
-    webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
-    webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
-    webServer.onNotFound([this]() { handleNotFound(); });
+    // Load admin password from NVS
+    loadAdminPassword();
 
-    webServer.begin();
-    Serial.println("[Web] WiFi server started on port 80");
-
-    // Start DNS server for captive portal if in AP mode
-    if (wifiManager.isAPActive()) {
-        dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
-        dnsServer.start(DNS_SERVER_PORT, "*", wifiManager.getAPIP());
-        dnsActive = true;
-        Serial.println("[DNS] Captive portal DNS started");
+    // Check if Ethernet-only mode is configured
+    Preferences netPrefs;
+    bool ethernetOnly = false;
+    if (netPrefs.begin("network_config", true)) {  // Read-only
+        ethernetOnly = netPrefs.getBool("ethernet_only", false);
+        netPrefs.end();
     }
 
-    // Start Ethernet HTTP server on port 80 (DHCP blocking fixed, can run simultaneously)
+    // Only start WiFi web server if NOT in Ethernet-only mode
+    if (!ethernetOnly) {
+        // Setup WiFi WebServer routes
+        webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
+        webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
+        webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
+        webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
+        webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
+        webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
+        webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
+        webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
+        webServer.onNotFound([this]() { handleNotFound(); });
+
+        webServer.begin();
+        Serial.println("[Web] WiFi server started on port 80");
+
+        // Start DNS server for captive portal if in AP mode
+        if (wifiManager.isAPActive()) {
+            dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+            dnsServer.start(DNS_SERVER_PORT, "*", wifiManager.getAPIP());
+            dnsActive = true;
+            Serial.println("[DNS] Captive portal DNS started");
+        }
+    } else {
+        Serial.println("[Web] Ethernet-only mode - WiFi web server disabled");
+    }
+
+    // Start Ethernet HTTP server on port 80
+    // In Ethernet-only mode, this is the only server
     if (ethernetConnected) {
         ethServer = new EthernetServer(ETHERNET_WEB_SERVER_PORT);
         ethServer->begin();
@@ -66,6 +84,16 @@ void DeviceWebServer::handleClient(void) {
 
     // Handle WiFi WebServer
     webServer.handleClient();
+
+    // Start Ethernet server if connected but not yet started
+    if (ethernetConnected && !ethServerActive) {
+        Serial.println("[Web] Ethernet connected - starting Ethernet server");
+        ethServer = new EthernetServer(ETHERNET_WEB_SERVER_PORT);
+        ethServer->begin();
+        ethServerActive = true;
+        Serial.print("[Web] Ethernet server started on port ");
+        Serial.println(ETHERNET_WEB_SERVER_PORT);
+    }
 
     // Handle Ethernet server
     if (ethServerActive && ethServer) {
@@ -302,6 +330,90 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         String jsonResponse;
         serializeJson(doc, jsonResponse);
         sendEthernetResponse(client, 200, "application/json", jsonResponse);
+    } else if (requestLine.startsWith("GET /mqtt")) {
+        // MQTT configuration page
+        Serial.println("[Eth] Serving MQTT config page");
+        if (mqttManager == nullptr || certManager == nullptr) {
+            sendEthernetResponse(client, 503, "text/plain", "MQTT not initialized");
+        } else {
+            sendEthernetResponse(client, 200, "text/html", generateMQTTConfigPage());
+        }
+    } else if (requestLine.startsWith("POST /api/mqtt/save")) {
+        // Save MQTT configuration
+        Serial.println("[Eth] Processing MQTT save request");
+        // Parse form data from POST body
+        int bodyStart = request.indexOf("\r\n\r\n") + 4;
+        String body = request.substring(bodyStart);
+
+        Serial.print("[Eth] POST body: ");
+        Serial.println(body);
+
+        // Parse parameters
+        bool enabled = body.indexOf("enabled=") >= 0;
+        String broker = "";
+        uint16_t port = 8883;
+        String username = "";
+        String password = "";
+        String topic = "";
+
+        // Helper function to extract value between prefix and &
+        auto extractValue = [&](const String& prefix) -> String {
+            int pos = body.indexOf(prefix);
+            if (pos < 0) return "";
+            int start = pos + prefix.length();
+            int end = body.indexOf("&", start);
+            if (end < 0) end = body.length();
+            String value = body.substring(start, end);
+            // URL decode
+            value.replace("+", " ");
+            value.replace("%2F", "/");
+            value.replace("%2f", "/");
+            value.replace("%20", " ");
+            value.trim();
+            return value;
+        };
+
+        broker = extractValue("broker=");
+        String portStr = extractValue("port=");
+        if (portStr.length() > 0) port = portStr.toInt();
+        username = extractValue("username=");
+        password = extractValue("password=");
+        topic = extractValue("topic=");
+
+        Serial.print("[Eth] Parsed - Enabled: ");
+        Serial.print(enabled);
+        Serial.print(", Broker: ");
+        Serial.print(broker);
+        Serial.print(", Port: ");
+        Serial.print(port);
+        Serial.print(", Topic: ");
+        Serial.println(topic);
+
+        if (mqttManager && mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
+            sendEthernetResponse(client, 200, "text/html",
+                "<html><body><h1>MQTT Settings Saved!</h1><p><a href='/mqtt'>Back</a></p></body></html>");
+        } else {
+            sendEthernetResponse(client, 500, "text/plain", "Failed to save MQTT configuration");
+        }
+    } else if (requestLine.startsWith("GET /api/mqtt/status")) {
+        // MQTT status JSON
+        if (mqttManager == nullptr || certManager == nullptr) {
+            sendEthernetResponse(client, 503, "application/json", "{\"error\":\"MQTT not initialized\"}");
+        } else {
+            JsonDocument doc;
+            doc["enabled"] = mqttManager->isEnabled();
+            doc["broker"] = mqttManager->getBroker();
+            doc["port"] = mqttManager->getPort();
+            doc["topic"] = mqttManager->getTopic();
+            doc["connected"] = mqttManager->isConnected();
+            doc["status"] = mqttManager->getConnectionStatus();
+            doc["cert_source"] = certManager->getCertificateSource();
+            doc["last_connected"] = mqttManager->getLastConnected();
+
+            String jsonResponse;
+            serializeJson(doc, jsonResponse);
+            sendEthernetResponse(client, 200, "application/json", jsonResponse);
+        }
     } else {
         // 404 Not Found
         Serial.println("[Eth] 404 Not Found");
@@ -357,22 +469,78 @@ void DeviceWebServer::handleSave(void) {
     Serial.println("[WiFi] Save credentials request");
     Serial.flush();
 
-    if (!webServer.hasArg("ssid") || !webServer.hasArg("password")) {
-        Serial.println("[WiFi] Missing required fields");
-        webServer.send(400, "text/html",
-            "<h1>Error: Missing WiFi credentials</h1><a href='/'>Back</a>");
-        return;
+    // Check for Ethernet-only mode
+    bool ethernetOnly = webServer.hasArg("ethernet_only");
+
+    // In Ethernet-only mode, WiFi credentials are not required
+    if (!ethernetOnly) {
+        if (!webServer.hasArg("ssid") || !webServer.hasArg("password")) {
+            Serial.println("[WiFi] Missing required fields");
+            webServer.send(400, "text/html",
+                "<h1>Error: Missing WiFi credentials</h1><a href='/'>Back</a>");
+            return;
+        }
     }
 
+    // Get WiFi credentials (may be empty in Ethernet-only mode)
     String ssid = webServer.arg("ssid");
     String password = webServer.arg("password");
 
-    Serial.print("[WiFi] Saving SSID: ");
+    // Get admin password fields
+    String adminPassword = webServer.arg("admin_password");
+    String adminPasswordConfirm = webServer.arg("admin_password_confirm");
+
+    // Validate admin password if provided
+    if (adminPassword.length() > 0) {
+        if (adminPassword != adminPasswordConfirm) {
+            Serial.println("[WiFi] Admin passwords do not match");
+            webServer.send(400, "text/html",
+                "<h1>Error: Admin passwords do not match</h1><a href='/'>Back</a>");
+            return;
+        }
+        if (adminPassword.length() < 4) {
+            Serial.println("[WiFi] Admin password too short");
+            webServer.send(400, "text/html",
+                "<h1>Error: Admin password must be at least 4 characters</h1><a href='/'>Back</a>");
+            return;
+        }
+    }
+
+    Serial.print("[WiFi] Ethernet-only mode: ");
+    Serial.println(ethernetOnly ? "Yes" : "No");
+    Serial.print("[WiFi] SSID: ");
     Serial.println(ssid);
+    Serial.print("[WiFi] Admin password: ");
+    Serial.println(adminPassword.length() > 0 ? "Set" : "Not set");
     Serial.flush();
 
-    // Save credentials to NVS
+    // Save WiFi credentials (even if empty in Ethernet-only mode)
     wifiManager.saveCredentials(ssid, password);
+
+    // Save Ethernet-only preference
+    Preferences netPrefs;
+    if (netPrefs.begin("network_config", false)) {
+        netPrefs.putBool("ethernet_only", ethernetOnly);
+        netPrefs.end();
+        Serial.println("[WiFi] Ethernet-only preference saved");
+    } else {
+        Serial.println("[WiFi] ERROR: Failed to save Ethernet-only preference");
+    }
+
+    // Save admin password
+    Preferences authPrefs;
+    if (authPrefs.begin("auth", false)) {
+        if (adminPassword.length() > 0) {
+            authPrefs.putString("admin_password", adminPassword);
+            Serial.println("[WiFi] Admin password saved");
+        } else {
+            authPrefs.remove("admin_password");
+            Serial.println("[WiFi] Admin password cleared");
+        }
+        authPrefs.end();
+    } else {
+        Serial.println("[WiFi] ERROR: Failed to save admin password");
+    }
 
     // Send success page BEFORE reboot
     webServer.send(200, "text/html", generateSaveSuccessPage());
@@ -498,7 +666,35 @@ String DeviceWebServer::generateProvisioningPage(void) {
 
       <div class="form-group">
         <label>WiFi Password *</label>
-        <input type="password" name="password" placeholder="WiFi password" required>
+        <input type="password" id="wifi-password" name="password" placeholder="WiFi password" required>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="ethernet-only" name="ethernet_only">
+          Ethernet-only mode (WiFi disabled)
+        </label>
+        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+          Check this for installations that should never use WiFi. WiFi fields will be cleared.
+        </p>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+
+      <h3 style="font-size: 16px; margin-bottom: 15px; color: #333;">Security Settings</h3>
+
+      <div class="form-group">
+        <label>Admin Password (for /mqtt configuration)</label>
+        <input type="password" id="admin-password" name="admin_password" placeholder="Secure MQTT settings access">
+      </div>
+
+      <div class="form-group">
+        <label>Confirm Admin Password</label>
+        <input type="password" id="admin-password-confirm" name="admin_password_confirm" placeholder="Re-enter password">
+      </div>
+
+      <div class="info">
+        ℹ️ Admin password protects MQTT configuration page. Leave empty for no authentication.
       </div>
 
       <button type="submit">Save & Reboot</button>
@@ -506,6 +702,49 @@ String DeviceWebServer::generateProvisioningPage(void) {
   </div>
 
   <script>
+    // Dynamic form behavior for Ethernet-only mode
+    document.getElementById('ethernet-only').addEventListener('change', function(e) {
+      const wifiFields = document.querySelectorAll('#ssid-select, #wifi-password');
+
+      if (e.target.checked) {
+        // Disable and clear WiFi fields
+        wifiFields.forEach(field => {
+          field.disabled = true;
+          field.value = '';
+          field.removeAttribute('required');
+          if (field.id === 'ssid-select') {
+            field.innerHTML = '<option value="">Not used in Ethernet-only mode</option>';
+          } else {
+            field.placeholder = 'Not used in Ethernet-only mode';
+          }
+        });
+      } else {
+        // Re-enable WiFi fields
+        wifiFields.forEach(field => {
+          field.disabled = false;
+          field.setAttribute('required', 'required');
+          if (field.id === 'ssid-select') {
+            scanNetworks();
+          } else {
+            field.placeholder = 'WiFi password';
+          }
+        });
+      }
+    });
+
+    // Form validation - re-enable disabled fields before submit so they're sent
+    document.querySelector('form').addEventListener('submit', function(e) {
+      const ethernetOnly = document.getElementById('ethernet-only').checked;
+      if (ethernetOnly) {
+        // Temporarily enable WiFi fields so empty values are sent
+        const wifiFields = document.querySelectorAll('#ssid-select, #wifi-password');
+        wifiFields.forEach(field => {
+          field.disabled = false;
+          field.value = '';  // Ensure empty
+        });
+      }
+    });
+
     async function scanNetworks() {
       try {
         const res = await fetch('/api/scan');
@@ -870,8 +1109,61 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
 </html>)HTML";
 }
 
+// Load admin password from NVS
+void DeviceWebServer::loadAdminPassword(void) {
+    Preferences authPrefs;
+    if (authPrefs.begin("auth", true)) {  // Read-only
+        adminPassword = authPrefs.getString("admin_password", "");
+        authPrefs.end();
+
+        if (adminPassword.length() > 0) {
+            Serial.println("[Web] Admin password loaded from NVS");
+        } else {
+            Serial.println("[Web] No admin password set - /mqtt routes will be unprotected");
+        }
+    } else {
+        Serial.println("[Web] ERROR: Failed to load admin password from NVS");
+        adminPassword = "";
+    }
+}
+
+// Require authentication for sensitive routes
+bool DeviceWebServer::requireAuth(void) {
+    // No password set = no authentication required
+    if (adminPassword.length() == 0) {
+        return true;
+    }
+
+    // Rate limiting: max 5 attempts per minute
+    if (failedAttempts >= 5 && millis() - lastFailedAttempt < 60000) {
+        Serial.println("[Web] Rate limit exceeded - too many failed attempts");
+        webServer.send(429, "text/plain",
+            "Too many failed authentication attempts. Please wait 1 minute.");
+        return false;
+    }
+
+    // Check HTTP Basic Authentication
+    if (!webServer.authenticate("admin", adminPassword.c_str())) {
+        failedAttempts++;
+        lastFailedAttempt = millis();
+        Serial.print("[Web] Authentication failed (attempt ");
+        Serial.print(failedAttempts);
+        Serial.println(")");
+        webServer.requestAuthentication();
+        return false;
+    }
+
+    // Success - reset counter
+    failedAttempts = 0;
+    Serial.println("[Web] Authentication successful");
+    return true;
+}
+
 // MQTT Configuration Handlers
 void DeviceWebServer::handleMQTTConfig(void) {
+    // Require authentication
+    if (!requireAuth()) return;
+
     if (mqttManager == nullptr || certManager == nullptr) {
         webServer.send(503, "text/plain", "MQTT not initialized");
         return;
@@ -881,6 +1173,9 @@ void DeviceWebServer::handleMQTTConfig(void) {
 }
 
 void DeviceWebServer::handleMQTTSave(void) {
+    // Require authentication
+    if (!requireAuth()) return;
+
     if (mqttManager == nullptr) {
         webServer.send(503, "text/plain", "MQTT manager not initialized");
         return;
@@ -906,6 +1201,9 @@ void DeviceWebServer::handleMQTTSave(void) {
 }
 
 void DeviceWebServer::handleMQTTUploadCert(void) {
+    // Require authentication
+    if (!requireAuth()) return;
+
     if (certManager == nullptr) {
         webServer.send(503, "text/plain", "Certificate manager not initialized");
         return;
@@ -940,6 +1238,9 @@ void DeviceWebServer::handleMQTTUploadCert(void) {
 }
 
 void DeviceWebServer::handleMQTTClearCerts(void) {
+    // Require authentication
+    if (!requireAuth()) return;
+
     if (certManager == nullptr) {
         webServer.send(503, "text/plain", "Certificate manager not initialized");
         return;
@@ -950,6 +1251,9 @@ void DeviceWebServer::handleMQTTClearCerts(void) {
 }
 
 void DeviceWebServer::handleMQTTStatus(void) {
+    // Require authentication
+    if (!requireAuth()) return;
+
     if (mqttManager == nullptr || certManager == nullptr) {
         webServer.send(503, "application/json", "{\"error\":\"MQTT not initialized\"}");
         return;

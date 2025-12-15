@@ -172,6 +172,19 @@ bool initEthernet(void) {
 bool initWiFi(WiFiManager& wifiMgr) {
     String ssid, password;
 
+    // Check if Ethernet-only mode is configured
+    Preferences netPrefs;
+    bool ethernetOnly = false;
+    if (netPrefs.begin("network_config", true)) {  // Read-only
+        ethernetOnly = netPrefs.getBool("ethernet_only", false);
+        netPrefs.end();
+    }
+
+    if (ethernetOnly) {
+        Serial.println("[WiFi] Ethernet-only mode enabled - WiFi disabled");
+        return false;  // WiFi not initialized (intentional)
+    }
+
     // Check if credentials exist
     if (!wifiMgr.hasCredentials()) {
         Serial.println("[WiFi] No credentials found - starting AP mode");

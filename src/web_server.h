@@ -7,6 +7,7 @@
 #include <EthernetServer.h>
 #include <EthernetClient.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include "wifi_manager.h"
 #include "certificate_manager.h"
 #include "mqtt_manager.h"
@@ -46,6 +47,13 @@ private:
     IPAddress ethernetIP;
     String ethernetMAC;
     bool ethernetConnected;
+
+    // Authentication (for /mqtt routes)
+    String adminPassword;
+    unsigned long lastFailedAttempt;
+    int failedAttempts;
+    bool requireAuth(void);
+    void loadAdminPassword(void);
 
     // Route handlers for WiFi WebServer
     void handleRoot(void);

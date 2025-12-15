@@ -5,6 +5,7 @@
 #include <SPI.h>
 #include <Ethernet.h>
 #include <ESPmDNS.h>
+#include <Preferences.h>
 #include "mdns_ethernet.h"
 #include "wifi_manager.h"
 

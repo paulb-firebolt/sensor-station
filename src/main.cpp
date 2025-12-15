@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <nvs_flash.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include "network.h"
 #include "wifi_manager.h"
 #include "web_server.h"
@@ -113,13 +114,23 @@ void setup() {
     }
 
     // Check if we need to start AP mode for provisioning
-    if (!wifiManager.hasCredentials()) {
+    // Skip if Ethernet-only mode is configured
+    Preferences netPrefs;
+    bool ethernetOnly = false;
+    if (netPrefs.begin("network_config", true)) {  // Read-only
+        ethernetOnly = netPrefs.getBool("ethernet_only", false);
+        netPrefs.end();
+    }
+
+    if (!ethernetOnly && !wifiManager.hasCredentials()) {
         Serial.println("\n=== Starting Provisioning Mode ===");
         if (wifiManager.startAP()) {
             Serial.println("Provisioning AP started successfully");
         } else {
             Serial.println("ERROR: Failed to start AP mode!");
         }
+    } else if (ethernetOnly) {
+        Serial.println("\n[Info] Ethernet-only mode - WiFi AP disabled");
     }
 
     // Initialize certificate manager
