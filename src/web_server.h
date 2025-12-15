@@ -8,6 +8,8 @@
 #include <EthernetClient.h>
 #include <ArduinoJson.h>
 #include "wifi_manager.h"
+#include "certificate_manager.h"
+#include "mqtt_manager.h"
 
 const int WIFI_WEB_SERVER_PORT = 80;
 const int ETHERNET_WEB_SERVER_PORT = 80;
@@ -26,8 +28,13 @@ public:
     void setEthernetInfo(IPAddress ip, String mac, bool connected);
     void setHostname(const String& name);
 
+    // Set MQTT managers (for MQTT configuration page)
+    void setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr);
+
 private:
     WiFiManager& wifiManager;
+    CertificateManager* certManager;
+    MQTTManager* mqttManager;
     WebServer webServer;           // For WiFi (AP and STA mode)
     EthernetServer* ethServer;     // For Ethernet
     DNSServer dnsServer;
@@ -46,6 +53,13 @@ private:
     void handleSave(void);
     void handleNotFound(void);
 
+    // MQTT configuration handlers
+    void handleMQTTConfig(void);
+    void handleMQTTSave(void);
+    void handleMQTTUploadCert(void);
+    void handleMQTTClearCerts(void);
+    void handleMQTTStatus(void);
+
     // Ethernet HTTP handlers
     void handleEthernetClient(void);
     void sendEthernetResponse(EthernetClient& client, int code, const String& contentType, const String& content);
@@ -56,6 +70,7 @@ private:
     String generateEthernetProvisioningPage(void);  // Ethernet - manual input
     String generateStatusPage(void);
     String generateSaveSuccessPage(void);
+    String generateMQTTConfigPage(void);            // MQTT configuration
 };
 
 #endif // WEB_SERVER_H

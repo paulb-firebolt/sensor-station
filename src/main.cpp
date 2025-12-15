@@ -1,8 +1,11 @@
 #include <Arduino.h>
 #include <nvs_flash.h>
+#include <ArduinoJson.h>
 #include "network.h"
 #include "wifi_manager.h"
 #include "web_server.h"
+#include "certificate_manager.h"
+#include "mqtt_manager.h"
 
 // GPIO pin for factory reset button
 const int FACTORY_RESET_PIN = 0; // Boot button on most ESP32 boards
@@ -11,11 +14,16 @@ const unsigned long FACTORY_RESET_HOLD_TIME = 5000; // 5 seconds
 // Global objects
 WiFiManager wifiManager;
 DeviceWebServer webServer(wifiManager);
+CertificateManager certManager;
+MQTTManager mqttManager;
 
 // Factory reset variables
 unsigned long resetButtonPressStart = 0;
 bool resetButtonPressed = false;
 bool factoryResetTriggered = false;
+
+// MQTT publish timing
+unsigned long lastMQTTPublish = 0;
 
 // Check for factory reset button press
 void checkFactoryReset(void) {
@@ -114,9 +122,19 @@ void setup() {
         }
     }
 
+    // Initialize certificate manager
+    certManager.begin();
+
+    // Initialize MQTT manager
+    mqttManager.begin(certManager, wifiManager);
+
     // Start web server
     webServer.setHostname(getHostname());
     webServer.setEthernetInfo(getIPAddress(), getMACAddress(), isEthernetConnected());
+
+    // Set MQTT managers for web interface
+    webServer.setMQTTManagers(&certManager, &mqttManager);
+
     webServer.begin();
 
     // Print status summary
@@ -180,6 +198,38 @@ void loop() {
 
     // Update Ethernet status for web server
     webServer.setEthernetInfo(getIPAddress(), getMACAddress(), isEthernetConnected());
+
+    // Update MQTT if WiFi is connected
+    if (isWiFiConnected()) {
+        mqttManager.update();
+
+        // Publish uptime data periodically if MQTT is connected
+        if (mqttManager.isConnected()) {
+            unsigned long now = millis();
+            if (now - lastMQTTPublish >= MQTT_PUBLISH_INTERVAL) {
+                lastMQTTPublish = now;
+
+                // Create JSON payload with uptime data
+                JsonDocument doc;
+                doc["uptime_ms"] = millis();
+                doc["uptime_sec"] = millis() / 1000;
+                doc["uptime_min"] = millis() / 60000;
+                doc["wifi_rssi"] = wifiManager.getRSSI();
+                doc["wifi_ssid"] = wifiManager.getConnectedSSID();
+                doc["free_heap"] = ESP.getFreeHeap();
+
+                String payload;
+                serializeJson(doc, payload);
+
+                // Publish to status topic
+                mqttManager.publish("status", payload);
+
+                Serial.print("[App] Published status: ");
+                Serial.print(millis() / 1000);
+                Serial.println(" seconds");
+            }
+        }
+    }
 
     // Your application code here
     // ...

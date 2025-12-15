@@ -1,9 +1,16 @@
 #include "web_server.h"
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
-    : wifiManager(wifiMgr), webServer(WIFI_WEB_SERVER_PORT), ethServer(nullptr),
+    : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
+      webServer(WIFI_WEB_SERVER_PORT), ethServer(nullptr),
       dnsActive(false), ethServerActive(false),
       ethernetIP(0, 0, 0, 0), ethernetConnected(false) {
+}
+
+void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr) {
+    certManager = certMgr;
+    mqttManager = mqttMgr;
+    Serial.println("[Web] MQTT managers set");
 }
 
 // Start web server and DNS (if in AP mode)
@@ -12,6 +19,11 @@ void DeviceWebServer::begin(void) {
     webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
     webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
     webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
+    webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
+    webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
+    webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
+    webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
+    webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
     webServer.onNotFound([this]() { handleNotFound(); });
 
     webServer.begin();
@@ -854,6 +866,372 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
     <p>Device is rebooting with new WiFi configuration...</p>
     <p>Please reconnect to your WiFi network and access the device at its new address.</p>
   </div>
+</body>
+</html>)HTML";
+}
+
+// MQTT Configuration Handlers
+void DeviceWebServer::handleMQTTConfig(void) {
+    if (mqttManager == nullptr || certManager == nullptr) {
+        webServer.send(503, "text/plain", "MQTT not initialized");
+        return;
+    }
+
+    webServer.send(200, "text/html", generateMQTTConfigPage());
+}
+
+void DeviceWebServer::handleMQTTSave(void) {
+    if (mqttManager == nullptr) {
+        webServer.send(503, "text/plain", "MQTT manager not initialized");
+        return;
+    }
+
+    // Get form parameters
+    bool enabled = webServer.hasArg("enabled");
+    String broker = webServer.arg("broker");
+    uint16_t port = webServer.arg("port").toInt();
+    if (port == 0) port = 8883;
+    String username = webServer.arg("username");
+    String password = webServer.arg("password");
+    String topic = webServer.arg("topic");
+
+    // Save configuration
+    if (mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
+        webServer.send(200, "text/html",
+            "<html><body><h1>MQTT Settings Saved!</h1><p>Configuration updated successfully.</p>"
+            "<p><a href='/mqtt'>Back to MQTT Config</a></p></body></html>");
+    } else {
+        webServer.send(500, "text/plain", "Failed to save MQTT configuration");
+    }
+}
+
+void DeviceWebServer::handleMQTTUploadCert(void) {
+    if (certManager == nullptr) {
+        webServer.send(503, "text/plain", "Certificate manager not initialized");
+        return;
+    }
+
+    // Get certificate type and data from POST
+    String certType = webServer.arg("cert_type");
+    String certData = webServer.arg("cert_data");
+
+    if (certData.length() == 0) {
+        webServer.send(400, "text/plain", "No certificate data provided");
+        return;
+    }
+
+    bool success = false;
+    if (certType == "ca") {
+        success = certManager->saveCACert(certData);
+    } else if (certType == "client") {
+        success = certManager->saveClientCert(certData);
+    } else if (certType == "key") {
+        success = certManager->saveClientKey(certData);
+    } else {
+        webServer.send(400, "text/plain", "Invalid certificate type");
+        return;
+    }
+
+    if (success) {
+        webServer.send(200, "text/plain", "Certificate uploaded successfully");
+    } else {
+        webServer.send(500, "text/plain", "Failed to save certificate");
+    }
+}
+
+void DeviceWebServer::handleMQTTClearCerts(void) {
+    if (certManager == nullptr) {
+        webServer.send(503, "text/plain", "Certificate manager not initialized");
+        return;
+    }
+
+    certManager->clearCertificates();
+    webServer.send(200, "text/plain", "All certificates cleared");
+}
+
+void DeviceWebServer::handleMQTTStatus(void) {
+    if (mqttManager == nullptr || certManager == nullptr) {
+        webServer.send(503, "application/json", "{\"error\":\"MQTT not initialized\"}");
+        return;
+    }
+
+    JsonDocument doc;
+    doc["enabled"] = mqttManager->isEnabled();
+    doc["broker"] = mqttManager->getBroker();
+    doc["port"] = mqttManager->getPort();
+    doc["topic"] = mqttManager->getTopic();
+    doc["connected"] = mqttManager->isConnected();
+    doc["status"] = mqttManager->getConnectionStatus();
+    doc["cert_source"] = certManager->getCertificateSource();
+    doc["last_connected"] = mqttManager->getLastConnected();
+
+    String response;
+    serializeJson(doc, response);
+    webServer.send(200, "application/json", response);
+}
+
+// Generate MQTT configuration page
+String DeviceWebServer::generateMQTTConfigPage(void) {
+    // Get current configuration
+    String broker = mqttManager ? mqttManager->getBroker() : "";
+    uint16_t port = mqttManager ? mqttManager->getPort() : 8883;
+    String username = mqttManager ? mqttManager->getUsername() : "";
+    String topic = mqttManager ? mqttManager->getTopic() : "sensors/esp32";
+    bool enabled = mqttManager ? mqttManager->isEnabled() : false;
+    String certSource = certManager ? certManager->getCertificateSource() : "Unknown";
+
+    return R"HTML(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MQTT Configuration</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 25px;
+      color: #333;
+    }
+    h2 {
+      font-size: 18px;
+      margin: 20px 0 15px 0;
+      color: #667eea;
+      border-bottom: 2px solid #667eea;
+      padding-bottom: 8px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+      font-size: 14px;
+    }
+    input[type="text"], input[type="number"], input[type="password"], textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    textarea {
+      min-height: 150px;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    button {
+      padding: 10px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-right: 10px;
+    }
+    button:hover { opacity: 0.9; }
+    .btn-danger {
+      background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    }
+    .info {
+      background: #e3f2fd;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 15px 0;
+      font-size: 13px;
+      color: #1976d2;
+    }
+    .warning {
+      background: #fff3e0;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 15px 0;
+      font-size: 13px;
+      color: #e65100;
+    }
+    .nav {
+      margin-bottom: 20px;
+    }
+    .nav a {
+      color: white;
+      text-decoration: none;
+      padding: 10px 20px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 6px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="nav">
+      <a href="/">← Back to Status</a>
+    </div>
+
+    <div class="card">
+      <h1>MQTT Configuration</h1>
+
+      <div class="warning">
+        <strong>Note:</strong> MQTTS requires WiFi connectivity. Ethernet does not support TLS.
+      </div>
+
+      <form method="POST" action="/api/mqtt/save">
+        <h2>Connection Settings</h2>
+
+        <div class="form-group">
+          <label>
+            <input type="checkbox" name="enabled" )HTML" + String(enabled ? "checked" : "") + R"HTML(>
+            Enable MQTT
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label>Broker (hostname or IP) *</label>
+          <input type="text" name="broker" placeholder="192.168.1.100 or mqtt.example.com" value=")HTML" + broker + R"HTML(" required>
+        </div>
+
+        <div class="form-group">
+          <label>Port</label>
+          <input type="number" name="port" value=")HTML" + String(port) + R"HTML(" placeholder="8883">
+        </div>
+
+        <div class="form-group">
+          <label>Username (optional)</label>
+          <input type="text" name="username" placeholder="mqtt_user" value=")HTML" + username + R"HTML(">
+        </div>
+
+        <div class="form-group">
+          <label>Password (optional)</label>
+          <input type="password" name="password" placeholder="mqtt_password">
+        </div>
+
+        <div class="form-group">
+          <label>Topic Prefix</label>
+          <input type="text" name="topic" placeholder="sensors/esp32" value=")HTML" + topic + R"HTML(">
+        </div>
+
+        <button type="submit">Save Settings</button>
+      </form>
+
+      <h2>TLS Certificates</h2>
+
+      <div class="info">
+        <strong>Current Certificate Source:</strong> )HTML" + certSource + R"HTML(<br>
+        Upload custom certificates for production, or use compiled-in defaults for testing.
+      </div>
+
+      <div class="form-group">
+        <label>CA Certificate</label>
+        <textarea id="ca-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        <button onclick="uploadCert('ca')">Upload CA Cert</button>
+      </div>
+
+      <div class="form-group">
+        <label>Client Certificate</label>
+        <textarea id="client-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+        <button onclick="uploadCert('client')">Upload Client Cert</button>
+      </div>
+
+      <div class="form-group">
+        <label>Client Private Key</label>
+        <textarea id="client-key" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+        <button onclick="uploadCert('key')">Upload Client Key</button>
+      </div>
+
+      <button class="btn-danger" onclick="clearCerts()">Clear All Certificates</button>
+
+      <h2>Status</h2>
+      <div id="status-info">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    async function uploadCert(type) {
+      let data = '';
+      if (type === 'ca') data = document.getElementById('ca-cert').value;
+      else if (type === 'client') data = document.getElementById('client-cert').value;
+      else if (type === 'key') data = document.getElementById('client-key').value;
+
+      if (!data) {
+        alert('Please paste certificate data first');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/mqtt/upload', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: 'cert_type=' + type + '&cert_data=' + encodeURIComponent(data)
+        });
+        if (res.ok) {
+          alert('Certificate uploaded successfully');
+          location.reload();
+        } else {
+          alert('Upload failed: ' + await res.text());
+        }
+      } catch (e) {
+        alert('Upload error: ' + e.message);
+      }
+    }
+
+    async function clearCerts() {
+      if (!confirm('Clear all certificates? Device will use compiled-in defaults.')) return;
+
+      try {
+        const res = await fetch('/api/mqtt/clear', {method: 'POST'});
+        if (res.ok) {
+          alert('Certificates cleared');
+          location.reload();
+        } else {
+          alert('Failed to clear certificates');
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      }
+    }
+
+    async function updateStatus() {
+      try {
+        const res = await fetch('/api/mqtt/status');
+        const data = await res.json();
+        document.getElementById('status-info').innerHTML =
+          '<strong>Status:</strong> ' + data.status + '<br>' +
+          '<strong>Broker:</strong> ' + data.broker + ':' + data.port + '<br>' +
+          '<strong>Topic:</strong> ' + data.topic + '<br>' +
+          '<strong>Certificate Source:</strong> ' + data.cert_source;
+      } catch (e) {
+        document.getElementById('status-info').innerHTML = 'Error loading status';
+      }
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 5000);
+  </script>
 </body>
 </html>)HTML";
 }
