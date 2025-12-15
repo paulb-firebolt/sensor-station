@@ -72,6 +72,7 @@ private:
     void handleEthernetClient(void);
     void sendEthernetResponse(EthernetClient& client, int code, const String& contentType, const String& content);
     void handleEthernetRequest(EthernetClient& client, const String& request);
+    bool requireEthernetAuth(const String& request);
 
     // Page generators
     String generateProvisioningPage(void);          // WiFi AP - with scanning

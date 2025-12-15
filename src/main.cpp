@@ -53,11 +53,39 @@ void checkFactoryReset(void) {
             Serial.println("\n========================================");
             Serial.println("FACTORY RESET TRIGGERED!");
             Serial.println("========================================");
-            Serial.println("Clearing WiFi credentials from NVS...");
+            Serial.println("Performing complete factory reset...");
+            Serial.println("");
 
+            // Clear all NVS namespaces
+            Serial.println("[Reset] Clearing WiFi credentials...");
             wifiManager.clearCredentials();
 
-            Serial.println("Credentials cleared successfully.");
+            Serial.println("[Reset] Clearing network configuration...");
+            Preferences netPrefs;
+            if (netPrefs.begin("network_config", false)) {
+                netPrefs.clear();
+                netPrefs.end();
+            }
+
+            Serial.println("[Reset] Clearing admin password...");
+            Preferences authPrefs;
+            if (authPrefs.begin("auth", false)) {
+                authPrefs.clear();
+                authPrefs.end();
+            }
+
+            Serial.println("[Reset] Clearing MQTT configuration...");
+            Preferences mqttPrefs;
+            if (mqttPrefs.begin("mqtt_config", false)) {
+                mqttPrefs.clear();
+                mqttPrefs.end();
+            }
+
+            Serial.println("[Reset] Clearing certificates...");
+            certManager.clearCertificates();
+
+            Serial.println("");
+            Serial.println("All settings cleared successfully!");
             Serial.println("Rebooting into provisioning mode...");
             Serial.println("========================================\n");
 

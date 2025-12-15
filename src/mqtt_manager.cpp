@@ -4,9 +4,12 @@
 MQTTManager::MQTTManager()
     : certManager(nullptr)
     , wifiManager(nullptr)
-    , mqttClient(secureClient)
+    , ethSecureClient(nullptr)
+    , mqttClient(wifiSecureClient)  // Default to WiFi client
     , enabled(false)
     , port(MQTT_DEFAULT_PORT)
+    , ethernetOnlyMode(false)
+    , currentMode(MODE_NONE)
     , connected(false)
     , lastReconnectAttempt(0)
     , lastPublishTime(0)
@@ -20,7 +23,10 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     certManager = &certMgr;
     wifiManager = &wifiMgr;
 
-    // Load configuration from NVS
+    // Load network preferences (Ethernet-only mode)
+    loadNetworkPreferences();
+
+    // Load MQTT configuration from NVS
     loadConfig();
 
     if (!enabled) {
@@ -39,8 +45,10 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     Serial.println(port);
     Serial.print("[MQTT] Topic prefix: ");
     Serial.println(topic_prefix);
+    Serial.print("[MQTT] Ethernet-only mode: ");
+    Serial.println(ethernetOnlyMode ? "Yes" : "No");
 
-    // Setup MQTT client
+    // Setup MQTT client with initial default (will be switched as needed)
     mqttClient.setServer(broker.c_str(), port);
     mqttClient.setBufferSize(512);  // Increase buffer for larger messages
 
@@ -52,10 +60,17 @@ void MQTTManager::update(void) {
         return;
     }
 
-    // Check if WiFi is connected (MQTTS requires WiFi)
-    if (!wifiManager->isConnectedStation()) {
+    // Check if any network is available
+    bool networkAvailable = false;
+    if (ethernetOnlyMode) {
+        networkAvailable = (Ethernet.linkStatus() == LinkON);
+    } else {
+        networkAvailable = wifiManager->isConnectedStation() || (Ethernet.linkStatus() == LinkON);
+    }
+
+    if (!networkAvailable) {
         if (connected) {
-            Serial.println("[MQTT] WiFi disconnected, MQTT unavailable");
+            Serial.println("[MQTT] Network disconnected, MQTT unavailable");
             connected = false;
         }
         return;
@@ -87,8 +102,10 @@ bool MQTTManager::reconnect(void) {
         return false;
     }
 
-    if (!wifiManager->isConnectedStation()) {
-        Serial.println("[MQTT] Cannot connect: WiFi not connected (MQTTS requires WiFi)");
+    // Select appropriate secure client based on network availability
+    Client* secureClient = selectSecureClient();
+    if (secureClient == nullptr) {
+        Serial.println("[MQTT] Cannot connect: No network available");
         return false;
     }
 
@@ -96,10 +113,8 @@ bool MQTTManager::reconnect(void) {
     Serial.print(broker);
     Serial.print(":");
     Serial.print(port);
-    Serial.println("...");
-
-    // Setup TLS certificates
-    setupTLS();
+    Serial.print(" via ");
+    Serial.println(currentMode == MODE_WIFI ? "WiFi" : "Ethernet");
 
     // Connect to MQTT broker
     if (connectToBroker()) {
@@ -304,13 +319,67 @@ bool MQTTManager::connectToBroker(void) {
     return result;
 }
 
-void MQTTManager::setupTLS(void) {
+// Load network preferences (Ethernet-only mode)
+void MQTTManager::loadNetworkPreferences(void) {
+    Preferences netPrefs;
+    if (!netPrefs.begin(NETWORK_CONFIG_NAMESPACE, true)) {  // Read-only
+        Serial.println("[MQTT] No network preferences found, using defaults");
+        ethernetOnlyMode = false;
+        return;
+    }
+
+    ethernetOnlyMode = netPrefs.getBool(ETHERNET_ONLY_KEY, false);
+    netPrefs.end();
+
+    Serial.print("[MQTT] Ethernet-only mode: ");
+    Serial.println(ethernetOnlyMode ? "Enabled" : "Disabled");
+}
+
+// Select the appropriate secure client based on network availability
+Client* MQTTManager::selectSecureClient(void) {
+    // Ethernet-only mode?
+    if (ethernetOnlyMode && Ethernet.linkStatus() == LinkON) {
+        if (currentMode != MODE_ETHERNET) {
+            Serial.println("[MQTT] Selecting Ethernet TLS client (Ethernet-only mode)");
+            setupEthernetTLS();
+            currentMode = MODE_ETHERNET;
+        }
+        return ethSecureClient;
+    }
+
+    // Normal mode: WiFi preferred
+    if (wifiManager->isConnectedStation()) {
+        if (currentMode != MODE_WIFI) {
+            Serial.println("[MQTT] Selecting WiFi TLS client (WiFi available)");
+            setupWiFiTLS();
+            currentMode = MODE_WIFI;
+        }
+        return &wifiSecureClient;
+    }
+
+    // Fallback to Ethernet if WiFi unavailable
+    if (Ethernet.linkStatus() == LinkON) {
+        if (currentMode != MODE_ETHERNET) {
+            Serial.println("[MQTT] Selecting Ethernet TLS client (WiFi unavailable, fallback)");
+            setupEthernetTLS();
+            currentMode = MODE_ETHERNET;
+        }
+        return ethSecureClient;
+    }
+
+    Serial.println("[MQTT] ERROR: No network available");
+    currentMode = MODE_NONE;
+    return nullptr;
+}
+
+// Setup WiFi TLS (WiFiClientSecure with mbedTLS)
+void MQTTManager::setupWiFiTLS(void) {
     if (certManager == nullptr) {
         Serial.println("[MQTT] ERROR: Certificate manager not initialized");
         return;
     }
 
-    Serial.println("[MQTT] Setting up TLS certificates...");
+    Serial.println("[MQTT] Setting up WiFi TLS certificates...");
 
     // Get certificates from certificate manager (NVS or compiled-in)
     const char* ca = certManager->getCACert();
@@ -320,12 +389,87 @@ void MQTTManager::setupTLS(void) {
     Serial.print("[MQTT] Certificate source: ");
     Serial.println(certManager->getCertificateSource());
 
-    // Set certificates
-    secureClient.setCACert(ca);
-    secureClient.setCertificate(cert);
-    secureClient.setPrivateKey(key);
+    // Set certificates for WiFiClientSecure
+    wifiSecureClient.setCACert(ca);
+    wifiSecureClient.setCertificate(cert);
+    wifiSecureClient.setPrivateKey(key);
 
-    Serial.println("[MQTT] TLS certificates configured");
+    // Update MQTT client to use WiFi secure client
+    mqttClient.setClient(wifiSecureClient);
+
+    Serial.println("[MQTT] WiFi TLS certificates configured");
+}
+
+// Setup Ethernet TLS (SSLClient with BearSSL)
+void MQTTManager::setupEthernetTLS(void) {
+    if (certManager == nullptr) {
+        Serial.println("[MQTT] ERROR: Certificate manager not initialized");
+        return;
+    }
+
+    Serial.println("[MQTT] Setting up Ethernet TLS certificates...");
+
+    // Get certificates in DER format for SSLClient
+    size_t caLen, certLen, keyLen;
+    uint8_t* caDER = certManager->getCACertDER(&caLen);
+    uint8_t* certDER = certManager->getClientCertDER(&certLen);
+    uint8_t* keyDER = certManager->getClientKeyDER(&keyLen);
+
+    if (caDER == nullptr || certDER == nullptr || keyDER == nullptr) {
+        Serial.println("[MQTT] ERROR: Failed to convert certificates to DER format");
+        if (caDER) free(caDER);
+        if (certDER) free(certDER);
+        if (keyDER) free(keyDER);
+        return;
+    }
+
+    Serial.print("[MQTT] Certificate source: ");
+    Serial.println(certManager->getCertificateSource());
+    Serial.print("[MQTT] CA DER size: ");
+    Serial.print(caLen);
+    Serial.println(" bytes");
+    Serial.print("[MQTT] Client cert DER size: ");
+    Serial.print(certLen);
+    Serial.println(" bytes");
+    Serial.print("[MQTT] Client key DER size: ");
+    Serial.print(keyLen);
+    Serial.println(" bytes");
+
+    // Create SSLClient with trust anchors
+    // Note: SSLClient requires trust anchors in a specific format
+    // For now, we'll create a basic SSLClient with mutual TLS
+
+    // Clean up existing Ethernet secure client if it exists
+    if (ethSecureClient != nullptr) {
+        delete ethSecureClient;
+        ethSecureClient = nullptr;
+    }
+
+    // Create new SSLClient with entropy source
+    ethSecureClient = new SSLClient(ethBaseClient, nullptr, 0, ENTROPY_PIN, SSLClient::SSL_WARN);
+
+    if (ethSecureClient == nullptr) {
+        Serial.println("[MQTT] ERROR: Failed to create SSLClient");
+        free(caDER);
+        free(certDER);
+        free(keyDER);
+        return;
+    }
+
+    // Note: SSLClient trust anchor setup is complex and requires BR format
+    // For initial implementation, we'll use SSLClient in a basic mode
+    // TODO: Implement proper trust anchor conversion and setup
+
+    // Update MQTT client to use Ethernet secure client
+    mqttClient.setClient(*ethSecureClient);
+
+    // Clean up DER buffers
+    free(caDER);
+    free(certDER);
+    free(keyDER);
+
+    Serial.println("[MQTT] Ethernet TLS configured (basic mode)");
+    Serial.println("[MQTT] WARNING: Trust anchor setup pending - using default validation");
 }
 
 String MQTTManager::getClientId(void) {

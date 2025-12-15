@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include <mbedtls/base64.h>
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
     : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
@@ -331,16 +332,39 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         serializeJson(doc, jsonResponse);
         sendEthernetResponse(client, 200, "application/json", jsonResponse);
     } else if (requestLine.startsWith("GET /mqtt")) {
-        // MQTT configuration page
+        // MQTT configuration page - requires authentication
         Serial.println("[Eth] Serving MQTT config page");
+
+        if (!requireEthernetAuth(request)) {
+            // Send 401 Unauthorized with WWW-Authenticate header
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+
         if (mqttManager == nullptr || certManager == nullptr) {
             sendEthernetResponse(client, 503, "text/plain", "MQTT not initialized");
         } else {
             sendEthernetResponse(client, 200, "text/html", generateMQTTConfigPage());
         }
     } else if (requestLine.startsWith("POST /api/mqtt/save")) {
-        // Save MQTT configuration
+        // Save MQTT configuration - requires authentication
         Serial.println("[Eth] Processing MQTT save request");
+
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+
         // Parse form data from POST body
         int bodyStart = request.indexOf("\r\n\r\n") + 4;
         String body = request.substring(bodyStart);
@@ -396,7 +420,17 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             sendEthernetResponse(client, 500, "text/plain", "Failed to save MQTT configuration");
         }
     } else if (requestLine.startsWith("GET /api/mqtt/status")) {
-        // MQTT status JSON
+        // MQTT status JSON - requires authentication
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+
         if (mqttManager == nullptr || certManager == nullptr) {
             sendEthernetResponse(client, 503, "application/json", "{\"error\":\"MQTT not initialized\"}");
         } else {
@@ -409,6 +443,12 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             doc["status"] = mqttManager->getConnectionStatus();
             doc["cert_source"] = certManager->getCertificateSource();
             doc["last_connected"] = mqttManager->getLastConnected();
+
+            // Write-only security: Show presence, not content
+            doc["has_ca_cert"] = certManager->hasCACertInNVS();
+            doc["has_client_cert"] = certManager->hasClientCertInNVS();
+            doc["has_client_key"] = certManager->hasClientKeyInNVS();
+            doc["last_upload"] = certManager->getLastUploadTime();
 
             String jsonResponse;
             serializeJson(doc, jsonResponse);
@@ -1159,6 +1199,82 @@ bool DeviceWebServer::requireAuth(void) {
     return true;
 }
 
+// Require authentication for Ethernet HTTP requests
+bool DeviceWebServer::requireEthernetAuth(const String& request) {
+    // No password set = no authentication required
+    if (adminPassword.length() == 0) {
+        return true;
+    }
+
+    // Rate limiting: max 5 attempts per minute
+    if (failedAttempts >= 5 && millis() - lastFailedAttempt < 60000) {
+        Serial.println("[Eth] Rate limit exceeded - too many failed attempts");
+        return false;
+    }
+
+    // Parse Authorization header
+    int authPos = request.indexOf("Authorization: Basic ");
+    if (authPos < 0) {
+        failedAttempts++;
+        lastFailedAttempt = millis();
+        Serial.println("[Eth] No Authorization header");
+        return false;
+    }
+
+    // Extract Base64 encoded credentials
+    int authStart = authPos + 21; // Length of "Authorization: Basic "
+    int authEnd = request.indexOf("\r\n", authStart);
+    if (authEnd < 0) authEnd = request.length();
+
+    String base64Creds = request.substring(authStart, authEnd);
+    base64Creds.trim();
+
+    // Encode expected credentials with mbedtls
+    String expectedCreds = "admin:" + adminPassword;
+    size_t expectedLen;
+
+    // Calculate required buffer size
+    mbedtls_base64_encode(NULL, 0, &expectedLen,
+                          (const unsigned char*)expectedCreds.c_str(),
+                          expectedCreds.length());
+
+    // Allocate buffer and encode
+    unsigned char* expectedBase64Buf = (unsigned char*)malloc(expectedLen + 1);
+    if (expectedBase64Buf == NULL) {
+        Serial.println("[Eth] Failed to allocate memory for base64");
+        return false;
+    }
+
+    size_t actualLen;
+    int ret = mbedtls_base64_encode(expectedBase64Buf, expectedLen, &actualLen,
+                                    (const unsigned char*)expectedCreds.c_str(),
+                                    expectedCreds.length());
+
+    if (ret != 0) {
+        free(expectedBase64Buf);
+        Serial.println("[Eth] Base64 encoding failed");
+        return false;
+    }
+
+    expectedBase64Buf[actualLen] = '\0';
+    String expectedBase64 = String((char*)expectedBase64Buf);
+    free(expectedBase64Buf);
+
+    if (base64Creds != expectedBase64) {
+        failedAttempts++;
+        lastFailedAttempt = millis();
+        Serial.print("[Eth] Authentication failed (attempt ");
+        Serial.print(failedAttempts);
+        Serial.println(")");
+        return false;
+    }
+
+    // Success - reset counter
+    failedAttempts = 0;
+    Serial.println("[Eth] Authentication successful");
+    return true;
+}
+
 // MQTT Configuration Handlers
 void DeviceWebServer::handleMQTTConfig(void) {
     // Require authentication
@@ -1268,6 +1384,12 @@ void DeviceWebServer::handleMQTTStatus(void) {
     doc["status"] = mqttManager->getConnectionStatus();
     doc["cert_source"] = certManager->getCertificateSource();
     doc["last_connected"] = mqttManager->getLastConnected();
+
+    // Write-only security: Show presence, not content
+    doc["has_ca_cert"] = certManager->hasCACertInNVS();
+    doc["has_client_cert"] = certManager->hasClientCertInNVS();
+    doc["has_client_key"] = certManager->hasClientKeyInNVS();
+    doc["last_upload"] = certManager->getLastUploadTime();
 
     String response;
     serializeJson(doc, response);

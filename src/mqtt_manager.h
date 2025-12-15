@@ -3,6 +3,8 @@
 
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
+#include <Ethernet.h>
+#include <SSLClient.h>
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
@@ -22,6 +24,13 @@ const char* const MQTT_TOPIC_KEY = "topic";
 const uint16_t MQTT_DEFAULT_PORT = 8883;
 const unsigned long MQTT_RECONNECT_INTERVAL = 10000;  // 10 seconds
 const unsigned long MQTT_PUBLISH_INTERVAL = 30000;    // 30 seconds
+
+// Entropy source for SSLClient (analog pin for randomness)
+const int ENTROPY_PIN = A0;
+
+// Network preferences NVS namespace
+const char* const NETWORK_CONFIG_NAMESPACE = "network_config";
+const char* const ETHERNET_ONLY_KEY = "ethernet_only";
 
 class MQTTManager {
 public:
@@ -67,8 +76,14 @@ private:
     CertificateManager* certManager;
     WiFiManager* wifiManager;
 
-    // MQTT clients
-    WiFiClientSecure secureClient;
+    // WiFi TLS client (existing)
+    WiFiClientSecure wifiSecureClient;
+
+    // Ethernet TLS client (new)
+    EthernetClient ethBaseClient;
+    SSLClient* ethSecureClient;  // Pointer because it needs trust anchors at construction
+
+    // MQTT client (uses selected secure client)
     PubSubClient mqttClient;
 
     // Configuration
@@ -79,6 +94,15 @@ private:
     String username;
     String password;
     String topic_prefix;
+    bool ethernetOnlyMode;
+
+    // Current network mode
+    enum NetworkMode {
+        MODE_NONE,
+        MODE_WIFI,
+        MODE_ETHERNET
+    };
+    NetworkMode currentMode;
 
     // State tracking
     bool connected;
@@ -89,8 +113,11 @@ private:
 
     // Helper methods
     bool connectToBroker(void);
-    void setupTLS(void);
+    void setupWiFiTLS(void);
+    void setupEthernetTLS(void);
+    Client* selectSecureClient(void);
     String getClientId(void);
+    void loadNetworkPreferences(void);
 };
 
 #endif // MQTT_MANAGER_H
