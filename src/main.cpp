@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.3"
+#define FIRMWARE_VERSION "0.0.6"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -11,6 +11,7 @@
 #include "certificate_manager.h"
 #include "mqtt_manager.h"
 #include "ota_manager.h"
+#include "thermal_detector.h"
 
 // GPIO pin for factory reset button
 const int FACTORY_RESET_PIN = 0; // Boot button on most ESP32 boards
@@ -22,6 +23,13 @@ DeviceWebServer webServer(wifiManager);
 CertificateManager certManager;
 MQTTManager mqttManager;
 OTAManager otaManager;
+
+// Add global instance after other global objects
+#define ENABLE_THERMAL_DETECTOR 1  // Set to 1 when WT32 is ready
+
+#if ENABLE_THERMAL_DETECTOR
+ThermalDetector thermalDetector(wifiManager, mqttManager);
+#endif
 
 // Factory reset variables
 unsigned long resetButtonPressStart = 0;
@@ -222,6 +230,11 @@ void setup() {
 
     webServer.begin();
 
+    // Initialize thermal detector (NEW)
+    #if ENABLE_THERMAL_DETECTOR
+    thermalDetector.begin();
+    #endif
+
     // Print status summary
     Serial.println("\n========================================");
     Serial.println("*** Device Ready ***");
@@ -298,6 +311,11 @@ void loop() {
     // Update MQTT if any network is available (WiFi or Ethernet)
     if (isWiFiConnected() || isEthernetConnected()) {
         mqttManager.update();
+
+        // NEW: Update thermal detector (reads SPI, detects, publishes)
+        #if ENABLE_THERMAL_DETECTOR
+        thermalDetector.update();
+        #endif
 
         // Publish uptime data periodically if MQTT is connected
         if (mqttManager.isConnected()) {

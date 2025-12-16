@@ -217,22 +217,50 @@ bool OTAManager::rollbackToPrevious(void) {
     Serial.print(" → To: ");
     Serial.println(previousVersion);
 
-    // Use ESP32 partition API to switch OTA slots
-    const esp_partition_t* update_partition = esp_ota_get_last_invalid_partition();
-
-    if (update_partition == NULL) {
-        Serial.println("[OTA] ERROR: Could not identify invalid partition");
+    // Get current running partition
+    const esp_partition_t* running_partition = esp_ota_get_running_partition();
+    if (running_partition == NULL) {
+        Serial.println("[OTA] ERROR: Could not identify running partition");
         return false;
     }
 
-    Serial.print("[OTA] Invalid partition found: ");
-    Serial.println(update_partition->label);
+    Serial.print("[OTA] Currently running: ");
+    Serial.println(running_partition->label);
 
-    // Set the OTA boot partition back to the last known good one
-    esp_err_t err = esp_ota_set_boot_partition(update_partition);
+    // Find the other OTA partition
+    const esp_partition_t* other_partition = NULL;
+
+    if (running_partition->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) {
+        // Currently on OTA_0, switch to OTA_1
+        other_partition = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP,
+            ESP_PARTITION_SUBTYPE_APP_OTA_1,
+            NULL
+        );
+        Serial.println("[OTA] Switching from OTA_0 to OTA_1");
+    } else if (running_partition->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) {
+        // Currently on OTA_1, switch to OTA_0
+        other_partition = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP,
+            ESP_PARTITION_SUBTYPE_APP_OTA_0,
+            NULL
+        );
+        Serial.println("[OTA] Switching from OTA_1 to OTA_0");
+    }
+
+    if (other_partition == NULL) {
+        Serial.println("[OTA] ERROR: Could not find alternate OTA partition");
+        return false;
+    }
+
+    Serial.print("[OTA] Target partition: ");
+    Serial.println(other_partition->label);
+
+    // Set the OTA boot partition to the other partition
+    esp_err_t err = esp_ota_set_boot_partition(other_partition);
 
     if (err != ESP_OK) {
-        Serial.print("[OTA] ERROR: esp_ota_set_boot_partition failed: ");
+        Serial.print("[OTA] ERROR: esp_ota_set_boot_partition failed with code: ");
         Serial.println(err);
         return false;
     }
@@ -254,7 +282,7 @@ bool OTAManager::rollbackToPrevious(void) {
 
     prefs.end();
 
-    Serial.println("[OTA] ✓ Rollback complete - versions swapped in NVS");
+    Serial.println("[OTA] ✓ Rollback complete - partition switched and versions swapped");
     return true;
 }
 
