@@ -516,7 +516,7 @@ void factoryReset() {
 
 **Trigger:**
 
-- Hold boot button for 10 seconds
+- Hold boot button for 5 seconds
 - Clears everything
 - Reboots into WiFi AP provisioning mode
 - Device starts fresh (like factory new)
@@ -708,7 +708,7 @@ SSLClient ethSecureClient(
 ### Scenario 4: Factory Reset
 
 ```
-1. Hold boot button 10 seconds
+1. Hold boot button 5 seconds
 2. All settings cleared:
    - WiFi credentials
    - Ethernet-only flag

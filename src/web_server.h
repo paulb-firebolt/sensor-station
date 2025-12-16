@@ -80,6 +80,7 @@ private:
     String generateStatusPage(void);
     String generateSaveSuccessPage(void);
     String generateMQTTConfigPage(void);            // MQTT configuration
+    String generateMQTTSaveSuccessPage(void);       // MQTT settings saved
 };
 
 #endif // WEB_SERVER_H

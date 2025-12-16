@@ -169,13 +169,13 @@ if (linkStatus == LinkON && lastLinkStatus == LinkOFF) {
 
 ### 5. Factory Reset Functionality
 
-**Implementation:** GPIO 0 (boot button) held for 10 seconds
+**Implementation:** GPIO 0 (boot button) held for 5 seconds
 
-**Why 10 seconds?**
+**Why 5 seconds?**
 
 - Actual hold time: 5 seconds
 - Detection delay: up to 5 seconds (due to blocking operations in main loop)
-- User guidance: 10 seconds accounts for detection delay
+- User guidance: 5 seconds accounts for detection delay
 
 **Key Learning:** Button detection runs in main loop, which can be delayed by network operations. Documentation should reflect real-world timing, not just code timing.
 
@@ -283,8 +283,8 @@ Serial.println("[Module] === END REQUEST ===");
 **Example:** Factory reset button
 
 **Code:** 5-second hold time
-**Reality:** Up to 10 seconds to detect
-**Documentation:** "Hold for 10 seconds"
+**Reality:** Up to 5 seconds to detect
+**Documentation:** "Hold for 5 seconds"
 
 **Why:** Main loop blocking delays button detection
 
@@ -448,7 +448,7 @@ const unsigned long FACTORY_RESET_HOLD_TIME = 5000;   // 5 seconds
 
 ### Factory Reset
 
-- [ ] Hold boot button for 10 seconds
+- [ ] Hold boot button for 5 seconds
 - [ ] Serial shows "FACTORY RESET TRIGGERED!"
 - [ ] Credentials cleared from NVS
 - [ ] Device reboots into AP mode

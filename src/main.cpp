@@ -34,7 +34,7 @@ void checkFactoryReset(void) {
         // Button just pressed
         resetButtonPressed = true;
         resetButtonPressStart = millis();
-        Serial.println("\n[Reset] Button pressed - hold for 10 seconds to factory reset");
+        Serial.println("\n[Reset] Button pressed - hold for 5 seconds to factory reset");
     } else if (!buttonPressed && resetButtonPressed) {
         // Button released
         resetButtonPressed = false;
@@ -130,7 +130,7 @@ void setup() {
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
     Serial.print("Factory reset button: GPIO ");
     Serial.println(FACTORY_RESET_PIN);
-    Serial.println("Hold for 10 seconds to clear WiFi credentials\n");
+    Serial.println("Hold for 5 seconds to clear WiFi credentials\n");
 
     // Initialize network (Ethernet + WiFi)
     if (!initNetwork(wifiManager)) {
@@ -238,8 +238,8 @@ void loop() {
     // Update Ethernet status for web server
     webServer.setEthernetInfo(getIPAddress(), getMACAddress(), isEthernetConnected());
 
-    // Update MQTT if WiFi is connected
-    if (isWiFiConnected()) {
+    // Update MQTT if any network is available (WiFi or Ethernet)
+    if (isWiFiConnected() || isEthernetConnected()) {
         mqttManager.update();
 
         // Publish uptime data periodically if MQTT is connected
@@ -253,8 +253,16 @@ void loop() {
                 doc["uptime_ms"] = millis();
                 doc["uptime_sec"] = millis() / 1000;
                 doc["uptime_min"] = millis() / 60000;
-                doc["wifi_rssi"] = wifiManager.getRSSI();
-                doc["wifi_ssid"] = wifiManager.getConnectedSSID();
+
+                // Include WiFi info if connected
+                if (isWiFiConnected()) {
+                    doc["wifi_rssi"] = wifiManager.getRSSI();
+                    doc["wifi_ssid"] = wifiManager.getConnectedSSID();
+                } else {
+                    doc["wifi_rssi"] = 0;
+                    doc["wifi_ssid"] = "Ethernet-Only";
+                }
+
                 doc["free_heap"] = ESP.getFreeHeap();
 
                 String payload;

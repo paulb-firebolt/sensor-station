@@ -414,8 +414,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         Serial.println(topic);
 
         if (mqttManager && mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
-            sendEthernetResponse(client, 200, "text/html",
-                "<html><body><h1>MQTT Settings Saved!</h1><p><a href='/mqtt'>Back</a></p></body></html>");
+            sendEthernetResponse(client, 200, "text/html", generateMQTTSaveSuccessPage());
         } else {
             sendEthernetResponse(client, 500, "text/plain", "Failed to save MQTT configuration");
         }
@@ -693,7 +692,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
     <p class="subtitle">Configure WiFi network connection</p>
 
     <div class="info">
-      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 10 seconds.
+      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 5 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -955,7 +954,7 @@ String DeviceWebServer::generateStatusPage(void) {
     html += R"HTML(
 
       <div class="info">
-        <strong>Factory Reset:</strong> To reconfigure WiFi, hold the boot button for 10 seconds.
+        <strong>Factory Reset:</strong> To reconfigure WiFi, hold the boot button for 5 seconds.
         The device will restart in setup mode at <strong>sensor-setup</strong> (password: 12345678).
       </div>
     </div>
@@ -1073,7 +1072,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     </div>
 
     <div class="info">
-      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 10 seconds.
+      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 5 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -1144,6 +1143,100 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
     <h1>Settings Saved!</h1>
     <p>Device is rebooting with new WiFi configuration...</p>
     <p>Please reconnect to your WiFi network and access the device at its new address.</p>
+  </div>
+</body>
+</html>)HTML";
+}
+
+// Generate MQTT save success page
+String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
+    return R"HTML(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MQTT Saved!</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      max-width: 450px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 {
+      color: #2e7d32;
+      margin-bottom: 20px;
+      font-size: 28px;
+    }
+    p {
+      color: #666;
+      margin-bottom: 15px;
+      line-height: 1.6;
+    }
+    .icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+    .button-group {
+      margin-top: 30px;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 12px 24px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #666;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .info {
+      background: #e8f5e9;
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 20px;
+      font-size: 13px;
+      color: #2e7d32;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">✓</div>
+    <h1>MQTT Settings Saved!</h1>
+    <p>Configuration updated successfully.</p>
+    <div class="info">
+      ℹ️ MQTT settings have been saved. No reboot required - the device will use the new configuration on next connection attempt.
+    </div>
+    <div class="button-group">
+      <a href="/mqtt" class="btn btn-primary">Back to MQTT Config</a>
+      <a href="/" class="btn btn-secondary">View Status</a>
+    </div>
   </div>
 </body>
 </html>)HTML";
@@ -1308,9 +1401,7 @@ void DeviceWebServer::handleMQTTSave(void) {
 
     // Save configuration
     if (mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
-        webServer.send(200, "text/html",
-            "<html><body><h1>MQTT Settings Saved!</h1><p>Configuration updated successfully.</p>"
-            "<p><a href='/mqtt'>Back to MQTT Config</a></p></body></html>");
+        webServer.send(200, "text/html", generateMQTTSaveSuccessPage());
     } else {
         webServer.send(500, "text/plain", "Failed to save MQTT configuration");
     }

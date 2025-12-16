@@ -1,6 +1,8 @@
 #ifndef CERTS_H
 #define CERTS_H
 
+// Multiple CA certificates supported - just concatenate them!
+// WiFiClientSecure/mbedTLS will automatically use the right one
 const char ca_cert[] = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIDuzCCAqOgAwIBAgIUHYY69v4vopXO/Sn82KK4wX8t6oIwDQYJKoZIhvcNAQEL

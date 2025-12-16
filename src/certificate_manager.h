@@ -23,12 +23,6 @@ public:
     const char* getClientCert(void);
     const char* getClientKey(void);
 
-    // Get certificates in DER format for SSLClient (BearSSL)
-    // Returns dynamically allocated buffer - caller must free()
-    uint8_t* getCACertDER(size_t* len);
-    uint8_t* getClientCertDER(size_t* len);
-    uint8_t* getClientKeyDER(size_t* len);
-
     // Save certificates to NVS
     bool saveCACert(const String& cert);
     bool saveClientCert(const String& cert);
@@ -63,7 +57,6 @@ private:
     // Helper methods
     bool loadCertFromNVS(const char* key, char** buffer);
     void freeCertBuffers(void);
-    uint8_t* convertPEMtoDER(const char* pem, size_t* outLen);
 };
 
 #endif // CERTIFICATE_MANAGER_H

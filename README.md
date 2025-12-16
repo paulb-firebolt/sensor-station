@@ -220,7 +220,7 @@ basic-network/
 ### 1. Network Initialization
 
 - Generates unique MAC address from ESP32 chip ID
-- Attempts DHCP for 10 seconds
+- Attempts DHCP for 5 seconds
 - Falls back to AutoIP (169.254.x.x) if DHCP fails
 - Verifies Ethernet link status
 
@@ -279,7 +279,7 @@ basic-network/
 Located in `src/network.h`:
 
 ```cpp
-const unsigned long DHCP_TIMEOUT = 10000;         // 10 seconds
+const unsigned long DHCP_TIMEOUT = 10000;         // 5 seconds
 const unsigned long LINK_CHECK_INTERVAL = 5000;   // 5 seconds
 ```
 
@@ -351,7 +351,7 @@ String generateHostname(void) {
 ## Performance
 
 - **mDNS Query Response Time**: < 5ms
-- **Initial Network Setup**: ~10 seconds (with DHCP timeout)
+- **Initial Network Setup**: ~5 seconds (with DHCP timeout)
 - **AutoIP Setup**: ~100ms
 - **Memory Usage**: ~1KB for mDNS buffers
 - **CPU Usage**: Minimal (event-driven)
