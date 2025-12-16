@@ -1,3 +1,6 @@
+// Define your firmware version at the top of main.cpp
+#define FIRMWARE_VERSION "0.0.3"
+
 #include <Arduino.h>
 #include <nvs_flash.h>
 #include <ArduinoJson.h>
@@ -7,6 +10,7 @@
 #include "web_server.h"
 #include "certificate_manager.h"
 #include "mqtt_manager.h"
+#include "ota_manager.h"
 
 // GPIO pin for factory reset button
 const int FACTORY_RESET_PIN = 0; // Boot button on most ESP32 boards
@@ -17,6 +21,7 @@ WiFiManager wifiManager;
 DeviceWebServer webServer(wifiManager);
 CertificateManager certManager;
 MQTTManager mqttManager;
+OTAManager otaManager;
 
 // Factory reset variables
 unsigned long resetButtonPressStart = 0;
@@ -95,6 +100,46 @@ void checkFactoryReset(void) {
     }
 }
 
+void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
+    // Null-terminate payload
+    payload[length] = '\0';
+    String message = String((char*)payload);
+
+    Serial.print("[MQTT] Message received on topic: ");
+    Serial.println(topic);
+    Serial.print("[MQTT] Payload: ");
+    Serial.println(message);
+
+    // Parse JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, message);
+
+    if (error) {
+        Serial.print("[MQTT] JSON parse error: ");
+        Serial.println(error.c_str());
+        return;
+    }
+
+    // Check for OTA command
+    if (doc["action"].is<String>()) {
+        String action = doc["action"].as<String>();
+
+        if (action == "ota") {
+            Serial.println("[MQTT] OTA command detected!");
+            otaManager.handleOTACommand(doc);
+        }
+        else if (action == "rollback") {
+            Serial.println("[MQTT] Rollback command detected!");
+            otaManager.rollbackToPrevious();
+        }
+        else if (action == "status") {
+            Serial.println("[MQTT] Status command detected!");
+            String status = otaManager.getOTAStatus();
+            mqttManager.publish("ota_status", status);
+        }
+    }
+}
+
 void setup() {
     // Initialize serial for debugging
     Serial.begin(115200);
@@ -166,6 +211,7 @@ void setup() {
 
     // Initialize MQTT manager
     mqttManager.begin(certManager, wifiManager);
+    mqttManager.setMessageCallback(handleMQTTMessage);
 
     // Start web server
     webServer.setHostname(getHostname());
@@ -223,6 +269,17 @@ void setup() {
     }
 
     Serial.println("\n========================================\n");
+
+    // Initialize OTA manager
+    otaManager.begin();
+
+    // Initialize firmware version on first boot
+    if (otaManager.isFirstBoot()) {
+        Serial.println("[Setup] First boot detected - initializing firmware version");
+        otaManager.saveVersionInfo(FIRMWARE_VERSION);
+        Serial.print("[Setup] Firmware version set to: ");
+        Serial.println(FIRMWARE_VERSION);
+    }
 }
 
 void loop() {
@@ -253,6 +310,8 @@ void loop() {
                 doc["uptime_ms"] = millis();
                 doc["uptime_sec"] = millis() / 1000;
                 doc["uptime_min"] = millis() / 60000;
+                doc["ota_version"] = otaManager.getCurrentVersion();
+                doc["ota_boot_count"] = otaManager.getOTAStatus();  // Full status JSON
 
                 // Include WiFi info if connected
                 if (isWiFiConnected()) {
@@ -276,6 +335,7 @@ void loop() {
                 Serial.println(" seconds");
             }
         }
+
     }
 
     // Your application code here
