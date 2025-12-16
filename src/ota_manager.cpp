@@ -36,11 +36,14 @@ void OTAManager::begin(void) {
             Serial.println("[OTA] ✗ Rollback failed - no previous version available");
             Serial.println("[OTA] Device will continue with current version");
             Serial.println("[OTA] Manual recovery required: re-flash via USB");
+            // Reset boot count so we don't keep trying to rollback
+            resetBootCount();
         }
+    } else {
+        // Normal boot (count < 5)
+        // Increment boot count for this boot
+        incrementBootCount();
     }
-
-    // Increment boot count for next boot
-    incrementBootCount();
 
     Serial.print("[OTA] Current version: ");
     Serial.println(currentVersion);
@@ -48,6 +51,7 @@ void OTAManager::begin(void) {
     Serial.println(previousVersion);
     Serial.print("[OTA] Boot count: ");
     Serial.println(bootCount);
+    Serial.println("[OTA] Note: Boot count will reset to 0 after 30 seconds of stable operation");
 }
 
 void OTAManager::loadVersionInfo(void) {
@@ -307,6 +311,21 @@ String OTAManager::getOTAStatus(void) {
     status += "\"update_in_progress\":" + String(updateInProgress ? "true" : "false");
     status += "}";
     return status;
+}
+
+void OTAManager::checkBootStability(void) {
+    // If device has been running for OTA_STABILITY_TIME ms since last boot,
+    // reset boot counter to 0 (device is stable!)
+
+    unsigned long currentUptime = millis();
+
+    // Only check once per boot - if boot counter is > 0 and we haven't
+    // already reset, check if we're past stability time
+    if (bootCount > 0 && currentUptime >= OTA_STABILITY_TIME) {
+        Serial.println("[OTA] Device stable for 30+ seconds - resetting boot counter");
+        resetBootCount();
+        // After reset, bootCount will be 0, so this won't trigger again this boot
+    }
 }
 
 bool OTAManager::validateSHA256(const String& expectedHash) {

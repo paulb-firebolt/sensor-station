@@ -19,7 +19,9 @@ const char* const OTA_NVS_NAMESPACE = "ota_config";
 const char* const OTA_CURRENT_VERSION_KEY = "current_version";
 const char* const OTA_PREVIOUS_VERSION_KEY = "prev_version";
 const char* const OTA_BOOT_COUNT_KEY = "boot_count";
+const char* const OTA_BOOT_TIME_KEY = "boot_time_ms";
 const int OTA_MAX_BOOT_COUNT = 5;
+const unsigned long OTA_STABILITY_TIME = 30000;  // 30 seconds = considered stable
 
 class OTAManager {
 public:
@@ -51,6 +53,9 @@ public:
 
     // Public version management (for initialization on first boot)
     void saveVersionInfo(const String& newVersion);
+
+    // Check and reset boot counter if stable (call from loop every few seconds)
+    void checkBootStability(void);
 
 private:
     Preferences prefs;

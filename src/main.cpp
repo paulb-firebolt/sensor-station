@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.6"
+#define FIRMWARE_VERSION "0.0.8"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -12,6 +12,7 @@
 #include "mqtt_manager.h"
 #include "ota_manager.h"
 #include "thermal_detector.h"
+#include "performance_metrics.h"
 
 // GPIO pin for factory reset button
 const int FACTORY_RESET_PIN = 0; // Boot button on most ESP32 boards
@@ -230,10 +231,13 @@ void setup() {
 
     webServer.begin();
 
-    // Initialize thermal detector (NEW)
+    // Initialize thermal detector
     #if ENABLE_THERMAL_DETECTOR
     thermalDetector.begin();
     #endif
+
+    // Initialize performance metrics
+    perfMetrics.begin();
 
     // Print status summary
     Serial.println("\n========================================");
@@ -296,6 +300,8 @@ void setup() {
 }
 
 void loop() {
+    perfMetrics.loopStart();
+
     // Check for factory reset button
     checkFactoryReset();
 
@@ -305,6 +311,9 @@ void loop() {
     // Handle web server requests
     webServer.handleClient();
 
+    // Reset boot counter
+    otaManager.checkBootStability();
+
     // Update Ethernet status for web server
     webServer.setEthernetInfo(getIPAddress(), getMACAddress(), isEthernetConnected());
 
@@ -312,52 +321,98 @@ void loop() {
     if (isWiFiConnected() || isEthernetConnected()) {
         mqttManager.update();
 
-        // NEW: Update thermal detector (reads SPI, detects, publishes)
+        // Update thermal detector (reads SPI, detects, publishes)
         #if ENABLE_THERMAL_DETECTOR
         thermalDetector.update();
         #endif
 
-        // Publish uptime data periodically if MQTT is connected
+        // Publish status data periodically if MQTT is connected
         if (mqttManager.isConnected()) {
             unsigned long now = millis();
             if (now - lastMQTTPublish >= MQTT_PUBLISH_INTERVAL) {
                 lastMQTTPublish = now;
 
-                // Create JSON payload with uptime data
-                JsonDocument doc;
-                doc["uptime_ms"] = millis();
-                doc["uptime_sec"] = millis() / 1000;
-                doc["uptime_min"] = millis() / 60000;
-                doc["ota_version"] = otaManager.getCurrentVersion();
-                doc["ota_boot_count"] = otaManager.getOTAStatus();  // Full status JSON
+                // Get current metrics
+                PerformanceMetrics::SystemMetrics metrics = perfMetrics.getMetrics();
 
-                // Include WiFi info if connected
-                if (isWiFiConnected()) {
-                    doc["wifi_rssi"] = wifiManager.getRSSI();
-                    doc["wifi_ssid"] = wifiManager.getConnectedSSID();
+                // Build comprehensive status JSON
+                JsonDocument doc;
+
+                // Basic device info
+                doc["device_id"] = getHostname();
+                doc["firmware_version"] = FIRMWARE_VERSION;
+                doc["timestamp"] = millis();
+
+                // Uptime
+                doc["uptime_seconds"] = metrics.uptime_ms / 1000;
+                doc["uptime_minutes"] = metrics.uptime_ms / 60000;
+
+                // Memory health
+                doc["memory"]["free_heap_kb"] = metrics.free_heap_bytes / 1024;
+                doc["memory"]["min_free_heap_kb"] = metrics.min_free_heap_ever / 1024;
+                doc["memory"]["largest_block_kb"] = metrics.largest_free_block / 1024;
+                doc["memory"]["spiram_free_kb"] = metrics.free_spiram_bytes / 1024;
+
+                // Memory usage percentage
+                uint32_t total_heap = ESP.getHeapSize();
+                int heap_usage_percent = 100 - ((metrics.free_heap_bytes * 100) / total_heap);
+                doc["memory"]["heap_usage_percent"] = heap_usage_percent;
+
+                // Performance metrics
+                doc["performance"]["loop_count"] = metrics.loop_count;
+                doc["performance"]["current_loop_ms"] = metrics.loop_time_ms;
+                doc["performance"]["max_loop_time_ms"] = metrics.max_loop_time_ms;
+                doc["performance"]["cpu_freq_mhz"] = metrics.cpu_freq_mhz;
+                doc["performance"]["thermal_frame_ms"] = metrics.thermal_frame_time_ms;
+                doc["performance"]["mqtt_publish_ms"] = metrics.mqtt_publish_time_ms;
+
+                // Network metrics
+                if (wifiManager.isConnectedStation()) {
+                    doc["network"]["type"] = "wifi";
+                    doc["network"]["ssid"] = wifiManager.getConnectedSSID();
+                    doc["network"]["signal_dbm"] = metrics.wifi_rssi;
+                    doc["network"]["signal_quality"] = constrain(
+                        2 * (metrics.wifi_rssi + 100), 0, 100
+                    );
+                    doc["network"]["channel"] = metrics.wifi_channel;
+                } else if (isEthernetConnected()) {
+                    doc["network"]["type"] = "ethernet";
+                    doc["network"]["ip"] = getIPAddress().toString();
                 } else {
-                    doc["wifi_rssi"] = 0;
-                    doc["wifi_ssid"] = "Ethernet-Only";
+                    doc["network"]["type"] = "disconnected";
                 }
 
-                doc["free_heap"] = ESP.getFreeHeap();
+                // MQTT connection state
+                doc["mqtt"]["connected"] = mqttManager.isConnected();
+                doc["mqtt"]["broker"] = mqttManager.getBroker();
+                doc["mqtt"]["port"] = mqttManager.getPort();
+
+                // OTA status
+                doc["ota"]["current_version"] = otaManager.getCurrentVersion();
+                doc["ota"]["previous_version"] = otaManager.getPreviousVersion();
 
                 String payload;
                 serializeJson(doc, payload);
 
                 // Publish to status topic
                 mqttManager.publish("status", payload);
+                Serial.printf("[App] Status published (%u bytes)\n", payload.length());
 
-                Serial.print("[App] Published status: ");
-                Serial.print(millis() / 1000);
-                Serial.println(" seconds");
+                // Log warnings locally
+                if (heap_usage_percent > 80) {
+                    Serial.printf("[WARN] Heap usage high: %d%% (%u bytes free)\n",
+                        heap_usage_percent, metrics.free_heap_bytes);
+                }
+                if (metrics.max_loop_time_ms > 50) {
+                    Serial.printf("[WARN] Loop timing exceeded 50ms peak: %u ms\n",
+                        metrics.max_loop_time_ms);
+                }
+
             }
         }
-
     }
 
-    // Your application code here
-    // ...
+    perfMetrics.loopEnd();
 
     delay(10); // Small delay to prevent watchdog issues
 }

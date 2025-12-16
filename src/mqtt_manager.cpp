@@ -45,7 +45,7 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
 
     // Setup MQTT client
     mqttClient.setServer(broker.c_str(), port);
-    mqttClient.setBufferSize(512);  // Increase buffer for larger messages
+    mqttClient.setBufferSize(1024);  // Increase buffer for larger messages
 
     Serial.println("[MQTT] Initialization complete (WiFi MQTTS only)");
 }
