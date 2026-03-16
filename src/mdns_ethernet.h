@@ -2,6 +2,8 @@
 #define MDNS_ETHERNET_H
 
 #include <Arduino.h>
+
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <Ethernet.h>
 #include <EthernetUdp.h>
 
@@ -33,5 +35,7 @@ private:
     void processQuery();
     bool parseQuery(uint8_t* buffer, int len, uint16_t& transactionID);
 };
+
+#endif // ENABLE_ETHERNET && !USE_RMII_ETHERNET
 
 #endif // MDNS_ETHERNET_H

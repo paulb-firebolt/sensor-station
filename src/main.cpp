@@ -14,8 +14,15 @@
 #include "thermal_detector.h"
 #include "performance_metrics.h"
 
-// GPIO pin for factory reset button
-const int FACTORY_RESET_PIN = 0; // Boot button on most ESP32 boards
+// GPIO pin for factory reset button.
+// Override via build_flags if needed (e.g. -DFACTORY_RESET_PIN=35).
+#ifndef FACTORY_RESET_PIN
+#if defined(ARDUINO_M5TAB5)
+#define FACTORY_RESET_PIN 8  // M5Stack Tab5 M-Bus pin (adjust to match your wiring)
+#else
+#define FACTORY_RESET_PIN 0  // Boot button on Waveshare ESP32-S3-POE-ETH
+#endif
+#endif
 const unsigned long FACTORY_RESET_HOLD_TIME = 5000; // 5 seconds
 
 // Global objects
@@ -25,8 +32,11 @@ CertificateManager certManager;
 MQTTManager mqttManager;
 OTAManager otaManager;
 
-// Add global instance after other global objects
-#define ENABLE_THERMAL_DETECTOR 1  // Set to 1 when WT32 is ready
+// Thermal detector enable flag.
+// Can be overridden from platformio.ini build_flags: -DENABLE_THERMAL_DETECTOR=0
+#ifndef ENABLE_THERMAL_DETECTOR
+#define ENABLE_THERMAL_DETECTOR 1  // Default: enabled (set to 0 when WT32 is not connected)
+#endif
 
 #if ENABLE_THERMAL_DETECTOR
 ThermalDetector thermalDetector(wifiManager, mqttManager);
@@ -204,6 +214,9 @@ void setup() {
         netPrefs.end();
     }
 
+#if WIFI_DISABLED
+    Serial.println("\n[Info] WiFi disabled by build flag - skipping AP/provisioning");
+#else
     if (!ethernetOnly && !wifiManager.hasCredentials()) {
         Serial.println("\n=== Starting Provisioning Mode ===");
         if (wifiManager.startAP()) {
@@ -214,6 +227,7 @@ void setup() {
     } else if (ethernetOnly) {
         Serial.println("\n[Info] Ethernet-only mode - WiFi AP disabled");
     }
+#endif
 
     // Initialize certificate manager
     certManager.begin();

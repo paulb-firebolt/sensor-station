@@ -4,8 +4,10 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <EthernetServer.h>
 #include <EthernetClient.h>
+#endif
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include "wifi_manager.h"
@@ -37,7 +39,9 @@ private:
     CertificateManager* certManager;
     MQTTManager* mqttManager;
     WebServer webServer;           // For WiFi (AP and STA mode)
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     EthernetServer* ethServer;     // For Ethernet
+#endif
     DNSServer dnsServer;
     bool dnsActive;
     bool ethServerActive;
@@ -68,15 +72,19 @@ private:
     void handleMQTTClearCerts(void);
     void handleMQTTStatus(void);
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // Ethernet HTTP handlers
     void handleEthernetClient(void);
     void sendEthernetResponse(EthernetClient& client, int code, const String& contentType, const String& content);
     void handleEthernetRequest(EthernetClient& client, const String& request);
     bool requireEthernetAuth(const String& request);
+#endif
 
     // Page generators
     String generateProvisioningPage(void);          // WiFi AP - with scanning
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     String generateEthernetProvisioningPage(void);  // Ethernet - manual input
+#endif
     String generateStatusPage(void);
     String generateSaveSuccessPage(void);
     String generateMQTTConfigPage(void);            // MQTT configuration

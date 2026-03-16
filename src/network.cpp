@@ -6,10 +6,12 @@ static String hostname;
 static bool ethernetInitialized = false;
 static bool wifiInitialized = false;
 static unsigned long lastLinkCheck = 0;
-static MDNSEthernet mdnsEth;
 static WiFiManager* wifiManagerPtr = nullptr;
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+static MDNSEthernet mdnsEth;
 static bool usingDHCP = false;  // Track if we got DHCP or using AutoIP
 static EthernetLinkStatus lastLinkStatus = Unknown;  // Track link state changes
+#endif
 
 // Generate MAC address from ESP32 chip ID
 void generateMAC(void) {
@@ -43,6 +45,50 @@ String generateHostname(void) {
     return String(hostnameStr);
 }
 
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+// Initialize RMII Ethernet via built-in ESP32-P4 EMAC + IP101 PHY.
+// All RMII data pins are pre-wired in ETH.h for ESP32-P4 (no overrides needed).
+bool initEthernet(void) {
+    Serial.println("\n=== RMII Ethernet Initialization (IP101 PHY) ===");
+
+    if (!ETH.begin(ETH_PHY_IP101, RMII_PHY_ADDR, RMII_MDC, RMII_MDIO, RMII_PHY_RST, EMAC_CLK_EXT_IN)) {
+        Serial.println("ERROR: ETH.begin() failed!");
+        return false;
+    }
+
+    // Wait for DHCP / link
+    Serial.print("Waiting for DHCP");
+    unsigned long timeout = millis() + DHCP_TIMEOUT;
+    while (!ETH.hasIP() && millis() < timeout) {
+        delay(200);
+        Serial.print(".");
+    }
+    Serial.println();
+
+    if (!ETH.hasIP()) {
+        Serial.println("ERROR: DHCP timeout - no IP assigned");
+        return false;
+    }
+
+    Serial.print("Link: UP | Speed: ");
+    Serial.print(ETH.linkSpeed());
+    Serial.println(" Mbps");
+    Serial.print("IP: ");
+    Serial.println(ETH.localIP());
+    Serial.print("Subnet: ");
+    Serial.println(ETH.subnetMask());
+    Serial.print("Gateway: ");
+    Serial.println(ETH.gatewayIP());
+
+    // RMII Ethernet is part of the ESP32 network stack — MDNS.begin() covers
+    // all interfaces (WiFi + Ethernet), so no separate mDNS instance needed.
+
+    ethernetInitialized = true;
+    Serial.println("=== RMII Ethernet Ready ===\n");
+    return true;
+}
+
+#elif ENABLE_ETHERNET
 // Hardware reset for W5500
 void resetW5500(void) {
     Serial.println("Resetting W5500...");
@@ -84,10 +130,17 @@ bool attemptDHCP(void) {
     Serial.println(Ethernet.localIP());
     return true;  // Got DHCP lease
 }
+#endif // ENABLE_ETHERNET
 
 // Get Ethernet IP address
 IPAddress getIPAddress(void) {
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    return ETH.localIP();
+#elif ENABLE_ETHERNET
     return Ethernet.localIP();
+#else
+    return IPAddress(0, 0, 0, 0);
+#endif
 }
 
 // Get WiFi IP address
@@ -100,7 +153,13 @@ IPAddress getWiFiIPAddress(void) {
 
 // Check if Ethernet is connected
 bool isEthernetConnected(void) {
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    return ethernetInitialized && ETH.linkUp() && ETH.hasIP();
+#elif ENABLE_ETHERNET
     return ethernetInitialized && (Ethernet.linkStatus() == LinkON);
+#else
+    return false;
+#endif
 }
 
 // Check if WiFi is connected
@@ -113,9 +172,10 @@ bool isNetworkConnected(void) {
     return isEthernetConnected() || isWiFiConnected();
 }
 
-// Initialize Ethernet
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+// Initialize W5500 SPI Ethernet
 bool initEthernet(void) {
-    Serial.println("\n=== Ethernet Initialization ===");
+    Serial.println("\n=== Ethernet Initialization (W5500) ===");
 
     // Configure SPI pins for W5500
     SPI.begin(ETH_CLK, ETH_MISO, ETH_MOSI, ETH_CS);
@@ -167,9 +227,14 @@ bool initEthernet(void) {
 
     return true;
 }
+#endif // ENABLE_ETHERNET && !USE_RMII_ETHERNET
 
 // Initialize WiFi with credentials
 bool initWiFi(WiFiManager& wifiMgr) {
+#if WIFI_DISABLED
+    Serial.println("[WiFi] Disabled by build flag - skipping");
+    return false;
+#else
     String ssid, password;
 
     // Check if Ethernet-only mode is configured
@@ -221,6 +286,7 @@ bool initWiFi(WiFiManager& wifiMgr) {
 
     wifiInitialized = true;
     return true;
+#endif // WIFI_DISABLED
 }
 
 // Initialize network (Ethernet + WiFi)
@@ -243,12 +309,16 @@ bool initNetwork(WiFiManager& wifiMgr) {
     Serial.println(".local\n");
 
     // Initialize Ethernet first
+#if ENABLE_ETHERNET
     bool ethSuccess = initEthernet();
-
     if (!ethSuccess) {
         Serial.println("WARNING: Ethernet initialization failed");
         Serial.println("Continuing with WiFi only...\n");
     }
+#else
+    bool ethSuccess = false;
+    Serial.println("[Network] Ethernet disabled (ENABLE_ETHERNET=0)");
+#endif
 
     // Initialize WiFi if credentials exist
     bool wifiSuccess = initWiFi(wifiMgr);
@@ -275,7 +345,11 @@ bool initNetwork(WiFiManager& wifiMgr) {
     Serial.println("========================================");
     Serial.println("Network Summary:");
     Serial.print("  Ethernet: ");
+#if ENABLE_ETHERNET
     Serial.println(ethSuccess ? "Connected ✓" : "Unavailable ✗");
+#else
+    Serial.println("Disabled");
+#endif
     Serial.print("  WiFi: ");
     if (wifiSuccess) {
         Serial.println("Connected ✓");
@@ -293,17 +367,20 @@ bool initNetwork(WiFiManager& wifiMgr) {
 void checkNetworkStatus(void) {
     unsigned long currentMillis = millis();
 
-    // Update Ethernet mDNS
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+    // Update Ethernet mDNS (W5500 only — RMII uses ESPmDNS which updates itself)
     if (ethernetInitialized) {
         mdnsEth.update();
     }
+#endif
 
     // Update WiFi mDNS (ESP mDNS handles updates automatically, but we can check connection)
     if (wifiInitialized && wifiManagerPtr) {
         wifiManagerPtr->checkConnection();
     }
 
-    // Check link status periodically
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+    // W5500: monitor link status and maintain DHCP lease
     if (currentMillis - lastLinkCheck >= LINK_CHECK_INTERVAL) {
         lastLinkCheck = currentMillis;
 
@@ -348,4 +425,5 @@ void checkNetworkStatus(void) {
             }
         }
     }
+#endif // ENABLE_ETHERNET && !USE_RMII_ETHERNET
 }

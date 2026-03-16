@@ -1,0 +1,9 @@
+nav:
+  - Home: index.md
+  - M5Stack Unit PoE P4: m5stack-unit-poe-p4-wifi-setup.md
+  - WiFi Provisioning: wifi-provisioning-implementation.md
+  - Ethernet TLS and Security: ethernet-tls-and-security.md
+  - OTA Firmware Updates: esp32-s3-ota-firware-updates.md
+  - Thermal Occupancy Counter: thermal-occupancy-counter.md
+  - MQTT Implementation Plan: mqtt-implementation-plan.md
+  - Ethernet TLS Limitation: ETHERNET_TLS_LIMITATION.md

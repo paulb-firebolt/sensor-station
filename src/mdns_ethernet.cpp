@@ -1,5 +1,7 @@
 #include "mdns_ethernet.h"
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+
 MDNSEthernet::MDNSEthernet() : lastAnnounce(0), servicePort(0), hasService(false) {
 }
 
@@ -397,3 +399,5 @@ void MDNSEthernet::sendMDNSResponse(IPAddress destIP, uint16_t destPort, uint16_
     udp.write(buffer, pos);
     udp.endPacket();
 }
+
+#endif // ENABLE_ETHERNET

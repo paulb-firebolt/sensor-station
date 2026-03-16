@@ -3,7 +3,10 @@
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
     : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
-      webServer(WIFI_WEB_SERVER_PORT), ethServer(nullptr),
+      webServer(WIFI_WEB_SERVER_PORT),
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+      ethServer(nullptr),
+#endif
       dnsActive(false), ethServerActive(false),
       ethernetIP(0, 0, 0, 0), ethernetConnected(false),
       adminPassword(""), lastFailedAttempt(0), failedAttempts(0) {
@@ -55,6 +58,7 @@ void DeviceWebServer::begin(void) {
         Serial.println("[Web] Ethernet-only mode - WiFi web server disabled");
     }
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // Start Ethernet HTTP server on port 80
     // In Ethernet-only mode, this is the only server
     if (ethernetConnected) {
@@ -64,6 +68,7 @@ void DeviceWebServer::begin(void) {
         Serial.print("[Web] Ethernet server started on port ");
         Serial.println(ETHERNET_WEB_SERVER_PORT);
     }
+#endif
 }
 
 // Stop web server
@@ -86,6 +91,7 @@ void DeviceWebServer::handleClient(void) {
     // Handle WiFi WebServer
     webServer.handleClient();
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // Start Ethernet server if connected but not yet started
     if (ethernetConnected && !ethServerActive) {
         Serial.println("[Web] Ethernet connected - starting Ethernet server");
@@ -100,8 +106,10 @@ void DeviceWebServer::handleClient(void) {
     if (ethServerActive && ethServer) {
         handleEthernetClient();
     }
+#endif
 }
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 // Handle Ethernet HTTP client
 void DeviceWebServer::handleEthernetClient(void) {
     EthernetClient client = ethServer->available();
@@ -459,6 +467,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         sendEthernetResponse(client, 404, "text/plain", "Not Found");
     }
 }
+#endif // ENABLE_ETHERNET
 
 // Set Ethernet information
 void DeviceWebServer::setEthernetInfo(IPAddress ip, String mac, bool connected) {
@@ -970,6 +979,7 @@ String DeviceWebServer::generateStatusPage(void) {
     return html;
 }
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 // Generate Ethernet provisioning page (manual input)
 String DeviceWebServer::generateEthernetProvisioningPage(void) {
     return R"HTML(<!DOCTYPE html>
@@ -1092,6 +1102,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
 </body>
 </html>)HTML";
 }
+#endif // ENABLE_ETHERNET
 
 // Generate save success page
 String DeviceWebServer::generateSaveSuccessPage(void) {
@@ -1292,6 +1303,7 @@ bool DeviceWebServer::requireAuth(void) {
     return true;
 }
 
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 // Require authentication for Ethernet HTTP requests
 bool DeviceWebServer::requireEthernetAuth(const String& request) {
     // No password set = no authentication required
@@ -1367,6 +1379,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     Serial.println("[Eth] Authentication successful");
     return true;
 }
+#endif // ENABLE_ETHERNET
 
 // MQTT Configuration Handlers
 void DeviceWebServer::handleMQTTConfig(void) {

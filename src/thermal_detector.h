@@ -22,14 +22,43 @@
 #include "mqtt_manager.h"
 
 // ============================================================================
-// SPI Configuration (ESP32-S3 - actually available pins)
+// SPI Configuration
+// Override any of these via build_flags in platformio.ini.
 // ============================================================================
 
+#if defined(ARDUINO_M5TAB5)
+// M5Stack Tab5 — thermal sensor connected to M-Bus connector (suggested wiring)
+#ifndef PIN_MOSI
+#define PIN_MOSI 20
+#endif
+#ifndef PIN_MISO
+#define PIN_MISO 19
+#endif
+#ifndef PIN_SCLK
+#define PIN_SCLK 18
+#endif
+#ifndef PIN_CS
+#define PIN_CS   21
+#endif
+#else
+// ESP32-S3 (Waveshare POE-ETH board)
+#ifndef PIN_MOSI
 #define PIN_MOSI 17
+#endif
+#ifndef PIN_MISO
 #define PIN_MISO 21
+#endif
+#ifndef PIN_SCLK
 #define PIN_SCLK 33
-#define PIN_CS 34
+#endif
+#ifndef PIN_CS
+#define PIN_CS   34
+#endif
+#endif // board select
+
+#ifndef SPI_FREQUENCY
 #define SPI_FREQUENCY 1000000  // 1 MHz
+#endif
 
 // ============================================================================
 // Thermal Sensor Configuration

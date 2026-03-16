@@ -1,5 +1,7 @@
 #include "mqtt_manager.h"
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <Ethernet.h>
+#endif
 
 MQTTManager::MQTTManager()
     : certManager(nullptr)
@@ -336,12 +338,15 @@ String MQTTManager::getClientId(void) {
     uint8_t mac[6];
 
     // Try to get Ethernet MAC first, fall back to WiFi MAC
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     Ethernet.MACAddress(mac);
-
     // If Ethernet MAC is all zeros, use WiFi MAC
     if (mac[0] == 0 && mac[1] == 0 && mac[2] == 0 && mac[3] == 0 && mac[4] == 0 && mac[5] == 0) {
         WiFi.macAddress(mac);
     }
+#else
+    WiFi.macAddress(mac);
+#endif
 
     char clientId[32];
     snprintf(clientId, sizeof(clientId), "sensor-%02x%02x%02x",
