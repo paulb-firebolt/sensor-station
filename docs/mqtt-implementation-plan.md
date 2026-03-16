@@ -47,7 +47,7 @@ The implementation uses a two-tier certificate storage approach:
 
 ### Certificate Loading Priority
 
-```
+```text
 1. Check NVS for certificates
    ├─ If found → Use NVS certificates
    └─ If not found → Fall back to compiled-in certificates
@@ -62,28 +62,28 @@ This approach provides:
 
 ### Component Design
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                      Main Application                   │
 └─────────────────────┬───────────────────────────────────┘
                       │
                       ├─────────────────────┐
                       │                     │
-        ┌─────────────▼──────────┐  ┌──────▼──────────────┐
-        │   MQTTManager          │  │ CertificateManager  │
-        │                        │  │                     │
-        │ - Connection lifecycle │  │ - Load from NVS     │
-        │ - Auto-reconnect       │  │ - Fallback to code  │
-        │ - Publish/Subscribe    │  │ - Save to NVS       │
-        │ - State tracking       │  │ - Clear certificates│
-        └─────────┬──────────────┘  └──────┬──────────────┘
+        ┌─────────────▼──────────┐  ┌───────▼──────────────┐
+        │   MQTTManager          │  │ CertificateManager   │
+        │                        │  │                      │
+        │ - Connection lifecycle │  │ - Load from NVS      │
+        │ - Auto-reconnect       │  │ - Fallback to code   │
+        │ - Publish/Subscribe    │  │ - Save to NVS        │
+        │ - State tracking       │  │ - Clear certificates │
+        └─────────┬──────────────┘  └──────┬───────────────┘
                   │                        │
                   └────────┬───────────────┘
                            │
-                  ┌────────▼────────┐
-                  │ WiFiClientSecure│
-                  │  + PubSubClient │
-                  └─────────────────┘
+                  ┌────────▼─────────┐
+                  │ WiFiClientSecure │
+                  │  + PubSubClient  │
+                  └──────────────────┘
 ```
 
 ## Certificate Management
@@ -237,7 +237,7 @@ This follows the industry-standard MQTT topic hierarchy for multi-device deploym
 
 **Development:**
 
-```
+```text
 Base: "sensors/esp32"
 Device: "sensor-a1b2c3"
 
@@ -247,7 +247,7 @@ Publish:   sensors/esp32/sensor-a1b2c3/status
 
 **Production:**
 
-```
+```text
 Base: "prod/facility-a"
 Device: "sensor-abc123"
 
@@ -257,7 +257,7 @@ Publish:   prod/facility-a/sensor-abc123/status
 
 **Multi-Device Subscriptions:**
 
-```
+```text
 All devices:              sensors/esp32/#
 Specific device:          sensors/esp32/sensor-a1b2c3/#
 Status from all devices:  sensors/esp32/+/status
@@ -266,7 +266,7 @@ Commands to all devices:  sensors/esp32/+/command
 
 **AWS IoT Core:**
 
-```
+```text
 Base: "$aws/things"
 Device: "sensor-a1b2c3"
 
@@ -306,20 +306,20 @@ Published every 30 seconds to `{prefix}/{device-id}/status`:
 
 #### Layout Sections
 
-```
+```text
 ┌────────────────────────────────────────────────┐
 │           MQTT Configuration                   │
 ├────────────────────────────────────────────────┤
 │                                                │
-│  [✓] Enable MQTT                               │
+│  [x] Enable MQTT                               │
 │                                                │
 │  Broker Settings:                              │
 │  ┌──────────────────────────────────────────┐  │
-│  │ Broker: [192.168.1.100_______________]   │  │
+│  │ Broker: [192.168.1.100__________________]│  │
 │  │ Port:   [8883]                           │  │
 │  │ Username: [_____________________________]│  │
 │  │ Password: [_____________________________]│  │
-│  │ Topic Prefix: [sensors/esp32___________] │  │
+│  │ Topic Prefix: [sensors/esp32____________]│  │
 │  └──────────────────────────────────────────┘  │
 │                                                │
 │  Certificate Upload:                           │
@@ -349,7 +349,7 @@ Published every 30 seconds to `{prefix}/{device-id}/status`:
 │                                                │
 │  Status:                                       │
 │  ┌──────────────────────────────────────────┐  │
-│  │ Connection: ✓ Connected                  │  │
+│  │ Connection: X Connected                  │  │
 │  │ Certificate Source: NVS Storage          │  │
 │  │ Last Connected: 2025-12-15 14:15:30      │  │
 │  │ Topics:                                  │  │
@@ -543,7 +543,7 @@ mosquitto -c mosquitto.conf -v
 
 **Configuration:**
 
-```
+```text
 Broker: 192.168.1.100
 Port: 8883
 Username: test_user
@@ -610,7 +610,7 @@ openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key \
 
 **Configuration:**
 
-```
+```text
 Broker: a3xyz-ats.iot.us-east-1.amazonaws.com
 Port: 8883
 Username: (leave empty)
@@ -658,13 +658,13 @@ AWS IoT Core supports several topic patterns:
 
 **Basic Telemetry:**
 
-```
+```text
 things/my-device-id/telemetry
 ```
 
 **Device Shadow:**
 
-```
+```text
 $aws/things/my-device-id/shadow/update
 $aws/things/my-device-id/shadow/update/accepted
 $aws/things/my-device-id/shadow/update/rejected
@@ -672,7 +672,7 @@ $aws/things/my-device-id/shadow/update/rejected
 
 **Custom Topics:**
 
-```
+```text
 sensors/esp32/my-device-id/data
 ```
 
@@ -686,7 +686,7 @@ sensors/esp32/my-device-id/data
 
 ### Deployment Workflow
 
-```
+```text
 1. Create Thing in AWS IoT Core
 2. Generate device certificate and key
 3. Download Amazon Root CA

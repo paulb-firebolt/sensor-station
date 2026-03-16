@@ -41,49 +41,49 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 
 ### System Flow
 
-```
+```text
 ┌─────────────────────────────────────┐
 │  MQTT Broker                        │
-│  (publishes to command topic)        │
+│  (publishes to command topic)       │
 └──────────────────┬──────────────────┘
                    │
                    ▼
-┌─────────────────────────────────────┐
-│  ESP32-S3 Device                    │
-│  ┌─────────────────────────────────┐│
-│  │ MQTT Manager (subscribed)       ││
-│  │ - Receives OTA command JSON     ││
-│  │ - Parses action, url, version   ││
-│  └────────────┬────────────────────┘│
-│               │                      │
-│  ┌────────────▼────────────────────┐│
-│  │ OTA Manager                     ││
-│  │ - Version comparison            ││
-│  │ - Pre-save new version to NVS   ││
-│  │ - Download firmware via HTTP(S) ││
-│  │ - Flash to OTA partition        ││
-│  │ - Trigger reboot                ││
-│  └────────────┬────────────────────┘│
-│               │                      │
-│  ┌────────────▼────────────────────┐│
-│  │ WiFiClient / WiFiClientSecure   ││
-│  │ - HTTP: plain connection        ││
-│  │ - HTTPS: TLS verification       ││
-│  └────────────┬────────────────────┘│
-│               │                      │
-└───────────────┼──────────────────────┘
-                │
-                ▼
-    ┌───────────────────────────┐
-    │ Web Server (HTTP/HTTPS)   │
-    │ - Serves firmware.bin     │
-    │ - Any location accessible │
-    └───────────────────────────┘
+┌──────────────────────────────────────┐
+│  ESP32-S3 Device                     │
+│  ┌─────────────────────────────────┐ │
+│  │ MQTT Manager (subscribed)       │ │
+│  │ - Receives OTA command JSON     │ │
+│  │ - Parses action, url, version   │ │
+│  └───────────────┬─────────────────┘ │
+│                  │                   │
+│  ┌───────────────▼─────────────────┐ │
+│  │ OTA Manager                     │ │
+│  │ - Version comparison            │ │
+│  │ - Pre-save new version to NVS   │ │
+│  │ - Download firmware via HTTP(S) │ │
+│  │ - Flash to OTA partition        │ │
+│  │ - Trigger reboot                │ │
+│  └───────────────┬─────────────────┘ │
+│                  │                   │
+│  ┌───────────────▼─────────────────┐ │
+│  │ WiFiClient / WiFiClientSecure   │ │
+│  │ - HTTP: plain connection        │ │
+│  │ - HTTPS: TLS verification       │ │
+│  └───────────────┬─────────────────┘ │
+│                  │                   │
+└──────────────────┼───────────────────┘
+                   │
+                   ▼
+      ┌───────────────────────────┐
+      │ Web Server (HTTP/HTTPS)   │
+      │ - Serves firmware.bin     │
+      │ - Any location accessible │
+      └───────────────────────────┘
 ```
 
 ### Partition Layout
 
-```
+```text
 ┌──────────────────────────────────────────┐
 │ ESP32-S3 Flash Memory                    │
 ├──────────────────────────────────────────┤
@@ -113,21 +113,21 @@ When new firmware is downloaded, it goes into **app1**. Bootloader (otadata) tra
 
 **Key Methods**:
 
-| Method | Purpose |
-|--------|---------|
-| `begin()` | Initialize OTA system, load versions from NVS, check boot count |
-| `handleOTACommand(JsonDocument)` | Parse MQTT command, trigger update |
-| `updateFromURL(url, version, sha256)` | Download and flash firmware |
-| `rollbackToPrevious()` | (Stub) Manual rollback trigger |
-| `getCurrentVersion()` | Get current firmware version |
-| `getPreviousVersion()` | Get previous firmware version |
-| `isFirstBoot()` | Check if device has never been updated |
-| `saveVersionInfo(version)` | Store version to NVS (public for initialization) |
-| `getOTAStatus()` | Return JSON with version info and boot count |
+| Method                                | Purpose                                                         |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `begin()`                             | Initialize OTA system, load versions from NVS, check boot count |
+| `handleOTACommand(JsonDocument)`      | Parse MQTT command, trigger update                              |
+| `updateFromURL(url, version, sha256)` | Download and flash firmware                                     |
+| `rollbackToPrevious()`                | (Stub) Manual rollback trigger                                  |
+| `getCurrentVersion()`                 | Get current firmware version                                    |
+| `getPreviousVersion()`                | Get previous firmware version                                   |
+| `isFirstBoot()`                       | Check if device has never been updated                          |
+| `saveVersionInfo(version)`            | Store version to NVS (public for initialization)                |
+| `getOTAStatus()`                      | Return JSON with version info and boot count                    |
 
 **NVS Storage**:
 
-```
+```text
 Namespace: "ota_config"
 ├── current_version    (String) - Current running firmware version
 ├── prev_version       (String) - Previous firmware version (for rollback)
@@ -139,11 +139,13 @@ Namespace: "ota_config"
 **Topic**: `devices/{device-id}/command`
 
 **Subscription**: Device subscribes at startup
+
 ```cpp
 mqttManager.setMessageCallback(handleMQTTMessage);
 ```
 
 **Handler Function** in `main.cpp`:
+
 ```cpp
 void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
     JsonDocument doc;
@@ -161,11 +163,13 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 ### 3. WiFi Clients
 
 **HTTP** (testing):
+
 ```cpp
 WiFiClient client;  // Plain, unencrypted
 ```
 
 **HTTPS** (production):
+
 ```cpp
 WiFiClientSecure client;  // TLS/SSL encrypted
 // Optional: client.setInsecure() for self-signed certs
@@ -276,7 +280,7 @@ curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
 
 Serial output on startup:
 
-```
+```text
 [OTA] Initializing OTA manager
 [OTA] Current version: 0.0.2
 [OTA] Previous version: 0.0.1
@@ -296,6 +300,7 @@ Serial output on startup:
 All commands published to: `devices/{device-id}/command`
 
 **Base structure**:
+
 ```json
 {
   "action": "string",
@@ -315,13 +320,15 @@ All commands published to: `devices/{device-id}/command`
 ```
 
 **Device Response**:
+
 - Device downloads firmware
 - Flashes to app1 partition
 - Reboots automatically
 - Boots into new firmware
 
 **Serial Output**:
-```
+
+```text
 [OTA] Command received - Version: 0.0.2
 [OTA] Starting firmware update...
 [OTA] Using HTTP client
@@ -339,6 +346,7 @@ All commands published to: `devices/{device-id}/command`
 ```
 
 **Device publishes to** `devices/{device-id}/ota_status`:
+
 ```json
 {
   "current_version": "0.0.2",
@@ -419,13 +427,15 @@ mosquitto_pub \
 **Purpose**: Detect crash loops and automatically recover to previous firmware
 
 **Mechanism**:
+
 - Counter increments on every boot
 - Reset to 0 on successful OTA update
 - Threshold: 5 boots without update = crash loop detected
 - **Automatic action**: Switch back to previous firmware partition
 
 **Behavior**:
-```
+
+```text
 Boot 1: [OTA] Boot count: 1           ✓ Normal
 Boot 2: [OTA] Boot count: 2           ✓ Normal
 Boot 3: [OTA] Boot count: 3           ✓ Normal
@@ -439,6 +449,7 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 ```
 
 **What happens on auto-rollback**:
+
 1. Device detects boot count ≥ 5 at startup
 2. Calls `rollbackToPrevious()` automatically
 3. Uses ESP32 OTA partition API to switch boot partition
@@ -448,7 +459,8 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 7. Service resumes normally
 
 **Serial output during rollback**:
-```
+
+```text
 [OTA] ⚠️  CRASH LOOP DETECTED!
 [OTA] Boot count exceeded maximum
 [OTA] Current version: 0.0.2
@@ -462,7 +474,8 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 **No manual intervention needed** — device recovers automatically!
 
 **Fallback if no previous version**:
-```
+
+```text
 [OTA] ✗ Rollback failed - no previous version available
 [OTA] Device will continue with current version
 [OTA] Manual recovery required: re-flash via USB
@@ -471,6 +484,7 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 ### 2. Dual OTA Partitions
 
 **Hardware Protection**: If new firmware (app1) crashes during boot:
+
 1. Bootloader detects crash (watchdog timeout)
 2. Bootloader reverts to previous firmware (app0)
 3. Device continues running old firmware
@@ -517,6 +531,7 @@ Ensures correct version is reported after reboot.
 **Cause**: Build failed or wrong environment name
 
 **Fix**:
+
 ```bash
 # Check environment name matches platformio.ini
 platformio run -e esp32-s3-devkitc-1
@@ -533,6 +548,7 @@ platformio run -e esp32-s3-devkitc-1 -v
 **Cause**: URL not reachable or wrong scheme
 
 **Fix**:
+
 ```bash
 # Verify URL is accessible
 curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
@@ -549,6 +565,7 @@ curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
 **Cause**: Version not saved before reboot (old code)
 
 **Fix**: Ensure latest code with `saveVersionInfo()` called **before** HTTPUpdate:
+
 ```cpp
 // Pre-save new version
 saveVersionInfo(version);
@@ -566,6 +583,7 @@ ret = httpUpdate.update(client, url, currentVersion);
 **Cause**: Check for actual OTA commands being received and successful
 
 **Debug**:
+
 ```bash
 # Monitor serial output during OTA
 # Look for: [OTA] Update successful! Rebooting...
@@ -581,6 +599,7 @@ mosquitto_sub -v -h 192.168.0.94 -t "devices/sensor-*/command"
 **Cause**: Self-signed certificate or missing CA
 
 **Fix for self-signed certs** (development only):
+
 ```cpp
 // In ota_manager.cpp, temporarily:
 WiFiClientSecure client;
@@ -589,6 +608,7 @@ ret = httpUpdate.update(client, url, currentVersion);
 ```
 
 **Fix for production**: Use valid SSL certificate or pin CA:
+
 ```cpp
 WiFiClientSecure client;
 client.setCACert(ca_cert);  // Your CA certificate PEM
@@ -601,27 +621,30 @@ ret = httpUpdate.update(client, url, currentVersion);
 
 ### Source Files
 
-| File | Purpose |
-|------|---------|
-| `src/ota_manager.h` | OTA Manager header, public API |
-| `src/ota_manager.cpp` | OTA Manager implementation |
-| `src/main.cpp` | Application entry, OTA initialization |
-| `partitions_ota.csv` | Flash partition layout (2 OTA slots) |
-| `platformio.ini` | PlatformIO config, partition table reference |
+| File                  | Purpose                                      |
+| --------------------- | -------------------------------------------- |
+| `src/ota_manager.h`   | OTA Manager header, public API               |
+| `src/ota_manager.cpp` | OTA Manager implementation                   |
+| `src/main.cpp`        | Application entry, OTA initialization        |
+| `partitions_ota.csv`  | Flash partition layout (2 OTA slots)         |
+| `platformio.ini`      | PlatformIO config, partition table reference |
 
 ### Key Code Sections in main.cpp
 
 **Version Definition**:
+
 ```cpp
 #define FIRMWARE_VERSION "0.0.1"
 ```
 
 **Global OTA Manager**:
+
 ```cpp
 OTAManager otaManager;
 ```
 
 **MQTT Callback**:
+
 ```cpp
 void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
     // Parse JSON and call otaManager.handleOTACommand(doc)
@@ -629,6 +652,7 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 ```
 
 **Setup Initialization**:
+
 ```cpp
 void setup() {
     otaManager.begin();
@@ -640,6 +664,7 @@ void setup() {
 ```
 
 **Status Publishing** (in loop):
+
 ```cpp
 if (mqttManager.isConnected()) {
     JsonDocument doc;

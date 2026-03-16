@@ -27,7 +27,7 @@ This document covers the complete implementation of a dual-stack network system 
 
 ### System Components
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     ESP32-S3 Device                         │
 ├─────────────────────────────────────────────────────────────┤
@@ -50,7 +50,7 @@ This document covers the complete implementation of a dual-stack network system 
 
 ### File Structure
 
-```
+```text
 src/
 ├── main.cpp              # Main application logic
 ├── network.h/cpp         # Dual-stack network initialization
