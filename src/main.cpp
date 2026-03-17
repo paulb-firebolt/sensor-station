@@ -49,6 +49,7 @@ bool factoryResetTriggered = false;
 
 // MQTT publish timing
 unsigned long lastMQTTPublish = 0;
+uint32_t lastReportedLoopPeak = 0;
 
 // Check for factory reset button press
 void checkFactoryReset(void) {
@@ -167,7 +168,7 @@ void setup() {
     }
 
     Serial.println("\n\n========================================");
-    Serial.println("ESP32-S3 Dual-Stack Network Sensor");
+    Serial.println("ESP32 Dual-Stack Network Sensor");
     Serial.println("Ethernet + WiFi with Web Provisioning");
     Serial.println("========================================\n");
 
@@ -417,9 +418,9 @@ void loop() {
                     Serial.printf("[WARN] Heap usage high: %d%% (%u bytes free)\n",
                         heap_usage_percent, metrics.free_heap_bytes);
                 }
-                if (metrics.max_loop_time_ms > 50) {
-                    Serial.printf("[WARN] Loop timing exceeded 50ms peak: %u ms\n",
-                        metrics.max_loop_time_ms);
+                if (metrics.max_loop_time_ms > lastReportedLoopPeak) {
+                    lastReportedLoopPeak = metrics.max_loop_time_ms;
+                    Serial.printf("[WARN] New loop peak: %u ms\n", metrics.max_loop_time_ms);
                 }
 
             }

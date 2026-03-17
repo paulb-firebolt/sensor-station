@@ -1,12 +1,12 @@
-# ESP32-S3 OTA Firmware Update System
+# ESP32 OTA Firmware Update System
 
 **Project:** Thermal Occupancy Counter with Ethernet + WiFi
 
-**Device:** ESP32-S3 with Dual Network Stack
+**Devices:** ESP32-S3 (Waveshare POE-ETH) · ESP32-P4 (M5Stack Unit PoE P4)
 
-**Date:** January 2025
+**Date:** March 2026
 
-**Version:** 1.0
+**Version:** 2.0
 
 ---
 
@@ -33,9 +33,13 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 
 - **MQTT-Triggered**: Control updates via MQTT publish to `command` topic
 - **HTTP & HTTPS Support**: Test with plain HTTP, deploy with HTTPS
-- **Boot Counter Watchdog**: Detects crash loops (>5 failed boots = alert)
-- **Version Tracking**: Stores current and previous firmware versions
+- **Works Over WiFi or RMII Ethernet**: `NetworkClient`/`NetworkClientSecure` uses LwIP regardless of interface
+- **Boot Counter Watchdog**: Detects crash loops (>5 failed boots = auto-rollback)
+- **Version Tracking**: Stores current and previous firmware versions in NVS
 - **Dual OTA Partitions**: Hardware-level fallback if new firmware fails to boot
+- **Rollback Safety**: Validates target partition before switching (no crash if app1 is empty)
+- **Force Flag**: Bypass version check via `"force":true` to re-flash or downgrade
+- **Numeric Semver Comparison**: `"0.0.10"` correctly beats `"0.0.9"`
 - **No User Intervention**: Automatic download, flash, and reboot
 
 ---
@@ -69,9 +73,10 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 │  └───────────────┬─────────────────┘ │
 │                  │                   │
 │  ┌───────────────▼─────────────────┐ │
-│  │ WiFiClient / WiFiClientSecure   │ │
-│  │ - HTTP: plain connection        │ │
-│  │ - HTTPS: TLS verification       │ │
+│  │ NetworkClient / NetworkClientSecure │ │
+│  │ - HTTP: plain connection            │ │
+│  │ - HTTPS: TLS verification           │ │
+│  │ - Works over WiFi + RMII Ethernet   │ │
 │  └───────────────┬─────────────────┘ │
 │                  │                   │
 └──────────────────┼───────────────────┘
@@ -86,21 +91,37 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 
 ### Partition Layout
 
+**ESP32-S3** (default partition table, ~1.25 MB OTA slots):
+
 ```text
 ┌──────────────────────────────────────────┐
-│ ESP32-S3 Flash Memory                    │
+│ ESP32-S3 Flash Memory (4 MB)             │
 ├──────────────────────────────────────────┤
 │ NVS (WiFi, MQTT, OTA config)  0x9000     │
 ├──────────────────────────────────────────┤
 │ OTA Data (bootloader state)   0xe000     │
 ├──────────────────────────────────────────┤
-│ app0 (OTA_0) - Running firmware          │
-│ 0x10000 - 0x1F0000 (1.9 MB)              │
+│ app0 (OTA_0) - Running firmware ~1.25 MB │
 ├──────────────────────────────────────────┤
-│ app1 (OTA_1) - Download target           │
-│ 0x200000 - 0x3F0000 (1.9 MB)             │
+│ app1 (OTA_1) - Download target ~1.25 MB  │
+└──────────────────────────────────────────┘
+```
+
+**ESP32-P4** uses `default_16MB.csv` (6.25 MB OTA slots — required for larger P4 firmware):
+
+```text
+┌──────────────────────────────────────────┐
+│ ESP32-P4 Flash Memory (16 MB)            │
 ├──────────────────────────────────────────┤
-│ FFAT (File storage)           0x3F0000   │
+│ NVS                           0x9000     │
+├──────────────────────────────────────────┤
+│ OTA Data                      0xe000     │
+├──────────────────────────────────────────┤
+│ app0 (OTA_0)    6.25 MB                  │
+├──────────────────────────────────────────┤
+│ app1 (OTA_1)    6.25 MB                  │
+├──────────────────────────────────────────┤
+│ SPIFFS / remaining flash                 │
 └──────────────────────────────────────────┘
 ```
 
@@ -163,22 +184,24 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 }
 ```
 
-### 3. WiFi Clients
+### 3. Network Clients
 
-**HTTP** (testing):
+OTA downloads use `NetworkClient` / `NetworkClientSecure` (not `WiFiClient`). These bind to the LwIP stack, so they work identically over WiFi or RMII Ethernet.
+
+**HTTP** (local testing):
 
 ```cpp
-WiFiClient client;  // Plain, unencrypted
+NetworkClient client;  // Plain, unencrypted
 ```
 
 **HTTPS** (production):
 
 ```cpp
-WiFiClientSecure client;  // TLS/SSL encrypted
-// Optional: client.setInsecure() for self-signed certs
+NetworkClientSecure client;  // TLS/SSL encrypted
+// Optional: client.setInsecure() for self-signed certs (dev only)
 ```
 
-Selection is automatic based on URL scheme.
+Selection is automatic based on URL scheme (`http://` vs `https://`).
 
 ---
 
@@ -186,37 +209,40 @@ Selection is automatic based on URL scheme.
 
 ### Step 1: Partition Table
 
-Create `partitions_ota.csv` in project root:
+**ESP32-S3**: No action needed — the default partition table has two OTA slots.
 
-```csv
-# Name,   Type, SubType, Offset,   Size,      Flags
-nvs,      data, nvs,     0x9000,   0x5000,
-otadata,  data, ota,     0xe000,   0x2000,
-app0,     app,  ota_0,   0x10000,  0x1F0000,
-app1,     app,  ota_1,   0x200000, 0x1F0000,
-ffat,     data, ffat,    0x3F0000, 0x10000,
-```
+**ESP32-P4 (M5Stack Unit PoE P4)**: Must set `board_build.partitions = default_16MB.csv`.
+The ESP32-P4 firmware is larger than the default 1.25 MB OTA slot; without this you get
+a "firmware too large" error at flash time.
 
 ### Step 2: PlatformIO Configuration
 
-Update `platformio.ini`:
-
 ```ini
 [env:esp32-s3-devkitc-1]
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
 board = esp32-s3-devkitc-1
 framework = arduino
-
-# Use OTA partition table
-board_build.partitions = partitions_ota.csv
-
 build_flags =
     -DARDUINO_USB_CDC_ON_BOOT=1
-
+    -DENABLE_ETHERNET=1
 lib_deps =
     bblanchon/ArduinoJson @ ^7.0.0
     knolleary/PubSubClient @ ^2.8.0
     arduino-libraries/Ethernet @ ^2.0.0
+
+[env:m5tab5-esp32p4]
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
+board = m5stack-tab5-p4
+framework = arduino
+board_build.partitions = default_16MB.csv   # ← required for P4
+build_flags =
+    -DCONFIG_IDF_TARGET_ESP32P4=1
+    -DENABLE_ETHERNET=1
+    -DUSE_RMII_ETHERNET=1
+    -DWIFI_DISABLED=1
+lib_deps =
+    bblanchon/ArduinoJson @ ^7.0.0
+    knolleary/PubSubClient @ ^2.8.0
 ```
 
 ### Step 3: Define Firmware Version
@@ -300,7 +326,9 @@ Serial output on startup:
 
 ### Format
 
-All commands published to: `devices/{device-id}/command`
+All commands published to: `sensors/esp32/{device-id}/command`
+
+The device ID is derived from the last 4 bytes of the chip's efuse MAC — e.g. `sensor-91A0ED30`.
 
 **Base structure**:
 
@@ -314,33 +342,50 @@ All commands published to: `devices/{device-id}/command`
 
 ### Command 1: Trigger OTA Update
 
-```json
-{
-  "action": "ota",
-  "url": "http://192.168.0.94:8080/firmware_0.0.2.bin",
-  "version": "0.0.2"
-}
+```bash
+mosquitto_pub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
 ```
 
-**Device Response**:
-
-- Device downloads firmware
-- Flashes to app1 partition
-- Reboots automatically
-- Boots into new firmware
+Device only updates if `version` is numerically greater than the current version (major.minor.patch comparison — `"0.0.10"` correctly beats `"0.0.9"`).
 
 **Serial Output**:
 
 ```text
-[OTA] Command received - Version: 0.0.2
+[OTA] Command received - Version: 0.1.0
 [OTA] Starting firmware update...
 [OTA] Using HTTP client
 [OTA] Pre-saving new version to NVS...
-[OTA] Version saved: 0.0.2
+[OTA] Version saved: 0.1.0
 [OTA] Update successful! Rebooting...
 ```
 
-### Command 2: Request Status
+### Command 2: Force Update (Bypass Version Check)
+
+Add `"force":true` to override the version comparison. Useful when NVS version is out of sync
+with the flashed firmware, or when deliberately downgrading:
+
+```bash
+mosquitto_pub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.0.9.bin","version":"0.0.9","force":true}'
+```
+
+```text
+[OTA] Force flag set — bypassing version check
+[OTA] Starting firmware update...
+```
+
+### Command 3: Request Status
 
 ```json
 {
@@ -348,19 +393,19 @@ All commands published to: `devices/{device-id}/command`
 }
 ```
 
-**Device publishes to** `devices/{device-id}/ota_status`:
+**Device publishes to** `sensors/esp32/{device-id}/ota_status`:
 
 ```json
 {
-  "current_version": "0.0.2",
-  "previous_version": "0.0.1",
+  "current_version": "0.1.0",
+  "previous_version": "0.0.9",
   "boot_count": 1,
   "max_boot_count": 5,
   "update_in_progress": false
 }
 ```
 
-### Command 3: Trigger Rollback (Manual)
+### Command 4: Trigger Rollback (Manual)
 
 ```json
 {
@@ -368,7 +413,9 @@ All commands published to: `devices/{device-id}/command`
 }
 ```
 
-**Status**: Currently a stub (returns false). For production, requires partition API implementation.
+Manually switches to the previous firmware partition (same logic as auto-rollback on crash loop).
+Only works if the alternate OTA partition contains a valid firmware image (magic byte 0xE9 present)
+— i.e. at least one successful OTA update has been performed since USB flash.
 
 ---
 
@@ -384,42 +431,45 @@ platformio run -e esp32-s3-devkitc-1 -t upload
 # 3. Device boots with new firmware immediately
 ```
 
-### Production (OTA Update)
+### Local OTA Update (Dev Setup)
 
 ```bash
 # 1. Update FIRMWARE_VERSION in main.cpp
-#    #define FIRMWARE_VERSION "0.0.3"
+#    #define FIRMWARE_VERSION "0.1.0"
 
 # 2. Build
-platformio run -e esp32-s3-devkitc-1
+pio run -e m5tab5-esp32p4          # ESP32-P4
+# or
+pio run -e esp32-s3-devkitc-1     # ESP32-S3
 
-# 3. Copy binary
-cp .pio/build/esp32-s3-devkitc-1/firmware.bin \
-   releases/firmware_0.0.3.bin
+# 3. Copy binary into the ota/ directory, named by device and version
+cp .pio/build/m5tab5-esp32p4/firmware.bin \
+   ota/m5tab5-esp32p4/firmware_0.1.0.bin
 
-# 4. Upload to web server
-scp releases/firmware_0.0.3.bin user@server:/var/www/firmware/
+# 4. Start HTTP server from ota/ directory
+cd ota
+python -m http.server 8080
+# Firmware now at: http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin
 
-# 5. Publish MQTT command
+# 5. Publish MQTT command (from another terminal)
 mosquitto_pub \
-  -h 192.168.0.94 \
-  -t "devices/sensor-d9b4dc/command" \
-  -m '{
-    "action":"ota",
-    "url":"http://192.168.0.94:8080/firmware_0.0.3.bin",
-    "version":"0.0.3"
-  }'
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
 
-# 6. Monitor device
-mosquitto_sub -h 192.168.0.94 -t "devices/sensor-d9b4dc/ota_status"
-# Expect: {"current_version":"0.0.3","boot_count":1,...}
-
-# 7. Fleet update (all devices)
-mosquitto_pub \
-  -h 192.168.0.94 \
-  -t "devices/all/command" \
-  -m '{"action":"ota","url":"http://fw.example.com/firmware_0.0.3.bin","version":"0.0.3"}'
+# 6. Monitor MQTT traffic
+mosquitto_sub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/#' -v
 ```
+
+See `docs/dev-environment.md` for full dev environment setup (DHCP server, Mosquitto broker, OTA HTTP server).
 
 ---
 
@@ -476,7 +526,18 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 
 **No manual intervention needed** — device recovers automatically!
 
-**Fallback if no previous version**:
+**Fallback if no previous version or empty partition**:
+
+Before switching partitions the firmware reads the first byte of the target partition.
+A valid ESP32 firmware image always starts with magic byte `0xE9`. If that byte is missing
+(partition never flashed), rollback aborts cleanly instead of crashing the bootloader:
+
+```text
+[OTA] ERROR: Target partition has no valid firmware — rollback aborted
+[OTA] Rollback only works after at least one successful OTA update
+```
+
+If NVS has no previous version at all:
 
 ```text
 [OTA] ✗ Rollback failed - no previous version available
@@ -494,18 +555,24 @@ Boot 1: [OTA] Boot count: 1           ✓ Back to stable version
 
 **This is transparent** - no code intervention needed.
 
-### 3. Version Comparison
+### 3. Version Comparison (Numeric Semver)
 
-Device only updates if new version > current version:
+Device only updates if the new version is numerically greater than the current version.
+Comparison is done with `sscanf` to parse major/minor/patch as integers — string comparison
+would incorrectly rank `"0.0.9"` above `"0.0.10"`.
 
 ```cpp
-if (version != "unknown" && version <= currentVersion) {
-    Serial.println("[OTA] Version is not newer");
-    return false;
+static bool isNewerVersion(const String& a, const String& b) {
+    int aMaj, aMin, aPat, bMaj, bMin, bPat;
+    sscanf(a.c_str(), "%d.%d.%d", &aMaj, &aMin, &aPat);
+    sscanf(b.c_str(), "%d.%d.%d", &bMaj, &bMin, &bPat);
+    if (aMaj != bMaj) return aMaj > bMaj;
+    if (aMin != bMin) return aMin > bMin;
+    return aPat > bPat;
 }
 ```
 
-Prevents accidental downgrade.
+Add `"force":true` to the MQTT command to bypass this check and re-flash or downgrade.
 
 ### 4. Pre-Save Before Reboot
 
@@ -595,6 +662,57 @@ ret = httpUpdate.update(client, url, currentVersion);
 mosquitto_sub -v -h 192.168.0.94 -t "devices/sensor-*/command"
 ```
 
+### Issue: Firmware too large for partition
+
+**Symptom**: Build error `firmware too large: 1,317,872 bytes (maximum is 1,310,720)`
+
+**Cause**: Default partition table has ~1.25 MB OTA slots — too small for ESP32-P4 firmware
+
+**Fix**: Add to `platformio.ini` for the P4 environment:
+
+```ini
+board_build.partitions = default_16MB.csv
+```
+
+This switches to 6.25 MB OTA slots (uses the built-in 16 MB partition table).
+
+### Issue: Rollback crashes or reports error code 5379
+
+**Symptom**: `[OTA] ERROR: esp_ota_set_boot_partition failed with code: 5379`
+
+**Cause**: The alternate OTA partition (app1) has never been written — `esp_ota_set_boot_partition`
+rejects a partition with no valid firmware image.
+
+**Explanation**: Rollback only works after at least one successful OTA update has been performed
+since the last USB flash. After a USB flash, only app0 contains firmware; app1 is empty.
+
+**Resolution**: Perform one OTA update first, then rollback is available.
+
+### Issue: NVS version out of sync with flashed firmware
+
+**Symptom**: Device refuses OTA saying version is not newer, but the flashed version is wrong
+
+**Fix**: Use the force flag to bypass version check:
+
+```bash
+mosquitto_pub ... -m '{"action":"ota","url":"...","version":"0.1.0","force":true}'
+```
+
+### Issue: Device doesn't retry DHCP after cable reconnect
+
+**Symptom**: Device gets no IP after boot without cable, then cable plugged in — device stays offline
+
+**Note**: For RMII Ethernet (ESP32-P4), DHCP retry is automatic via the `ARDUINO_EVENT_ETH_GOT_IP`
+event. If the cable is plugged in after boot, the device acquires an IP and announces it on serial:
+
+```text
+[ETH] Link UP — waiting for DHCP...
+[ETH] IP assigned: 192.168.2.105
+```
+
+No reboot required. If this is not happening, verify the event handler is registered before
+`ETH.begin()` in `network.cpp`.
+
 ### Issue: HTTPS Certificate Error (Production)
 
 **Symptom**: `[E][NetworkClientSecure.cpp:159] connect(): start_ssl_client: connect failed`
@@ -605,7 +723,7 @@ mosquitto_sub -v -h 192.168.0.94 -t "devices/sensor-*/command"
 
 ```cpp
 // In ota_manager.cpp, temporarily:
-WiFiClientSecure client;
+NetworkClientSecure client;
 client.setInsecure();  // ⚠️ NOT for production!
 ret = httpUpdate.update(client, url, currentVersion);
 ```
@@ -613,7 +731,7 @@ ret = httpUpdate.update(client, url, currentVersion);
 **Fix for production**: Use valid SSL certificate or pin CA:
 
 ```cpp
-WiFiClientSecure client;
+NetworkClientSecure client;
 client.setCACert(ca_cert);  // Your CA certificate PEM
 ret = httpUpdate.update(client, url, currentVersion);
 ```
@@ -683,10 +801,15 @@ if (mqttManager.isConnected()) {
 The OTA system is production-ready with:
 
 ✅ MQTT-triggered updates
-✅ HTTP/HTTPS support (auto-detect)
-✅ Boot counter watchdog (crash loop detection)
-✅ Dual partition failsafe
-✅ Version tracking (current + previous)
-✅ No user intervention required
+✅ HTTP/HTTPS support (auto-detect by URL scheme)
+✅ Works over WiFi **and** RMII Ethernet (NetworkClient/NetworkClientSecure)
+✅ Boot counter watchdog — auto-rollback on crash loop
+✅ Rollback safety — validates target partition before switching
+✅ Dual partition failsafe (hardware bootloader protection)
+✅ Version tracking in NVS (current + previous)
+✅ Numeric semver comparison — `0.0.10` > `0.0.9`
+✅ Force flag — re-flash or downgrade on demand
+✅ DHCP reconnect on cable plug without reboot (RMII)
+✅ Correct 16 MB partition table for ESP32-P4
 
-Deploy with confidence via MQTT commands to individual devices or fleet-wide.
+Deploy with confidence via MQTT commands to individual devices.

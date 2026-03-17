@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-updated: 2026-03-17T14:30:00Z
+updated: 2026-03-17T14:45:00Z
 ---
 
 <!-- trunk-ignore(markdownlint/MD025) -->
@@ -199,6 +199,99 @@ Without this, mbedTLS on the ESP32 will reject the cert with
 
 ---
 
+## OTA Firmware Updates (HTTP test server)
+
+OTA updates are triggered via MQTT. The device downloads firmware from a plain
+HTTP server — Python's built-in server is all you need for local testing.
+
+### Directory layout
+
+Keep firmware binaries organised by device in an `ota/` folder:
+
+```text
+~/Documents/PlatformIO/Projects/basic-network/ota/
+├── esp32-s3-devkitc-1/
+│   ├── firmware_0.0.9.bin
+│   └── firmware_0.1.0.bin
+└── m5tab5-esp32p4/
+    ├── firmware_0.0.9.bin
+    └── firmware_0.1.0.bin
+```
+
+### 1. Build and copy firmware
+
+```bash
+cd ~/Documents/PlatformIO/Projects/basic-network
+
+# Build
+pio run -e m5tab5-esp32p4
+
+# Copy with version-stamped name
+cp .pio/build/m5tab5-esp32p4/firmware.bin \
+   ota/m5tab5-esp32p4/firmware_0.1.0.bin
+```
+
+For the S3:
+```bash
+pio run -e esp32-s3-devkitc-1
+cp .pio/build/esp32-s3-devkitc-1/firmware.bin \
+   ota/esp32-s3-devkitc-1/firmware_0.1.0.bin
+```
+
+### 2. Start the HTTP server
+
+Serve from the `ota/` directory so both device folders are accessible:
+
+```bash
+cd ~/Documents/PlatformIO/Projects/basic-network/ota
+python -m http.server 8080
+```
+
+Firmware is now available at:
+- `http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin`
+- `http://192.168.2.1:8080/esp32-s3-devkitc-1/firmware_0.1.0.bin`
+
+### 3. Trigger OTA via MQTT
+
+```bash
+mosquitto_pub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
+```
+
+The device will download, flash, and reboot automatically. Monitor progress:
+
+```bash
+mosquitto_sub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/#' -v
+```
+
+### Force update (bypass version check)
+
+If the NVS version is out of sync with the flashed firmware, add `"force":true`:
+
+```bash
+mosquitto_pub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.0.9.bin","version":"0.0.9","force":true}'
+```
+
+This also allows flashing an older version if needed.
+
+---
+
 ## Typical Dev Session
 
 ```bash
@@ -215,14 +308,18 @@ docker run -it --rm --init --net host -v "$(pwd)/data":/data \
 cd ~/docker/mosquitto
 docker compose up
 
-# 4. Monitor MQTT traffic (terminal 3)
+# 4. Start OTA HTTP server (terminal 3)
+cd ~/Documents/PlatformIO/Projects/basic-network/ota
+python -m http.server 8080
+
+# 5. Monitor MQTT traffic (terminal 4)
 mosquitto_sub -h 192.168.2.1 -p 8883 \
   --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
   --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
   --key    ~/docker/mosquitto/mqtt/certs/client.key \
   -t 'sensors/#' -v
 
-# 5. Flash and monitor device (terminal 4)
+# 6. Flash and monitor device (terminal 5)
 cd ~/Documents/PlatformIO/Projects/basic-network
 pio run -e m5tab5-esp32p4 -t upload && pio device monitor -e m5tab5-esp32p4
 ```
