@@ -1,8 +1,11 @@
 # ESP32-S3 OTA Firmware Update System
 
 **Project:** Thermal Occupancy Counter with Ethernet + WiFi
+
 **Device:** ESP32-S3 with Dual Network Stack
+
 **Date:** January 2025
+
 **Version:** 1.0
 
 ---

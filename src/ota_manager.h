@@ -3,9 +3,8 @@
 #define OTA_MANAGER_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
+#include <NetworkClient.h>
+#include <NetworkClientSecure.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
 #include <Update.h>

@@ -1,7 +1,5 @@
 // ota_manager.cpp
 #include "ota_manager.h"
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
 #include <mbedtls/md.h>
 
 OTAManager::OTAManager()
@@ -115,6 +113,18 @@ void OTAManager::resetBootCount(void) {
     Serial.println("[OTA] Boot count reset");
 }
 
+// Returns true if version string a is strictly greater than b.
+// Parses major.minor.patch numerically — "0.0.10" > "0.0.9".
+static bool isNewerVersion(const String& a, const String& b) {
+    int aMaj = 0, aMin = 0, aPat = 0;
+    int bMaj = 0, bMin = 0, bPat = 0;
+    sscanf(a.c_str(), "%d.%d.%d", &aMaj, &aMin, &aPat);
+    sscanf(b.c_str(), "%d.%d.%d", &bMaj, &bMin, &bPat);
+    if (aMaj != bMaj) return aMaj > bMaj;
+    if (aMin != bMin) return aMin > bMin;
+    return aPat > bPat;
+}
+
 bool OTAManager::handleOTACommand(const JsonDocument& command) {
     // Parse OTA command
     // Expected format: {"action":"ota","url":"https://...","version":"1.2.3","sha256":"abc..."}
@@ -133,10 +143,14 @@ bool OTAManager::handleOTACommand(const JsonDocument& command) {
     Serial.print(", URL: ");
     Serial.println(url);
 
-    // Check if version is newer
-    if (version != "unknown" && version <= currentVersion) {
-        Serial.println("[OTA] Version is not newer than current");
+    // Check if version is newer (numeric semver comparison — not string)
+    bool force = command["force"].is<bool>() && command["force"].as<bool>();
+    if (!force && version != "unknown" && !isNewerVersion(version, currentVersion)) {
+        Serial.println("[OTA] Version is not newer than current (use \"force\":true to override)");
         return false;
+    }
+    if (force) {
+        Serial.println("[OTA] Force flag set — bypassing version check");
     }
 
     return updateFromURL(url, version, sha256);
@@ -164,16 +178,12 @@ bool OTAManager::updateFromURL(const String& url, const String& version, const S
 
     if (url.startsWith("https://")) {
         Serial.println("[OTA] Using HTTPS client");
-        WiFiClientSecure client;
-
-        // For self-signed certificates, disable verification (not recommended for production)
-        // client.setInsecure();
-
-        // For production with valid certificates, the default is to verify
+        NetworkClientSecure client;
+        // client.setInsecure();  // uncomment for self-signed certs (dev only)
         ret = httpUpdate.update(client, url, currentVersion);
     } else if (url.startsWith("http://")) {
         Serial.println("[OTA] Using HTTP client");
-        WiFiClient client;
+        NetworkClient client;
         ret = httpUpdate.update(client, url, currentVersion);
     } else {
         Serial.println("[OTA] ERROR: Invalid URL scheme (must be http:// or https://)");
@@ -259,6 +269,15 @@ bool OTAManager::rollbackToPrevious(void) {
 
     Serial.print("[OTA] Target partition: ");
     Serial.println(other_partition->label);
+
+    // Verify the target partition contains a valid firmware image (magic byte 0xE9)
+    uint8_t magic = 0;
+    esp_partition_read(other_partition, 0, &magic, 1);
+    if (magic != 0xE9) {
+        Serial.println("[OTA] ERROR: Target partition has no valid firmware — rollback aborted");
+        Serial.println("[OTA] Rollback only works after at least one successful OTA update");
+        return false;
+    }
 
     // Set the OTA boot partition to the other partition
     esp_err_t err = esp_ota_set_boot_partition(other_partition);

@@ -46,17 +46,46 @@ String generateHostname(void) {
 }
 
 #if ENABLE_ETHERNET && USE_RMII_ETHERNET
+// Event handler for RMII Ethernet link/IP changes.
+// LwIP fires these automatically on cable plug/unplug and DHCP completion.
+static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
+    switch (event) {
+        case ARDUINO_EVENT_ETH_CONNECTED:
+            Serial.println("[ETH] Link UP — waiting for DHCP...");
+            break;
+        case ARDUINO_EVENT_ETH_GOT_IP:
+            Serial.print("[ETH] IP assigned: ");
+            Serial.println(ETH.localIP());
+            ethernetInitialized = true;
+            // Re-announce mDNS on the new IP
+            if (hostname.length() > 0) {
+                MDNS.begin(hostname.c_str());
+                MDNS.addService("http", "tcp", 80);
+            }
+            break;
+        case ARDUINO_EVENT_ETH_DISCONNECTED:
+            Serial.println("[ETH] Link DOWN");
+            ethernetInitialized = false;
+            break;
+        default:
+            break;
+    }
+}
+
 // Initialize RMII Ethernet via built-in ESP32-P4 EMAC + IP101 PHY.
-// All RMII data pins are pre-wired in ETH.h for ESP32-P4 (no overrides needed).
+// Registers event handler so reconnects and DHCP retries are automatic.
 bool initEthernet(void) {
     Serial.println("\n=== RMII Ethernet Initialization (IP101 PHY) ===");
+
+    // Register before ETH.begin() so we don't miss early events
+    Network.onEvent(onEthEvent);
 
     if (!ETH.begin(ETH_PHY_IP101, RMII_PHY_ADDR, RMII_MDC, RMII_MDIO, RMII_PHY_RST, EMAC_CLK_EXT_IN)) {
         Serial.println("ERROR: ETH.begin() failed!");
         return false;
     }
 
-    // Wait for DHCP / link
+    // Wait for DHCP / link at boot (non-fatal if cable not present yet)
     Serial.print("Waiting for DHCP");
     unsigned long timeout = millis() + DHCP_TIMEOUT;
     while (!ETH.hasIP() && millis() < timeout) {
@@ -66,8 +95,9 @@ bool initEthernet(void) {
     Serial.println();
 
     if (!ETH.hasIP()) {
-        Serial.println("ERROR: DHCP timeout - no IP assigned");
-        return false;
+        Serial.println("WARNING: No IP at boot — will acquire when cable is connected");
+        // Interface is running; onEthEvent will set ethernetInitialized when IP arrives
+        return true;  // Not a fatal failure — ETH.begin() succeeded
     }
 
     Serial.print("Link: UP | Speed: ");
@@ -79,9 +109,6 @@ bool initEthernet(void) {
     Serial.println(ETH.subnetMask());
     Serial.print("Gateway: ");
     Serial.println(ETH.gatewayIP());
-
-    // RMII Ethernet is part of the ESP32 network stack — MDNS.begin() covers
-    // all interfaces (WiFi + Ethernet), so no separate mDNS instance needed.
 
     ethernetInitialized = true;
     Serial.println("=== RMII Ethernet Ready ===\n");
