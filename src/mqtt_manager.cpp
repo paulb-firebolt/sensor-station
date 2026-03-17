@@ -6,7 +6,7 @@
 MQTTManager::MQTTManager()
     : certManager(nullptr)
     , wifiManager(nullptr)
-    , mqttClient(wifiSecureClient)  // Use WiFi client only
+    , mqttClient(secureClient)
     , enabled(false)
     , port(MQTT_DEFAULT_PORT)
     , connected(false)
@@ -42,8 +42,8 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     Serial.print("[MQTT] Topic prefix: ");
     Serial.println(topic_prefix);
 
-    // Setup WiFi TLS certificates
-    setupWiFiTLS();
+    // Setup TLS certificates
+    setupTLS();
 
     // Setup MQTT client
     mqttClient.setServer(broker.c_str(), port);
@@ -57,10 +57,10 @@ void MQTTManager::update(void) {
         return;
     }
 
-    // Check if WiFi is available
-    if (!wifiManager->isConnectedStation()) {
+    // Check if any network is available
+    if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
         if (connected) {
-            Serial.println("[MQTT] WiFi disconnected, MQTT unavailable");
+            Serial.println("[MQTT] Network disconnected, MQTT unavailable");
             connected = false;
         }
         return;
@@ -92,17 +92,16 @@ bool MQTTManager::reconnect(void) {
         return false;
     }
 
-    // Check WiFi is available
-    if (!wifiManager->isConnectedStation()) {
-        Serial.println("[MQTT] Cannot connect: WiFi not available");
+    // Check network is available
+    if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
+        Serial.println("[MQTT] Cannot connect: no network available");
         return false;
     }
 
     Serial.print("[MQTT] Connecting to ");
     Serial.print(broker);
     Serial.print(":");
-    Serial.print(port);
-    Serial.println(" via WiFi");
+    Serial.println(port);
 
     // Connect to MQTT broker
     if (connectToBroker()) {
@@ -272,8 +271,8 @@ String MQTTManager::getConnectionStatus(void) {
     if (!enabled) {
         return "Disabled";
     }
-    if (!wifiManager->isConnectedStation()) {
-        return "WiFi Not Connected";
+    if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
+        return "Network Not Connected";
     }
     if (isConnected()) {
         return "Connected";
@@ -307,14 +306,14 @@ bool MQTTManager::connectToBroker(void) {
     return result;
 }
 
-// Setup WiFi TLS (WiFiClientSecure with mbedTLS)
-void MQTTManager::setupWiFiTLS(void) {
+// Setup TLS (NetworkClientSecure with mbedTLS — works over WiFi and RMII Ethernet)
+void MQTTManager::setupTLS(void) {
     if (certManager == nullptr) {
         Serial.println("[MQTT] ERROR: Certificate manager not initialized");
         return;
     }
 
-    Serial.println("[MQTT] Setting up WiFi TLS certificates...");
+    Serial.println("[MQTT] Setting up TLS certificates...");
 
     // Get certificates from certificate manager (NVS or compiled-in)
     const char* ca = certManager->getCACert();
@@ -324,33 +323,13 @@ void MQTTManager::setupWiFiTLS(void) {
     Serial.print("[MQTT] Certificate source: ");
     Serial.println(certManager->getCertificateSource());
 
-    // Set certificates for WiFiClientSecure
-    wifiSecureClient.setCACert(ca);
-    wifiSecureClient.setCertificate(cert);
-    wifiSecureClient.setPrivateKey(key);
+    secureClient.setCACert(ca);
+    secureClient.setCertificate(cert);
+    secureClient.setPrivateKey(key);
 
-    Serial.println("[MQTT] WiFi TLS certificates configured");
+    Serial.println("[MQTT] TLS certificates configured");
 }
 
 String MQTTManager::getClientId(void) {
-    // Generate unique client ID from Ethernet MAC address (like hostname)
-    // This matches the device naming scheme: sensor-a1b2c3
-    uint8_t mac[6];
-
-    // Try to get Ethernet MAC first, fall back to WiFi MAC
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-    Ethernet.MACAddress(mac);
-    // If Ethernet MAC is all zeros, use WiFi MAC
-    if (mac[0] == 0 && mac[1] == 0 && mac[2] == 0 && mac[3] == 0 && mac[4] == 0 && mac[5] == 0) {
-        WiFi.macAddress(mac);
-    }
-#else
-    WiFi.macAddress(mac);
-#endif
-
-    char clientId[32];
-    snprintf(clientId, sizeof(clientId), "sensor-%02x%02x%02x",
-             mac[3], mac[4], mac[5]);
-
-    return String(clientId);
+    return getHostname();
 }

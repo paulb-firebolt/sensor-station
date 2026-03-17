@@ -2,7 +2,7 @@
 #define MQTT_MANAGER_H
 
 #include <Arduino.h>
-#include <WiFiClientSecure.h>
+#include <NetworkClientSecure.h>
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <Ethernet.h>
 #endif
@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include "certificate_manager.h"
 #include "wifi_manager.h"
+#include "network.h"
 
 // NVS namespace and keys for MQTT configuration
 const char* const MQTT_NVS_NAMESPACE = "mqtt_config";
@@ -70,10 +71,10 @@ private:
     CertificateManager* certManager;
     WiFiManager* wifiManager;
 
-    // WiFi TLS client
-    WiFiClientSecure wifiSecureClient;
+    // Network TLS client (works over both WiFi and RMII Ethernet via LwIP)
+    NetworkClientSecure secureClient;
 
-    // MQTT client (uses WiFi secure client only - Ethernet TLS not supported)
+    // MQTT client
     PubSubClient mqttClient;
 
     // Configuration
@@ -94,7 +95,7 @@ private:
 
     // Helper methods
     bool connectToBroker(void);
-    void setupWiFiTLS(void);
+    void setupTLS(void);
     String getClientId(void);
 };
 

@@ -1,329 +1,213 @@
 ---
-title: Ethernet TLS Limitation - Why MQTTS Over Ethernet Doesn't Work
+title: Ethernet TLS — W5500 Limitation and RMII Solution
 created: 2025-12-15T20:56:00Z
-updated: 2025-12-15T20:56:00Z
+updated: 2026-03-17T14:00:00Z
 ---
 
-# Ethernet TLS Limitation - Why MQTTS Over Ethernet Doesn't Work
+# Ethernet TLS — W5500 Limitation and RMII Solution
 
-## Executive Summary
+## Summary
 
-**MQTTS (MQTT over TLS) cannot work with W5500 Ethernet on ESP32 due to fundamental architectural limitations.**
+| Ethernet Type | Board | TLS Works? | Why |
+|---|---|---|---|
+| W5500 SPI (WIZnet) | ESP32-S3 Waveshare | ❌ No | WIZnet stack, no hostname to BearSSL |
+| RMII (built-in EMAC) | ESP32-P4 Unit PoE P4 | ✅ Yes | LwIP stack, same as WiFi, mbedTLS works |
 
-**Working Solution:** Use WiFi for MQTTS (production ready) ✅
+**MQTTS over W5500 Ethernet is architecturally impossible** — do not attempt again.
 
-## The Problem
+**MQTTS over RMII Ethernet works** — implemented and production-ready using `NetworkClientSecure`.
 
-After extensive investigation and multiple implementation attempts, we've identified an unbreakable limitation:
+---
 
-**BearSSL requires a hostname for certificate verification, but EthernetClient only supports IP-based connections.**
+## W5500 — Why It Fails (Permanent Limitation)
 
-## Technical Details
+After extensive investigation and multiple implementation attempts, we confirmed an unbreakable limitation with W5500 SPI Ethernet.
 
 ### The Architectural Chain
 
 ```
 MQTT Application
     ↓
-PubSubClient (MQTT library)
+PubSubClient
     ↓
 SSLClient (BearSSL TLS wrapper)
     ↓
-EthernetClient (W5500 driver)
+EthernetClient (WIZnet W5500 driver)
     ↓
-W5500 Hardware (Ethernet controller)
+W5500 Hardware (has its own onboard TCP/IP stack)
 ```
 
 ### The Breaking Point
 
-**EthernetClient API:**
+The W5500 has its own onboard TCP/IP stack. The Arduino `EthernetClient` API only exposes IP-based connections:
 
 ```cpp
-class EthernetClient {
-    int connect(IPAddress ip, uint16_t port);  // ✅ Available
-    // int connect(const char* host, uint16_t port);  // ❌ DOESN'T EXIST
-};
+int connect(IPAddress ip, uint16_t port);   // ✅ Available
+int connect(const char* host, uint16_t port); // ❌ DOES NOT EXIST
 ```
 
-**What BearSSL Needs:**
+BearSSL (used by SSLClient) requires a hostname string to perform certificate
+verification against the server cert's Subject Alternative Names (SAN). Because
+`EthernetClient` never passes a hostname, BearSSL cannot verify the server cert —
+connection always fails.
 
-- Hostname string for certificate verification
-- Matches hostname against certificate's Subject Alternative Names (SAN)
-- Essential for preventing man-in-the-middle attacks
+### What Was Tried (All Failed)
 
-**What EthernetClient Provides:**
+1. **Trust anchors only** — cert chain validates but hostname verification fails
+2. **IP address in cert SAN** — BearSSL still never receives the IP string to verify against
+3. **Custom `EthernetClientResolver`** — causes memory corruption when wrapped by SSLClient
+4. **Manual DNS then IP connect** — hostname still never reaches BearSSL
+5. **mDNS resolution** — resolves to IP, same problem
 
-- Only IP address connections
-- No hostname string passed through
-- BearSSL never learns what hostname to verify
+### Why This Cannot Be Fixed
 
-### The Circular Dependency
-
-```
-1. User configures broker: "mqtt.example.com"
-2. DNS/mDNS resolves: mqtt.example.com → 192.168.1.100
-3. EthernetClient.connect(192.168.1.100, 8883)  ← Can ONLY take IP
-4. BearSSL asks: "What hostname should I verify?"  ← Never receives it
-5. Certificate has: DNS:mqtt.example.com in SAN
-6. BearSSL error: "Expected server name was not found in the chain"
-```
-
-## What We Tried
-
-### Attempt 1: Trust Anchors Only
-
-- ✅ Trust anchors loaded correctly (Mosquitto CA + AWS IoT Root CA)
-- ✅ Certificate chain validates
-- ❌ Hostname verification fails
-
-### Attempt 2: IP Address in Certificate SAN
-
-- Added `IP:169.254.163.140` to certificate
-- ✅ Certificate has IP in SAN field
-- ❌ BearSSL never gets the IP string to verify against
-
-### Attempt 3: Custom EthernetClient with Hostname Resolution
-
-- Created `EthernetClientResolver` class
-- Attempted to intercept `connect()` and resolve hostnames
-- ❌ Causes memory corruption/crashes when wrapped by SSLClient
-- ❌ Can't safely inherit from EthernetClient
-
-### Attempt 4: Manual Resolution Before Connection
-
-- Store hostname and IP separately
-- Tell PubSubClient to use hostname
-- ❌ Still calls EthernetClient.connect(IPAddress) internally
-- ❌ Hostname never reaches BearSSL
-
-### Attempt 5: mDNS Resolution
-
-- Implement mDNS resolver for `.local` addresses
-- ✅ Can resolve hostname to IP
-- ❌ Still stuck with IP-only connection to EthernetClient
-- ❌ BearSSL still never gets hostname
-
-## Why This Can't Be Fixed
-
-### W5500 Hardware Limitation
-
-- W5500 chip operates at IP level only
-- No DNS/hostname resolution in hardware
-- Arduino Ethernet library reflects this limitation
-
-### SSLClient/BearSSL Design
-
-- BearSSL's minimal verification engine REQUIRES hostname
-- No option to disable hostname verification
-- Designed for security - won't accept connections without verification
-
-### Can't Fork/Modify
-
+- W5500 hardware operates at IP level only — no hostname concept
+- Arduino Ethernet library reflects this hardware limitation
+- BearSSL's verification engine requires a hostname — by design, for security
 - Modifying SSLClient to skip verification defeats the purpose of TLS
-- Security risk: no protection against MITM attacks
-- Maintenance burden
 
-## Working Solution: WiFi for TLS
+**Do not attempt Ethernet TLS on W5500 again.**
 
-### What Works ✅
+---
 
-**WiFi MQTTS (WiFiClientSecure + mbedTLS):**
+## RMII Ethernet — Why It Works
 
-- Full TLS 1.2 support
-- Hostname-based connections work perfectly
-- Certificate validation with SAN
-- Mutual TLS with client certificates
-- Trust anchors (multiple CAs)
-- Production ready
+The ESP32-P4 Unit PoE P4 uses a built-in RMII Ethernet MAC (EMAC) connected to
+an IP101 PHY. This is architecturally completely different from W5500.
 
-**Implementation:**
+### The Architectural Chain
+
+```
+MQTT Application
+    ↓
+PubSubClient
+    ↓
+NetworkClientSecure (mbedTLS)
+    ↓
+LwIP TCP stack
+    ↓
+RMII EMAC (kernel-level, same stack as WiFi)
+    ↓
+IP101 PHY hardware
+```
+
+### Why It Works
+
+RMII Ethernet on ESP32 runs through **LwIP** — the same TCP/IP stack that WiFi
+uses. `NetworkClientSecure` (and `WiFiClientSecure`) both use **mbedTLS over
+LwIP sockets**. Since LwIP fully supports hostname-based connections, mbedTLS
+receives the hostname and can perform certificate verification correctly.
+
+This is the same code path as WiFi TLS — just a different physical interface
+at the bottom of the stack.
+
+### Proof of Concept Results (2026-03-17)
+
+Test sketch (`src/samples/rmii_tls_test.cpp`, env `m5tab5-tls-test`):
+
+```
+[ETH] IP: 192.168.2.100
+[NTP] Time synced: Mon Mar 17 14:xx:xx 2026
+[PASS] TLS connected in 672 ms
+       NetworkClientSecure works over RMII Ethernet!
+```
+
+Mosquitto confirmed TLS handshake completed:
+```
+New connection from 192.168.2.100 on port 8883
+(connection closed cleanly after test)
+```
+
+### Implementation
+
+Two changes to `MQTTManager`:
+
+1. **Replace client class** — `WiFiClientSecure` → `NetworkClientSecure`
+   (same API, works over any LwIP interface)
+
+2. **Remove WiFi guard** — `update()` and `reconnect()` previously gated on
+   `wifiManager->isConnectedStation()`. Updated to accept either WiFi or Ethernet:
 
 ```cpp
-// WiFi supports both connection methods:
-WiFiClientSecure client;
-client.connect("mqtt.example.com", 8883);  // ✅ Hostname string
-client.connect(IPAddress(192,168,1,100), 8883);  // ✅ Also supports IP
+if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
+    // no network available
+    return;
+}
 ```
 
-### Architecture Recommendation
+No other changes needed — cert loading, PubSubClient, topics, reconnect logic
+all remain identical.
 
-**Dual-Stack Deployment:**
+---
 
+## Server Certificate Requirements
+
+mbedTLS requires the broker's IP address to be present as an `iPAddress` type
+entry in the server certificate's **Subject Alternative Name (SAN)** extension.
+The CN field alone is not sufficient.
+
+The Mosquitto setup script (`~/docker/mosquitto/setup.sh`) was updated to add
+this when signing the server cert:
+
+```bash
+openssl x509 -req -in "$CERTS_DIR/server.csr" \
+  -CA "$CERTS_DIR/ca.crt" \
+  -CAkey "$CERTS_DIR/ca.key" \
+  -CAcreateserial \
+  -out "$CERTS_DIR/server.crt" \
+  -days 365 \
+  -sha256 \
+  -extfile <(echo "subjectAltName=IP:$MQTT_HOST")   # ← required
 ```
-┌─────────────────────────────┐
-│     ESP32-S3 Device         │
-├─────────────────────────────┤
-│  WiFi: MQTTS (TLS)          │  ← Secure MQTT
-│    ↓                        │
-│  Mosquitto/AWS IoT          │
-│                             │
-│  Ethernet: HTTP, plain MQTT │  ← Fast local traffic
-│    ↓                        │
-│  Local services             │
-└─────────────────────────────┘
+
+Without this, mbedTLS returns `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED (-9984)`
+even when the CN matches the IP.
+
+### NTP Time Sync
+
+mbedTLS also validates certificate validity dates. The ESP32-P4 has no RTC,
+so time must be synced via NTP before any TLS connection:
+
+```cpp
+configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+// wait for sync before connecting
 ```
 
-**Benefits:**
+Without NTP, cert date validation fails silently with the same
+`X509_CERT_VERIFY_FAILED` error.
 
-- WiFi for secure cloud connections (MQTTS)
-- Ethernet for fast local network traffic
-- Each interface used for its strengths
-- No security compromise
+---
 
-## Implications for AWS IoT Migration
+## Mosquitto Setup — Complete Certificate Generation
 
-### AWS IoT Core
+The setup script at `~/docker/mosquitto/setup.sh` generates all certs correctly.
+Key points:
 
-**Broker:** `a1b2c3d4e5f6g7-ats.iot.us-east-1.amazonaws.com`
+- CA cert: 10-year validity, used to sign server and client certs
+- Server cert: must include `subjectAltName=IP:<broker-ip>` (see above)
+- Client cert: used by ESP32 for mutual TLS authentication
+- Mosquitto config: `require_certificate true` enforces mutual TLS
 
-**Same limitation applies:**
+To regenerate all certs and restart Mosquitto:
+```bash
+cd ~/docker/mosquitto && bash setup.sh
+```
 
-1. DNS resolves hostname → IP address
-2. EthernetClient.connect(IP) ← Lost hostname
-3. BearSSL can't verify certificate
-4. Connection fails
+Then copy new `ca.crt`, `client.crt`, `client.key` into `docs/certs/` and
+update `src/certs.h`.
 
-**Solution:** Use WiFi for AWS IoT Core connections
+---
 
-### AWS IoT Device SDK
+## Production Status
 
-**ESP32 AWS IoT SDK:**
+### ESP32-S3 (Waveshare POE-ETH, W5500)
 
-- Built on ESP-IDF (not Arduino)
-- Uses WiFi by default
-- mbedTLS integration expects WiFi TCP stack
-- Ethernet support uncertain/untested
+- **MQTTS: WiFi only** — W5500 TLS permanently broken
+- WiFi used for MQTT, Ethernet used for local web interface
+- Dual-stack operation unchanged
 
-## Alternative Approaches (Not Recommended)
+### ESP32-P4 (M5Stack Unit PoE P4, RMII)
 
-### 1. Plain MQTT on Ethernet (Port 1883)
-
-- ❌ No encryption
-- ❌ Credentials sent in cleartext
-- ❌ Not acceptable for production
-
-### 2. VPN/Tunnel on Ethernet
-
-- Route Ethernet through VPN
-- VPN handles TLS
-- MQTT inside VPN tunnel
-- Complex, additional infrastructure needed
-
-### 3. Different Ethernet Hardware
-
-- Use Ethernet controller with hostname support
-- Example: enc28j60 with different driver
-- ⚠️ Still likely to hit same limitations
-- ⚠️ Hardware change required
-
-### 4. ESP-IDF Native Ethernet
-
-- Use ESP-IDF instead of Arduino framework
-- Access lwIP TCP stack directly
-- May support hostname connections
-- ⚠️ Complete rewrite required
-- ⚠️ Weeks of development effort
-
-## Lessons Learned
-
-### For Future Projects
-
-**When choosing Ethernet hardware:**
-
-- Verify TLS library compatibility
-- Check if hostname-based connections supported
-- Test TLS early in development
-- Consider WiFi as primary for secure connections
-
-**Architecture decisions:**
-
-- Design for dual-stack from the start
-- WiFi for secure cloud connections
-- Ethernet for local/fast traffic
-- Don't assume all network stacks are equal
-
-## Current Production Status
-
-### What Works ✅
-
-1. **WiFi MQTTS** - Production Ready
-
-   - Broker: Any (Mosquitto, AWS IoT, etc.)
-   - Port: 8883
-   - TLS: Full support with hostname verification
-   - Certificates: Trust anchors + client cert
-   - Authentication: Mutual TLS
-
-2. **Ethernet Local Network** - Production Ready
-
-   - HTTP web interface
-   - Local API endpoints
-   - Fast data transfer
-   - No TLS required for trusted networks
-
-3. **Dual-Stack Operation**
-   - Automatic failover between WiFi/Ethernet
-   - Network selection based on availability
-   - Unified management interface
-
-### What Doesn't Work ❌
-
-1. **Ethernet MQTTS** - Architecturally Impossible
-
-   - Cannot be fixed without hardware change
-   - Don't waste time trying
-
-2. **Ethernet AWS IoT Direct** - Same Limitation
-   - Use WiFi for AWS IoT connections
-   - Ethernet can't do TLS with hostnames
-
-## Recommendations
-
-### For Current Deployment
-
-**Use WiFi for MQTTS:**
-
-- Configure WiFi credentials
-- Enable MQTTS on port 8883
-- Upload device-specific certificates
-- Monitor WiFi connectivity
-
-**Use Ethernet for:**
-
-- Web interface access
-- Local network communication
-- Non-sensitive data
-- Fast transfers when WiFi unavailable
-
-### For AWS IoT Migration
-
-**Plan for WiFi:**
-
-- AWS IoT Core requires TLS
-- Use WiFi for all IoT Core connections
-- Ethernet as fallback for local operations
-- Consider WiFi as primary interface
-
-### For Future Hardware Selection
-
-**If Ethernet TLS is critical:**
-
-- Don't use W5500
-- Consider WiFi-only deployment
-- Or ESP32 with native Ethernet (ESP32-Ethernet-Kit)
-- Verify TLS support before purchasing
-
-## Conclusion
-
-After 4+ hours of investigation and multiple implementation attempts, we've conclusively determined that **MQTTS over W5500 Ethernet is architecturally impossible** due to the EthernetClient API limitation.
-
-**The working solution is WiFi MQTTS**, which is production-ready and fully featured.
-
-This is not a bug - it's a fundamental architectural limitation of the W5500 hardware and Arduino Ethernet library design.
-
-## References
-
-- SSLClient Library: https://github.com/OPEnSLab-OSU/SSLClient
-- Arduino Ethernet Library: https://github.com/arduino-libraries/Ethernet
-- BearSSL Documentation: https://bearssl.org/
-- ESP32 Arduino Core: https://github.com/espressif/arduino-esp32
+- **MQTTS: Ethernet** — working via `NetworkClientSecure` over RMII
+- No WiFi hardware on this board — Ethernet is the only interface
+- Full mutual TLS with CA + client cert verified
