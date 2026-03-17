@@ -39,6 +39,7 @@ public:
 
     // Connection management
     bool isConnected(void);
+    bool hasAttemptedConnect(void);
     bool reconnect(void);
     void disconnect(void);
 
@@ -92,6 +93,7 @@ private:
     unsigned long lastPublishTime;
     unsigned long lastConnectedTime;
     unsigned int reconnectAttempts;
+    bool everAttemptedConnect;
 
     // Helper methods
     bool connectToBroker(void);

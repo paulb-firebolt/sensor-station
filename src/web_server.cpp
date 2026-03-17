@@ -9,7 +9,12 @@ DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
 #endif
       dnsActive(false), ethServerActive(false),
       ethernetIP(0, 0, 0, 0), ethernetConnected(false),
-      adminPassword(""), lastFailedAttempt(0), failedAttempts(0) {
+      adminPassword(""), lastFailedAttempt(0), failedAttempts(0),
+      findMeCallback(nullptr) {
+}
+
+void DeviceWebServer::setFindMeCallback(void (*callback)(void)) {
+    findMeCallback = callback;
 }
 
 void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr) {
@@ -35,8 +40,13 @@ void DeviceWebServer::begin(void) {
     if (!ethernetOnly) {
         // Setup WiFi WebServer routes
         webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
+        webServer.on("/api/findme", HTTP_POST, [this]() { handleFindMe(); });
+#if WIFI_DISABLED
+        webServer.on("/api/setup", HTTP_POST, [this]() { handleDeviceSetup(); });
+#else
         webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
         webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
+#endif
         webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
         webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
         webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
@@ -236,6 +246,16 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 
     // Determine the path
     if (requestLine.startsWith("GET / ") || requestLine.startsWith("GET /index")) {
+#if WIFI_DISABLED
+        // On WiFi-disabled builds, show first-run setup until admin password is configured
+        if (adminPassword.isEmpty()) {
+            Serial.println("[Eth] Serving device setup page (first run)");
+            sendEthernetResponse(client, 200, "text/html", generateDeviceSetupPage());
+        } else {
+            Serial.println("[Eth] Serving status page");
+            sendEthernetResponse(client, 200, "text/html", generateStatusPage());
+        }
+#else
         // Show provisioning page if in AP mode, otherwise status page
         if (wifiManager.isAPActive()) {
             Serial.println("[Eth] Serving Ethernet provisioning page (manual input)");
@@ -244,6 +264,71 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             Serial.println("[Eth] Serving status page");
             sendEthernetResponse(client, 200, "text/html", generateStatusPage());
         }
+#endif
+    } else if (requestLine.startsWith("POST /api/setup")) {
+#if WIFI_DISABLED
+        // Handle admin password setup (WiFi-disabled first-run)
+        int bodyStart = request.indexOf("\r\n\r\n") + 4;
+        String body = request.substring(bodyStart);
+
+        auto urlDecode = [](const String& s) -> String {
+            String out;
+            for (int i = 0; i < (int)s.length(); i++) {
+                if (s[i] == '+') {
+                    out += ' ';
+                } else if (s[i] == '%' && i + 2 < (int)s.length()) {
+                    char hi = s[i+1], lo = s[i+2];
+                    auto hexVal = [](char c) -> int {
+                        if (c >= '0' && c <= '9') return c - '0';
+                        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                        return 0;
+                    };
+                    out += (char)((hexVal(hi) << 4) | hexVal(lo));
+                    i += 2;
+                } else {
+                    out += s[i];
+                }
+            }
+            return out;
+        };
+
+        auto parseField = [&](const String& key) -> String {
+            String search = key + "=";
+            int pos = body.indexOf(search);
+            if (pos < 0) return "";
+            int start = pos + search.length();
+            int end = body.indexOf('&', start);
+            if (end < 0) end = body.length();
+            return urlDecode(body.substring(start, end));
+        };
+
+        String newPass = parseField("admin_password");
+        String confirm = parseField("admin_password_confirm");
+
+        if (newPass.length() < 4) {
+            sendEthernetResponse(client, 400, "text/html",
+                "<h1>Error: Password must be at least 4 characters</h1><a href='/'>Back</a>");
+        } else if (newPass != confirm) {
+            sendEthernetResponse(client, 400, "text/html",
+                "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
+        } else {
+            Preferences authPrefs;
+            if (authPrefs.begin("auth", false)) {
+                authPrefs.putString("admin_password", newPass);
+                authPrefs.end();
+                adminPassword = newPass;
+                Serial.println("[Setup] Admin password saved");
+            }
+            // Redirect to status page
+            client.println("HTTP/1.1 303 See Other");
+            client.println("Location: /");
+            client.println("Connection: close");
+            client.println();
+        }
+#else
+        sendEthernetResponse(client, 404, "text/plain", "Not Found");
+#endif
     } else if (requestLine.startsWith("POST /api/save")) {
         // Handle save from Ethernet (manual input)
         Serial.println("[Eth] Processing save request");
@@ -482,7 +567,56 @@ void DeviceWebServer::setHostname(const String& name) {
 }
 
 // Handle root page request
+void DeviceWebServer::handleFindMe(void) {
+    if (findMeCallback != nullptr) {
+        findMeCallback();
+        webServer.send(200, "text/plain", "OK");
+    } else {
+        webServer.send(404, "text/plain", "Not supported on this hardware");
+    }
+}
+
+#if WIFI_DISABLED
+void DeviceWebServer::handleDeviceSetup(void) {
+    String newPass = webServer.arg("admin_password");
+    String confirm = webServer.arg("admin_password_confirm");
+
+    if (newPass.length() < 4) {
+        webServer.send(400, "text/html",
+            "<h1>Error: Password must be at least 4 characters</h1><a href='/'>Back</a>");
+        return;
+    }
+    if (newPass != confirm) {
+        webServer.send(400, "text/html",
+            "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
+        return;
+    }
+
+    Preferences authPrefs;
+    if (authPrefs.begin("auth", false)) {
+        authPrefs.putString("admin_password", newPass);
+        authPrefs.end();
+        adminPassword = newPass;
+        Serial.println("[Setup] Admin password saved");
+    } else {
+        webServer.send(500, "text/html",
+            "<h1>Error: Failed to save password</h1><a href='/'>Back</a>");
+        return;
+    }
+
+    webServer.sendHeader("Location", "/");
+    webServer.send(303);
+}
+#endif // WIFI_DISABLED
+
 void DeviceWebServer::handleRoot(void) {
+#if WIFI_DISABLED
+    if (adminPassword.isEmpty()) {
+        webServer.send(200, "text/html", generateDeviceSetupPage());
+    } else {
+        webServer.send(200, "text/html", generateStatusPage());
+    }
+#else
     if (wifiManager.isAPActive()) {
         // Provisioning mode - show WiFi setup form
         webServer.send(200, "text/html", generateProvisioningPage());
@@ -490,6 +624,7 @@ void DeviceWebServer::handleRoot(void) {
         // Normal mode - show read-only status page
         webServer.send(200, "text/html", generateStatusPage());
     }
+#endif
 }
 
 // Handle WiFi scan request
@@ -701,7 +836,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
     <p class="subtitle">Configure WiFi network connection</p>
 
     <div class="info">
-      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 5 seconds.
+      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -747,6 +882,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
 
       <button type="submit">Save & Reboot</button>
     </form>
+    <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
   </div>
 
   <script>
@@ -824,10 +960,12 @@ String DeviceWebServer::generateProvisioningPage(void) {
 // Generate status page (read-only)
 String DeviceWebServer::generateStatusPage(void) {
     // Get current status
+#if !WIFI_DISABLED
     String wifiSSID = wifiManager.getConnectedSSID();
     IPAddress wifiIP = wifiManager.getStationIP();
     int wifiRSSI = wifiManager.getRSSI();
     bool wifiConnected = wifiManager.isConnectedStation();
+#endif
 
     // Build status HTML
     String html = R"HTML(<!DOCTYPE html>
@@ -930,8 +1068,10 @@ String DeviceWebServer::generateStatusPage(void) {
       <div class="status-item">
         <span class="label">MAC Address</span>
         <span class="value">)HTML" + ethernetMAC + R"HTML(</span>
-      </div>
+      </div>)HTML";
 
+#if !WIFI_DISABLED
+    html += R"HTML(
       <h2>WiFi Status</h2>
       <div class="status-item">
         <span class="label">Status</span>
@@ -959,13 +1099,22 @@ String DeviceWebServer::generateStatusPage(void) {
         <span class="value">)HTML" + String(wifiRSSI) + R"HTML( dBm</span>
       </div>)HTML";
     }
+#endif
 
     html += R"HTML(
 
-      <div class="info">
-        <strong>Factory Reset:</strong> To reconfigure WiFi, hold the boot button for 5 seconds.
-        The device will restart in setup mode at <strong>sensor-setup</strong> (password: 12345678).
+      <div style="margin-top:20px;">
+        <button onclick="fetch('/api/findme',{method:'POST'})" style="padding:10px 20px;background:#667eea;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Find Me</button>
       </div>
+
+      <div class="info" style="margin-top:15px;">
+        <strong>Factory Reset:</strong> Hold the boot button for 5 seconds to clear all settings and restart.)HTML"
+#if !WIFI_DISABLED
+        R"HTML( The device will restart in setup mode at <strong>sensor-setup</strong> (password: 12345678).)HTML"
+#endif
+        R"HTML(
+      </div>
+      <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
     </div>
   </div>
 
@@ -1082,7 +1231,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     </div>
 
     <div class="info">
-      <strong>Note:</strong> To reset WiFi settings later, hold the boot button for 5 seconds.
+      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -1098,6 +1247,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
 
       <button type="submit">Save & Reboot</button>
     </form>
+    <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
   </div>
 </body>
 </html>)HTML";
@@ -1154,6 +1304,7 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
     <h1>Settings Saved!</h1>
     <p>Device is rebooting with new WiFi configuration...</p>
     <p>Please reconnect to your WiFi network and access the device at its new address.</p>
+    <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
   </div>
 </body>
 </html>)HTML";
@@ -1248,10 +1399,89 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
       <a href="/mqtt" class="btn btn-primary">Back to MQTT Config</a>
       <a href="/" class="btn btn-secondary">View Status</a>
     </div>
+    <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
   </div>
 </body>
 </html>)HTML";
 }
+
+#if WIFI_DISABLED
+// First-run setup page for WiFi-disabled builds (P4 / Ethernet-only)
+// Shown when no admin password has been set yet.
+String DeviceWebServer::generateDeviceSetupPage(void) {
+    return R"HTML(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Device Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 { font-size: 24px; margin-bottom: 8px; color: #333; }
+    .subtitle { font-size: 14px; color: #888; margin-bottom: 24px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: 600; color: #555; font-size: 14px; }
+    input {
+      width: 100%; padding: 10px;
+      border: 1px solid #ddd; border-radius: 6px;
+      font-size: 14px; font-family: inherit;
+    }
+    input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
+    button {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white; border: none; border-radius: 6px;
+      font-weight: 600; cursor: pointer; margin-top: 20px; font-size: 16px;
+    }
+    button:hover { opacity: 0.9; }
+    .info { background: #e3f2fd; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; color: #1976d2; }
+    .hint { font-size: 12px; color: #999; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Device Setup</h1>
+    <p class="subtitle">Set an admin password to protect MQTT configuration.</p>
+
+    <div class="info">
+      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
+    </div>
+
+    <form method="POST" action="/api/setup">
+      <div class="form-group">
+        <label>Admin Password *</label>
+        <input type="password" name="admin_password" placeholder="Min 4 characters" required minlength="4">
+        <p class="hint">Protects the /mqtt configuration page.</p>
+      </div>
+      <div class="form-group">
+        <label>Confirm Password *</label>
+        <input type="password" name="admin_password_confirm" placeholder="Re-enter password" required>
+      </div>
+      <button type="submit">Save &amp; Continue</button>
+    </form>
+    <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
+  </div>
+</body>
+</html>)HTML";
+}
+#endif // WIFI_DISABLED
 
 // Load admin password from NVS
 void DeviceWebServer::loadAdminPassword(void) {
@@ -1626,9 +1856,17 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     <div class="card">
       <h1>MQTT Configuration</h1>
 
-      <div class="warning">
-        <strong>Note:</strong> MQTTS requires WiFi connectivity. Ethernet does not support TLS.
-      </div>
+)HTML"
+#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
+    R"HTML(      <div class="warning">
+        <strong>Note:</strong> MQTTS is not supported over W5500 Ethernet. TLS connections require WiFi.
+      </div>)HTML"
+#else
+    R"HTML(      <div class="info">
+        <strong>TLS supported</strong> — MQTTS (port 8883) works over both Ethernet and WiFi on this device.
+      </div>)HTML"
+#endif
+    R"HTML(
 
       <form method="POST" action="/api/mqtt/save">
         <h2>Connection Settings</h2>
@@ -1689,7 +1927,7 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
 
       <div class="form-group">
         <label>Client Private Key</label>
-        <textarea id="client-key" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+        <textarea id="client-key" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
         <button onclick="uploadCert('key')">Upload Client Key</button>
       </div>
 
@@ -1697,6 +1935,7 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
 
       <h2>Status</h2>
       <div id="status-info">Loading...</div>
+      <p style="text-align:center;color:#999;font-size:12px;margin-top:30px;">&copy; Copyright 2026, Glimpse Analytics</p>
     </div>
   </div>
 

@@ -4,18 +4,19 @@ created: 2025-12-15T15:31:00Z
 updated: 2026-03-17T14:00:00Z
 ---
 
+<!-- trunk-ignore(markdownlint/MD025) -->
 # Ethernet TLS and Security
 
 ## Status (as of 2026-03-17)
 
-| Feature | Board | Status |
-|---|---|---|
-| MQTTS over WiFi | ESP32-S3 | ✅ Working |
-| MQTTS over W5500 Ethernet | ESP32-S3 | ❌ Architecturally impossible |
-| MQTTS over RMII Ethernet | ESP32-P4 | ✅ Working |
-| HTTP Basic Auth on /mqtt | Both | ✅ Implemented |
-| Write-only certificate management | Both | ✅ Implemented |
-| Ethernet-only deployment mode | Both | ✅ Implemented |
+| Feature                           | Board    | Status                        |
+| --------------------------------- | -------- | ----------------------------- |
+| MQTTS over WiFi                   | ESP32-S3 | ✅ Working                    |
+| MQTTS over W5500 Ethernet         | ESP32-S3 | ❌ Architecturally impossible |
+| MQTTS over RMII Ethernet          | ESP32-P4 | ✅ Working                    |
+| HTTP Basic Auth on /mqtt          | Both     | ✅ Implemented                |
+| Write-only certificate management | Both     | ✅ Implemented                |
+| Ethernet-only deployment mode     | Both     | ✅ Implemented                |
 
 See `docs/ETHERNET_TLS_LIMITATION.md` for the full explanation of why W5500
 TLS fails and why RMII TLS works.
@@ -72,7 +73,7 @@ openssl x509 -req -in "$CERTS_DIR/server.csr" \
 
 ### Mosquitto Config
 
-```
+```text
 listener 8883
 certfile /mosquitto/certs/server.crt
 keyfile  /mosquitto/certs/server.key
@@ -88,6 +89,7 @@ cert signed by the CA or the connection is rejected.
 ### Updating Certs
 
 After running `setup.sh`:
+
 1. Copy `ca.crt`, `client.crt`, `client.key` to `docs/certs/`
 2. Update `src/certs.h` with the new content
 3. Restart Mosquitto: `cd ~/docker/mosquitto && docker compose restart`
@@ -97,19 +99,19 @@ After running `setup.sh`:
 
 ## NVS Storage Schema
 
-| Namespace | Key | Type | Notes |
-|---|---|---|---|
-| `network_config` | `ethernet_only` | bool | Ethernet-only deployment mode |
-| `auth` | `admin_password` | string | Protects /mqtt config page |
-| `mqtt_config` | `enabled` | bool | |
-| `mqtt_config` | `broker` | string | Hostname or IP |
-| `mqtt_config` | `port` | uint16 | Default 8883 |
-| `mqtt_config` | `username` | string | Optional |
-| `mqtt_config` | `password` | string | Optional |
-| `mqtt_config` | `topic` | string | Topic prefix |
-| `certificates` | `ca_cert` | string | PEM, write-only via web |
-| `certificates` | `client_cert` | string | PEM, write-only via web |
-| `certificates` | `client_key` | string | PEM, write-only via web |
+| Namespace        | Key              | Type   | Notes                         |
+| ---------------- | ---------------- | ------ | ----------------------------- |
+| `network_config` | `ethernet_only`  | bool   | Ethernet-only deployment mode |
+| `auth`           | `admin_password` | string | Protects /mqtt config page    |
+| `mqtt_config`    | `enabled`        | bool   |                               |
+| `mqtt_config`    | `broker`         | string | Hostname or IP                |
+| `mqtt_config`    | `port`           | uint16 | Default 8883                  |
+| `mqtt_config`    | `username`       | string | Optional                      |
+| `mqtt_config`    | `password`       | string | Optional                      |
+| `mqtt_config`    | `topic`          | string | Topic prefix                  |
+| `certificates`   | `ca_cert`        | string | PEM, write-only via web       |
+| `certificates`   | `client_cert`    | string | PEM, write-only via web       |
+| `certificates`   | `client_key`     | string | PEM, write-only via web       |
 
 ---
 
@@ -118,4 +120,4 @@ After running `setup.sh`:
 - Certificates are write-only via the web interface — never returned in API responses
 - Admin password protects `/mqtt` configuration routes (HTTP Basic Auth)
 - Factory reset (hold boot button 5s) clears all NVS including certs and credentials
-- Physical security is the primary defence — device is not internet-exposed
+- Physical security is the primary defense — device is not internet-exposed

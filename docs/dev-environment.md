@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-updated: 2026-03-17T14:45:00Z
+updated: 2026-03-17T17:30:00Z
 ---
 
 <!-- trunk-ignore(markdownlint/MD025) -->
@@ -72,7 +72,7 @@ The device will get an IP in the `192.168.2.100–200` range. The host
 ```text
 ~/docker/mosquitto/
 ├── compose.yml
-├── setup.sh              ← generates all certs + config
+├── setup.sh              ← generates all certs + config (canonical copy: docs/mosquitto/setup.sh)
 └── mqtt/
     ├── config/
     │   └── mosquitto.conf
@@ -86,6 +86,10 @@ The device will get an IP in the `192.168.2.100–200` range. The host
     ├── data/
     └── log/
 ```
+
+The reference copy of `setup.sh` lives at `docs/mosquitto/setup.sh` in this repo.
+Copy it to `~/docker/mosquitto/setup.sh` before running, or edit in-place there
+and copy back to keep the docs in sync.
 
 ### compose.yml
 
@@ -127,15 +131,18 @@ log_type all
 
 ### First-Time Setup
 
-Run `setup.sh` to generate all certificates and start the broker:
+The reference copy of the setup script is at `docs/mosquitto/setup.sh`.
+Before running, check that `MQTT_HOST` matches your Ethernet interface's static
+IP (see the static IP requirement below), then:
 
 ```bash
+cp docs/mosquitto/setup.sh ~/docker/mosquitto/setup.sh
 cd ~/docker/mosquitto
 bash setup.sh
 ```
 
-This generates a full mutual TLS PKI (CA, server cert with IP SAN, client cert)
-and starts the Mosquitto container via `docker compose up -d`.
+This generates a full mutual TLS PKI (CA, server cert with IP + DNS SANs,
+client cert) and starts the Mosquitto container via `docker compose up -d`.
 
 After running, copy the device certs into the project:
 
@@ -181,21 +188,43 @@ mosquitto_pub \
 
 ### Regenerating Certificates
 
-If certs expire or the broker IP changes, edit `MQTT_HOST` in `setup.sh` then:
+If certs expire or the broker IP changes, update `MQTT_HOST` in
+`docs/mosquitto/setup.sh`, copy it to `~/docker/mosquitto/`, then:
 
 ```bash
 cd ~/docker/mosquitto
 bash setup.sh           # regenerates certs and restarts broker
+
+# Sync certs back to the project
+cp mqtt/certs/ca.crt mqtt/certs/client.crt mqtt/certs/client.key \
+   ~/Documents/PlatformIO/Projects/basic-network/docs/certs/
 ```
 
-Then copy new certs to `docs/certs/`, update `src/certs.h`, and reflash firmware.
+Then update `src/certs.h` with the new cert contents and reflash firmware.
 
-### Important: Server Cert Must Have IP SAN
+### Important: Static IP + Cert SAN Requirements
 
-`setup.sh` correctly generates the server cert with `subjectAltName=IP:<broker-ip>`.
-Without this, mbedTLS on the ESP32 will reject the cert with
-`MBEDTLS_ERR_X509_CERT_VERIFY_FAILED` even if the CN matches. See
-`docs/ETHERNET_TLS_LIMITATION.md` for background.
+The ESP32-P4 RMII path connects to the broker **by IP address** and validates
+TLS against the `IP:` SAN in the server cert. Two things must be true:
+
+1. **The host Ethernet interface must have a static IP.** `setup.sh` hardcodes
+   this as `MQTT_HOST`. mDNS discovery (`_secure-mqtt._tcp`) returns this IP —
+   if it changes, TLS validation fails and discovery breaks.
+
+2. **The cert SAN must include that static IP.** `setup.sh` does this
+   automatically via `subjectAltName=IP:$MQTT_HOST,DNS:$MQTT_HOSTNAME.local`.
+   Without the IP SAN, mbedTLS rejects the cert with
+   `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`. See `ETHERNET_TLS_LIMITATION.md`.
+
+**Why not use `mosquitto.local`?** `CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y` is
+compiled into the P4 libs, but `lwip_getaddrinfo("mosquitto.local")` fails in
+practice over RMII (returns error -54). `MDNS.queryService()` works because it
+uses the mDNS API directly, not the LwIP DNS bridge. The `DNS:mosquitto.local`
+SAN is included for future use and for production environments (AWS IoT Core
+etc.) where a routable hostname is used instead of an IP — no SAN issues there.
+
+If the broker IP changes, edit `MQTT_HOST` in `setup.sh`, re-run it, copy new
+certs to `docs/certs/`, update `src/certs.h`, and reflash.
 
 ---
 
@@ -323,3 +352,30 @@ mosquitto_sub -h 192.168.2.1 -p 8883 \
 cd ~/Documents/PlatformIO/Projects/basic-network
 pio run -e m5tab5-esp32p4 -t upload && pio device monitor -e m5tab5-esp32p4
 ```
+
+---
+
+## P4 First-Run Setup
+
+After flashing the firmware to a fresh or factory-reset P4:
+
+1. Connect the P4 to the same Ethernet network as your dev machine (or directly via the static-IP setup described above).
+2. Find the device IP from the serial monitor or your router's DHCP table.
+3. Open `http://<device-ip>/` — you will see the **Device Setup** page.
+4. Set an admin password and click **Save & Continue**.
+5. You are redirected to the status page. Navigate to `http://<device-ip>/mqtt`.
+6. Enable MQTT, set the broker IP (`192.168.2.1` if using the dev setup above), port `8883`, and topic prefix. Leave username/password blank (mTLS handles authentication).
+7. Click **Save** — MQTT connects immediately, no reboot needed.
+8. The status LED turns **green** once MQTT connects.
+
+To test the setup worked:
+```bash
+mosquitto_sub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/#' -v
+```
+
+The device will publish a status message to `sensors/esp32/<device-id>/status` every 30 seconds once connected.

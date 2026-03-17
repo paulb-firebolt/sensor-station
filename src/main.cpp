@@ -18,7 +18,7 @@
 // Override via build_flags if needed (e.g. -DFACTORY_RESET_PIN=35).
 #ifndef FACTORY_RESET_PIN
 #if defined(ARDUINO_M5TAB5)
-#define FACTORY_RESET_PIN 8  // M5Stack Tab5 M-Bus pin (adjust to match your wiring)
+#define FACTORY_RESET_PIN 45  // USR button on M5Stack Unit PoE P4 (GPIO_NUM_45)
 #else
 #define FACTORY_RESET_PIN 0  // Boot button on Waveshare ESP32-S3-POE-ETH
 #endif
@@ -40,6 +40,62 @@ OTAManager otaManager;
 
 #if ENABLE_THERMAL_DETECTOR
 ThermalDetector thermalDetector(wifiManager, mqttManager);
+#endif
+
+#if defined(ARDUINO_M5TAB5)
+// RGB LED — common anode, GPIO R=17, G=15, B=16
+// Common anode: duty 0 = full brightness, duty 255 = off
+#define LED_R_PIN 17
+#define LED_G_PIN 15
+#define LED_B_PIN 16
+#define LED_FREQ  5000
+#define LED_RES   8   // 8-bit: 0–255
+
+static void ledInit(void) {
+    ledcAttach(LED_R_PIN, LED_FREQ, LED_RES);
+    ledcAttach(LED_G_PIN, LED_FREQ, LED_RES);
+    ledcAttach(LED_B_PIN, LED_FREQ, LED_RES);
+    // Start off
+    ledcWrite(LED_R_PIN, 255);
+    ledcWrite(LED_G_PIN, 255);
+    ledcWrite(LED_B_PIN, 255);
+}
+
+static void ledSet(uint8_t r, uint8_t g, uint8_t b) {
+    ledcWrite(LED_R_PIN, 255 - r);
+    ledcWrite(LED_G_PIN, 255 - g);
+    ledcWrite(LED_B_PIN, 255 - b);
+}
+
+// Hue 0-255 → dim RGB for rainbow cycling
+static void ledHue(uint8_t hue) {
+    uint8_t r, g, b;
+    uint8_t region = hue / 43;
+    uint8_t rem = (hue - region * 43) * 6;
+    uint8_t q = 255 - rem;
+    switch (region) {
+        case 0: r=255; g=rem; b=0;   break;
+        case 1: r=q;   g=255; b=0;   break;
+        case 2: r=0;   g=255; b=rem; break;
+        case 3: r=0;   g=q;   b=255; break;
+        case 4: r=rem; g=0;   b=255; break;
+        default: r=255; g=0;  b=q;   break;
+    }
+    ledSet(r / 4, g / 4, b / 4);  // 25% brightness
+}
+#endif // ARDUINO_M5TAB5
+
+// Find-me state (LED rainbow for 15 seconds)
+#if defined(ARDUINO_M5TAB5)
+static bool findMeActive = false;
+static unsigned long findMeStart = 0;
+static const unsigned long FIND_ME_DURATION = 15000;
+
+void triggerFindMe(void) {
+    findMeActive = true;
+    findMeStart = millis();
+    Serial.println("[FindMe] Rainbow started (15s)");
+}
 #endif
 
 // Factory reset variables
@@ -157,10 +213,23 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
             String status = otaManager.getOTAStatus();
             mqttManager.publish("ota_status", status);
         }
+        else if (action == "findme") {
+            Serial.println("[MQTT] Find-me command detected!");
+#if defined(ARDUINO_M5TAB5)
+            triggerFindMe();
+#else
+            Serial.println("[FindMe] No LED on this board");
+#endif
+        }
     }
 }
 
 void setup() {
+#if defined(ARDUINO_M5TAB5)
+    ledInit();
+    ledSet(0, 0, 32);  // dim blue — starting up
+#endif
+
     // Initialize serial for debugging
     Serial.begin(115200);
     while (!Serial && millis() < 3000) {
@@ -243,6 +312,10 @@ void setup() {
 
     // Set MQTT managers for web interface
     webServer.setMQTTManagers(&certManager, &mqttManager);
+
+#if defined(ARDUINO_M5TAB5)
+    webServer.setFindMeCallback(triggerFindMe);
+#endif
 
     webServer.begin();
 
@@ -428,6 +501,33 @@ void loop() {
     }
 
     perfMetrics.loopEnd();
+
+#if defined(ARDUINO_M5TAB5)
+    {
+        static unsigned long lastLedUpdate = 0;
+        unsigned long now = millis();
+        unsigned long interval = findMeActive ? 30 : 500;
+        if (now - lastLedUpdate >= interval) {
+            lastLedUpdate = now;
+            if (findMeActive) {
+                if (now - findMeStart >= FIND_ME_DURATION) {
+                    findMeActive = false;
+                    Serial.println("[FindMe] Rainbow ended");
+                } else {
+                    // Full cycle every ~4 seconds: hue advances 256 steps in 4000 ms
+                    uint8_t hue = (uint8_t)((now - findMeStart) * 256 / 4000);
+                    ledHue(hue);
+                }
+            } else if (mqttManager.isConnected()) {
+                ledSet(0, 64, 0);   // dim green — MQTT connected
+            } else if (mqttManager.isEnabled() && mqttManager.hasAttemptedConnect()) {
+                ledSet(64, 0, 0);   // dim red — MQTT failing
+            } else {
+                ledSet(0, 0, 32);   // dim blue — starting up or MQTT not configured
+            }
+        }
+    }
+#endif
 
     delay(10); // Small delay to prevent watchdog issues
 }

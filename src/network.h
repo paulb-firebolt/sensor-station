@@ -64,4 +64,12 @@ bool isEthernetConnected(void);
 bool isWiFiConnected(void);
 bool isNetworkConnected(void);
 
+// mDNS service discovery (ESPmDNS — RMII Ethernet and WiFi paths only)
+// Queries for well-known service types and returns host/port or URL.
+// Returns false immediately on W5500-only builds (MDNSEthernet is responder-only).
+#if USE_RMII_ETHERNET
+bool discoverMQTTBroker(String& host, uint16_t& port);
+bool discoverOTAServer(String& url);
+#endif
+
 #endif // NETWORK_H

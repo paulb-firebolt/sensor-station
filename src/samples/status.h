@@ -20,7 +20,7 @@ public:
   StatusServer() : running(false), ethernetServer(nullptr) {}
 
   void begin(const char* hostname, String broker, bool* mqttStatus) {
-    deviceName = "ESP32-S3-Thermal";
+    deviceName = "ESP32-sensor-station";
     mqttBroker = broker;
     mqttConnectedPtr = mqttStatus;
 

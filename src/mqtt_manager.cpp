@@ -13,7 +13,8 @@ MQTTManager::MQTTManager()
     , lastReconnectAttempt(0)
     , lastPublishTime(0)
     , lastConnectedTime(0)
-    , reconnectAttempts(0) {
+    , reconnectAttempts(0)
+    , everAttemptedConnect(false) {
 }
 
 void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
@@ -25,14 +26,26 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     // Load MQTT configuration from NVS
     loadConfig();
 
+    // Setup TLS certificates unconditionally — certs must be loaded regardless of
+    // whether MQTT is currently enabled, so that enabling via web UI works without reboot.
+    setupTLS();
+
     if (!enabled) {
         Serial.println("[MQTT] MQTT is disabled in configuration");
         return;
     }
 
     if (broker.length() == 0) {
+#if USE_RMII_ETHERNET
+        Serial.println("[MQTT] No broker in NVS — attempting mDNS discovery...");
+        if (!discoverMQTTBroker(broker, port)) {
+            Serial.println("[MQTT] No broker found via mDNS — MQTT unavailable");
+            return;
+        }
+#else
         Serial.println("[MQTT] No broker configured");
         return;
+#endif
     }
 
     Serial.print("[MQTT] Configured broker: ");
@@ -41,9 +54,6 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     Serial.println(port);
     Serial.print("[MQTT] Topic prefix: ");
     Serial.println(topic_prefix);
-
-    // Setup TLS certificates
-    setupTLS();
 
     // Setup MQTT client
     mqttClient.setServer(broker.c_str(), port);
@@ -87,10 +97,15 @@ bool MQTTManager::isConnected(void) {
     return connected && mqttClient.connected();
 }
 
+bool MQTTManager::hasAttemptedConnect(void) {
+    return everAttemptedConnect;
+}
+
 bool MQTTManager::reconnect(void) {
     if (!enabled || broker.length() == 0) {
         return false;
     }
+    everAttemptedConnect = true;
 
     // Check network is available
     if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
@@ -128,6 +143,28 @@ bool MQTTManager::reconnect(void) {
         Serial.print(", state: ");
         Serial.println(mqttClient.state());
         connected = false;
+
+#if USE_RMII_ETHERNET
+        // On first failure and every 6 attempts after, try mDNS to see if broker moved
+        if (reconnectAttempts == 1 || reconnectAttempts % 6 == 0) {
+            String discoveredHost;
+            uint16_t discoveredPort = port;
+            if (discoverMQTTBroker(discoveredHost, discoveredPort)) {
+                if (discoveredHost != broker || discoveredPort != port) {
+                    Serial.print("[MQTT] mDNS found broker at new address: ");
+                    Serial.print(discoveredHost);
+                    Serial.print(":");
+                    Serial.println(discoveredPort);
+                    broker = discoveredHost;
+                    port = discoveredPort;
+                    mqttClient.setServer(broker.c_str(), port);
+                } else {
+                    Serial.println("[MQTT] mDNS confirms same broker address");
+                }
+            }
+        }
+#endif
+
         return false;
     }
 }
@@ -200,10 +237,15 @@ bool MQTTManager::saveConfig(bool en, const String& brk, uint16_t prt,
     // Reload configuration
     loadConfig();
 
-    // Reconfigure MQTT client
+    // Reconfigure MQTT client (also refreshes TLS certs in case they changed)
+    setupTLS();
     if (enabled && broker.length() > 0) {
         mqttClient.setServer(broker.c_str(), port);
     }
+
+    // Reset reconnect timer so update() triggers a connection attempt immediately
+    lastReconnectAttempt = 0;
+    connected = false;
 
     return true;
 }

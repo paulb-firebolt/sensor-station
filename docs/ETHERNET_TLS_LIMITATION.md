@@ -1,17 +1,18 @@
 ---
 title: Ethernet TLS — W5500 Limitation and RMII Solution
 created: 2025-12-15T20:56:00Z
-updated: 2026-03-17T14:00:00Z
+updated: 2026-03-17T17:45:00Z
 ---
 
+<!-- trunk-ignore(markdownlint/MD025) -->
 # Ethernet TLS — W5500 Limitation and RMII Solution
 
 ## Summary
 
-| Ethernet Type | Board | TLS Works? | Why |
-|---|---|---|---|
-| W5500 SPI (WIZnet) | ESP32-S3 Waveshare | ❌ No | WIZnet stack, no hostname to BearSSL |
-| RMII (built-in EMAC) | ESP32-P4 Unit PoE P4 | ✅ Yes | LwIP stack, same as WiFi, mbedTLS works |
+| Ethernet Type        | Board                | TLS Works? | Why                                     |
+| -------------------- | -------------------- | ---------- | --------------------------------------- |
+| W5500 SPI (WIZnet)   | ESP32-S3 Waveshare   | ❌ No      | WIZnet stack, no hostname to BearSSL    |
+| RMII (built-in EMAC) | ESP32-P4 Unit PoE P4 | ✅ Yes     | LwIP stack, same as WiFi, mbedTLS works |
 
 **MQTTS over W5500 Ethernet is architecturally impossible** — do not attempt again.
 
@@ -25,7 +26,7 @@ After extensive investigation and multiple implementation attempts, we confirmed
 
 ### The Architectural Chain
 
-```
+```text
 MQTT Application
     ↓
 PubSubClient
@@ -75,9 +76,10 @@ connection always fails.
 The ESP32-P4 Unit PoE P4 uses a built-in RMII Ethernet MAC (EMAC) connected to
 an IP101 PHY. This is architecturally completely different from W5500.
 
+<!-- trunk-ignore(markdownlint/MD024) -->
 ### The Architectural Chain
 
-```
+```text
 MQTT Application
     ↓
 PubSubClient
@@ -105,7 +107,7 @@ at the bottom of the stack.
 
 Test sketch (`src/samples/rmii_tls_test.cpp`, env `m5tab5-tls-test`):
 
-```
+```text
 [ETH] IP: 192.168.2.100
 [NTP] Time synced: Mon Mar 17 14:xx:xx 2026
 [PASS] TLS connected in 672 ms
@@ -113,7 +115,8 @@ Test sketch (`src/samples/rmii_tls_test.cpp`, env `m5tab5-tls-test`):
 ```
 
 Mosquitto confirmed TLS handshake completed:
-```
+
+```text
 New connection from 192.168.2.100 on port 8883
 (connection closed cleanly after test)
 ```
@@ -157,24 +160,38 @@ openssl x509 -req -in "$CERTS_DIR/server.csr" \
   -out "$CERTS_DIR/server.crt" \
   -days 365 \
   -sha256 \
-  -extfile <(echo "subjectAltName=IP:$MQTT_HOST")   # ← required
+  -extfile <(echo "subjectAltName=IP:$MQTT_HOST,DNS:$MQTT_HOSTNAME.local")
 ```
 
-Without this, mbedTLS returns `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED (-9984)`
-even when the CN matches the IP.
+Both entries are included:
 
-### NTP Time Sync
+- `IP:192.168.2.1` — used by mDNS discovery and direct NVS-configured connections (device connects by IP)
+- `DNS:mosquitto.local` — future-proofing for when `.local` hostname resolution works over RMII
 
-mbedTLS also validates certificate validity dates. The ESP32-P4 has no RTC,
-so time must be synced via NTP before any TLS connection:
+Without the `IP:` SAN, mbedTLS returns `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED (-9984)` even when the CN matches.
 
-```cpp
-configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-// wait for sync before connecting
-```
+> **Note on `.local` resolution**: `CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y` is
+> compiled into the P4 libs but `lwip_getaddrinfo("mosquitto.local")` fails in
+> practice over RMII (returns error -54). The device therefore always connects by
+> IP. See `dev-environment.md` for the static IP requirement.
 
-Without NTP, cert date validation fails silently with the same
-`X509_CERT_VERIFY_FAILED` error.
+### Certificate Date Validation — Disabled by Design
+
+mbedTLS has two separate time-related compile flags:
+
+| Flag                            | ESP32-P4   | Meaning                                    |
+| ------------------------------- | ---------- | ------------------------------------------ |
+| `CONFIG_MBEDTLS_HAVE_TIME`      | ✅ `y`     | mbedTLS has access to a clock              |
+| `CONFIG_MBEDTLS_HAVE_TIME_DATE` | ❌ not set | mbedTLS checks cert not-before / not-after |
+
+Espressif **disables date validation by default** on ESP32 targets. This is an
+intentional IoT design decision: embedded devices frequently lack a reliable RTC
+or network time source at boot, and a false time would cause all certs to be
+rejected. The broker's clock is trusted for message timestamps instead.
+
+**NTP is not required for TLS on ESP32.** Cert chain and signature validation
+work correctly regardless of the device clock. Only date range checks are
+skipped.
 
 ---
 
@@ -189,6 +206,7 @@ Key points:
 - Mosquitto config: `require_certificate true` enforces mutual TLS
 
 To regenerate all certs and restart Mosquitto:
+
 ```bash
 cd ~/docker/mosquitto && bash setup.sh
 ```

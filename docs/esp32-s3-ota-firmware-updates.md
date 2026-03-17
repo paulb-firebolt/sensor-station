@@ -55,31 +55,31 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 └──────────────────┬──────────────────┘
                    │
                    ▼
-┌──────────────────────────────────────┐
-│  ESP32-S3 Device                     │
-│  ┌─────────────────────────────────┐ │
-│  │ MQTT Manager (subscribed)       │ │
-│  │ - Receives OTA command JSON     │ │
-│  │ - Parses action, url, version   │ │
-│  └───────────────┬─────────────────┘ │
-│                  │                   │
-│  ┌───────────────▼─────────────────┐ │
-│  │ OTA Manager                     │ │
-│  │ - Version comparison            │ │
-│  │ - Pre-save new version to NVS   │ │
-│  │ - Download firmware via HTTP(S) │ │
-│  │ - Flash to OTA partition        │ │
-│  │ - Trigger reboot                │ │
-│  └───────────────┬─────────────────┘ │
-│                  │                   │
-│  ┌───────────────▼─────────────────┐ │
+┌──────────────────────────────────────────┐
+│  ESP32-S3 Device                         │
+│  ┌─────────────────────────────────────┐ │
+│  │ MQTT Manager (subscribed)           │ │
+│  │ - Receives OTA command JSON         │ │
+│  │ - Parses action, url, version       │ │
+│  └───────────────┬─────────────────────┘ │
+│                  │                       │
+│  ┌───────────────▼─────────────────────┐ │
+│  │ OTA Manager                         │ │
+│  │ - Version comparison                │ │
+│  │ - Pre-save new version to NVS       │ │
+│  │ - Download firmware via HTTP(S)     │ │
+│  │ - Flash to OTA partition            │ │
+│  │ - Trigger reboot                    │ │
+│  └───────────────┬─────────────────────┘ │
+│                  │                       │
+│  ┌───────────────▼─────────────────────┐ │
 │  │ NetworkClient / NetworkClientSecure │ │
 │  │ - HTTP: plain connection            │ │
 │  │ - HTTPS: TLS verification           │ │
 │  │ - Works over WiFi + RMII Ethernet   │ │
-│  └───────────────┬─────────────────┘ │
-│                  │                   │
-└──────────────────┼───────────────────┘
+│  └───────────────┬─────────────────────┘ │
+│                  │                       │
+└──────────────────┼───────────────────────┘
                    │
                    ▼
       ┌───────────────────────────┐
@@ -416,6 +416,25 @@ mosquitto_pub \
 Manually switches to the previous firmware partition (same logic as auto-rollback on crash loop).
 Only works if the alternate OTA partition contains a valid firmware image (magic byte 0xE9 present)
 — i.e. at least one successful OTA update has been performed since USB flash.
+
+### Command 5: Find Me (P4 only)
+
+```bash
+mosquitto_pub \
+  -h 192.168.2.1 -p 8883 \
+  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
+  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
+  --key    ~/docker/mosquitto/mqtt/certs/client.key \
+  -t 'sensors/esp32/sensor-91A0ED30/command' \
+  -m '{"action":"findme"}'
+```
+
+Cycles the onboard RGB LED through rainbow colours for 15 seconds, making it easy to physically
+identify a specific device on a shelf or in a rack. Only implemented on the M5Stack Unit PoE P4
+(ESP32-P4); ignored silently on other hardware.
+
+The same effect can be triggered locally via the **Find Me** button on the device's status page
+(`http://<device-ip>/`).
 
 ---
 
@@ -800,16 +819,16 @@ if (mqttManager.isConnected()) {
 
 The OTA system is production-ready with:
 
-✅ MQTT-triggered updates
-✅ HTTP/HTTPS support (auto-detect by URL scheme)
-✅ Works over WiFi **and** RMII Ethernet (NetworkClient/NetworkClientSecure)
-✅ Boot counter watchdog — auto-rollback on crash loop
-✅ Rollback safety — validates target partition before switching
-✅ Dual partition failsafe (hardware bootloader protection)
-✅ Version tracking in NVS (current + previous)
-✅ Numeric semver comparison — `0.0.10` > `0.0.9`
-✅ Force flag — re-flash or downgrade on demand
-✅ DHCP reconnect on cable plug without reboot (RMII)
-✅ Correct 16 MB partition table for ESP32-P4
+- [x]  MQTT-triggered updates
+- [x]  HTTP/HTTPS support (auto-detect by URL scheme)
+- [x]  Works over WiFi **and** RMII Ethernet (NetworkClient/NetworkClientSecure)
+- [x]  Boot counter watchdog — auto-rollback on crash loop
+- [x]  Rollback safety — validates target partition before switching
+- [x]  Dual partition failsafe (hardware bootloader protection)
+- [x]  Version tracking in NVS (current + previous)
+- [x]  Numeric semver comparison — `0.0.10` > `0.0.9`
+- [x]  Force flag — re-flash or downgrade on demand
+- [x]  DHCP reconnect on cable plug without reboot (RMII)
+- [x] Correct 16 MB partition table for ESP32-P4
 
 Deploy with confidence via MQTT commands to individual devices.

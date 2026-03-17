@@ -2,6 +2,9 @@
 
 ## Overview
 
+!!! info
+    This was an early piece of work done as a PoC to prove we could connect and collect data using SPI, emulating a thermal sensor which we do not have.
+
 The system consists of two ESP32 boards communicating via SPI:
 
 - **WT32-ETH01** (Sensor/Slave): Generates synthetic thermal frames
@@ -49,7 +52,7 @@ The system consists of two ESP32 boards communicating via SPI:
 
 ## Wiring Diagram
 
-```
+```text
 WT32-ETH01 (Slave)          ESP32-S3 (Master)
 ─────────────────           ─────────────────
 
@@ -174,7 +177,7 @@ The detector pipeline is **hardware-agnostic** - it expects 16-bit thermal data 
 
 ## References
 
-- **ESP32-S3 DevKit Pinout**: https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html
-- **WT32-ETH01 Pinout**: https://docs.waveshare.com/wiki/WT32-ETH01
+- **ESP32-S3 DevKit Pinout**: <https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html>
+- **WT32-ETH01 Pinout**: <https://docs.waveshare.com/wiki/WT32-ETH01>
 - **HTPA80×64d Datasheet**: Available from Heimann Sensor
 - **Project Documentation**: See `docs/` folder

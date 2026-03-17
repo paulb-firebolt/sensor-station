@@ -1,5 +1,6 @@
 // ota_manager.cpp
 #include "ota_manager.h"
+#include "network.h"
 #include <mbedtls/md.h>
 
 OTAManager::OTAManager()
@@ -128,13 +129,24 @@ static bool isNewerVersion(const String& a, const String& b) {
 bool OTAManager::handleOTACommand(const JsonDocument& command) {
     // Parse OTA command
     // Expected format: {"action":"ota","url":"https://...","version":"1.2.3","sha256":"abc..."}
+    // If "url" is omitted, mDNS discovery of _ota._tcp is attempted (RMII builds only).
 
-    if (!command["url"].is<String>()) {
+    String url;
+    if (command["url"].is<String>()) {
+        url = command["url"].as<String>();
+    } else {
+#if USE_RMII_ETHERNET
+        Serial.println("[OTA] No URL in command — attempting mDNS OTA server discovery...");
+        if (!discoverOTAServer(url)) {
+            Serial.println("[OTA] ERROR: No URL in command and no OTA server found via mDNS");
+            return false;
+        }
+#else
         Serial.println("[OTA] ERROR: No URL in OTA command");
         return false;
+#endif
     }
 
-    String url = command["url"].as<String>();
     String version = command["version"].is<String>() ? command["version"].as<String>() : "unknown";
     String sha256 = command["sha256"].is<String>() ? command["sha256"].as<String>() : "";
 

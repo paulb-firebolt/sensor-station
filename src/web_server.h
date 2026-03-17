@@ -34,6 +34,9 @@ public:
     // Set MQTT managers (for MQTT configuration page)
     void setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr);
 
+    // Optional find-me callback (LED rainbow trigger)
+    void setFindMeCallback(void (*callback)(void));
+
 private:
     WiFiManager& wifiManager;
     CertificateManager* certManager;
@@ -59,11 +62,18 @@ private:
     bool requireAuth(void);
     void loadAdminPassword(void);
 
+    // Callbacks
+    void (*findMeCallback)(void);
+
     // Route handlers for WiFi WebServer
     void handleRoot(void);
+    void handleFindMe(void);
     void handleScan(void);
     void handleSave(void);
     void handleNotFound(void);
+#if WIFI_DISABLED
+    void handleDeviceSetup(void);
+#endif
 
     // MQTT configuration handlers
     void handleMQTTConfig(void);
@@ -84,6 +94,9 @@ private:
     String generateProvisioningPage(void);          // WiFi AP - with scanning
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     String generateEthernetProvisioningPage(void);  // Ethernet - manual input
+#endif
+#if WIFI_DISABLED
+    String generateDeviceSetupPage(void);           // No-WiFi first-run setup
 #endif
     String generateStatusPage(void);
     String generateSaveSuccessPage(void);

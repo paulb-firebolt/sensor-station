@@ -12,6 +12,9 @@ static MDNSEthernet mdnsEth;
 static bool usingDHCP = false;  // Track if we got DHCP or using AutoIP
 static EthernetLinkStatus lastLinkStatus = Unknown;  // Track link state changes
 #endif
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+static bool usingAutoIP = false;   // true while on 169.254.x.x
+#endif
 
 // Generate MAC address from ESP32 chip ID
 void generateMAC(void) {
@@ -56,6 +59,7 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
         case ARDUINO_EVENT_ETH_GOT_IP:
             Serial.print("[ETH] IP assigned: ");
             Serial.println(ETH.localIP());
+            usingAutoIP = false;
             ethernetInitialized = true;
             // Re-announce mDNS on the new IP
             if (hostname.length() > 0) {
@@ -66,6 +70,11 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
         case ARDUINO_EVENT_ETH_DISCONNECTED:
             Serial.println("[ETH] Link DOWN");
             ethernetInitialized = false;
+            if (usingAutoIP) {
+                ETH.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
+                usingAutoIP = false;
+                Serial.println("[ETH] AutoIP released — DHCP re-armed for next connect");
+            }
             break;
         default:
             break;
@@ -95,9 +104,24 @@ bool initEthernet(void) {
     Serial.println();
 
     if (!ETH.hasIP()) {
-        Serial.println("WARNING: No IP at boot — will acquire when cable is connected");
-        // Interface is running; onEthEvent will set ethernetInitialized when IP arrives
-        return true;  // Not a fatal failure — ETH.begin() succeeded
+        IPAddress autoIP(169, 254, mac[4], mac[5]);
+        IPAddress autoSubnet(255, 255, 0, 0);
+        IPAddress autoGW(0, 0, 0, 0);
+        ETH.config(autoIP, autoGW, autoSubnet);
+        usingAutoIP = true;
+        ethernetInitialized = true;
+
+        Serial.print("[ETH] DHCP timed out — AutoIP configured: ");
+        Serial.println(autoIP);
+
+        if (hostname.length() > 0) {
+            MDNS.begin(hostname.c_str());
+            MDNS.addService("http", "tcp", 80);
+            Serial.print("[ETH] mDNS started on AutoIP: ");
+            Serial.print(hostname);
+            Serial.println(".local");
+        }
+        return true;
     }
 
     Serial.print("Link: UP | Speed: ");
@@ -112,6 +136,67 @@ bool initEthernet(void) {
 
     ethernetInitialized = true;
     Serial.println("=== RMII Ethernet Ready ===\n");
+    return true;
+}
+
+// Query mDNS for an MQTT broker.
+// Tries _secure-mqtt._tcp (port 8883 / TLS) first, falls back to _mqtt._tcp.
+// Uses a 3 s timeout per query so boot is not held up too long.
+bool discoverMQTTBroker(String& host, uint16_t& port) {
+    Serial.println("[mDNS] Querying for _secure-mqtt._tcp...");
+    int n = MDNS.queryService("secure-mqtt", "tcp");
+    if (n == 0) {
+        Serial.println("[mDNS] Not found — trying _mqtt._tcp...");
+        n = MDNS.queryService("mqtt", "tcp");
+    }
+    if (n == 0) {
+        Serial.println("[mDNS] No MQTT broker found via mDNS");
+        return false;
+    }
+    // Prefer connecting by hostname so TLS validates against DNS SAN.
+    // MDNS.queryHost() uses the mDNS stack directly (not LwIP getaddrinfo)
+    // and resolves the hostname to an IP which NetworkClientSecure can use.
+    String brokerHostname = MDNS.hostname(0);
+    IPAddress resolved = MDNS.queryHost(brokerHostname.c_str(), 3000);
+    if (resolved != IPAddress(0, 0, 0, 0)) {
+        // queryHost succeeded — use IP so TLS validates against IP SAN
+        host = resolved.toString();
+        Serial.print("[mDNS] Resolved ");
+        Serial.print(brokerHostname);
+        Serial.print(" -> ");
+    } else {
+        // Fall back to the address from the SRV record
+        host = MDNS.address(0).toString();
+        Serial.print("[mDNS] queryHost failed, using SRV address: ");
+    }
+    port = MDNS.port(0);
+    Serial.print(host);
+    Serial.print(":");
+    Serial.println(port);
+    return true;
+}
+
+// Query mDNS for an OTA firmware server (_ota._tcp).
+// Constructs a URL from the discovered IP and port.
+// Checks the TXT record "path" key; falls back to /firmware/<hostname>.bin.
+// Uses http:// unless port is 443.
+bool discoverOTAServer(String& url) {
+    Serial.println("[mDNS] Querying for _ota._tcp...");
+    int n = MDNS.queryService("ota", "tcp");
+    if (n == 0) {
+        Serial.println("[mDNS] No OTA server found via mDNS");
+        return false;
+    }
+    String ip = MDNS.address(0).toString();
+    uint16_t svcPort = MDNS.port(0);
+    String path = MDNS.txt(0, "path");
+    if (path.length() == 0) {
+        path = "/firmware/" + getHostname() + ".bin";
+    }
+    String scheme = (svcPort == 443) ? "https" : "http";
+    url = scheme + "://" + ip + ":" + String(svcPort) + path;
+    Serial.print("[mDNS] Discovered OTA server: ");
+    Serial.println(url);
     return true;
 }
 
@@ -348,6 +433,9 @@ bool initNetwork(WiFiManager& wifiMgr) {
 #endif
 
     // Initialize WiFi if credentials exist
+#if WIFI_DISABLED
+    bool wifiSuccess = false;
+#else
     bool wifiSuccess = initWiFi(wifiMgr);
 
     if (!wifiSuccess && !wifiMgr.hasCredentials()) {
@@ -368,6 +456,7 @@ bool initNetwork(WiFiManager& wifiMgr) {
         }
         // If no credentials, we'll start AP mode - this is OK
     }
+#endif
 
     Serial.println("========================================");
     Serial.println("Network Summary:");
@@ -378,6 +467,9 @@ bool initNetwork(WiFiManager& wifiMgr) {
     Serial.println("Disabled");
 #endif
     Serial.print("  WiFi: ");
+#if WIFI_DISABLED
+    Serial.println("Disabled");
+#else
     if (wifiSuccess) {
         Serial.println("Connected ✓");
     } else if (!wifiMgr.hasCredentials()) {
@@ -385,9 +477,14 @@ bool initNetwork(WiFiManager& wifiMgr) {
     } else {
         Serial.println("Failed ✗");
     }
+#endif
     Serial.println("========================================\n");
 
+#if WIFI_DISABLED
+    return ethSuccess;
+#else
     return ethSuccess || wifiSuccess || !wifiMgr.hasCredentials();
+#endif
 }
 
 // Check network status periodically
