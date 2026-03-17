@@ -45,7 +45,7 @@ void setup() {
   delay(2000);
 
   Serial.println("\n\n========================================");
-  Serial.println("ESP32-S3 MQTT/TLS with WiFi Provisioning");
+  Serial.println("ESP32 MQTT/TLS with WiFi Provisioning");
   Serial.println("========================================");
   Serial.flush();
 

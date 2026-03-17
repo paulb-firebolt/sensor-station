@@ -294,12 +294,16 @@ bool MQTTManager::connectToBroker(void) {
     Serial.print("[MQTT] Client ID: ");
     Serial.println(clientId);
 
+    // TLS mutual auth (client cert) is always active via secureClient.
+    // Username/password is optional on top — Mosquitto uses the cert CN as identity
+    // when use_identity_as_username is set, so credentials are rarely needed.
     bool result;
-    if (username.length() > 0 && password.length() > 0) {
-        Serial.println("[MQTT] Connecting with username/password authentication");
-        result = mqttClient.connect(clientId.c_str(), username.c_str(), password.c_str());
+    if (username.length() > 0) {
+        Serial.println("[MQTT] Connecting (mTLS + username)");
+        const char* pass = password.length() > 0 ? password.c_str() : nullptr;
+        result = mqttClient.connect(clientId.c_str(), username.c_str(), pass);
     } else {
-        Serial.println("[MQTT] Connecting with certificate-only authentication");
+        Serial.println("[MQTT] Connecting (mTLS, certificate identity)");
         result = mqttClient.connect(clientId.c_str());
     }
 

@@ -319,7 +319,7 @@ bool initWiFi(WiFiManager& wifiMgr) {
 // Initialize network (Ethernet + WiFi)
 bool initNetwork(WiFiManager& wifiMgr) {
     Serial.println("\n========================================");
-    Serial.println("ESP32-S3 Dual Network Stack Initialization");
+    Serial.println("ESP32 Dual Network Stack Initialization");
     Serial.println("========================================\n");
 
     // Store WiFiManager reference
