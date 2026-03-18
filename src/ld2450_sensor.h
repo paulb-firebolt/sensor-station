@@ -84,7 +84,7 @@ public:
     LD2450Sensor(HardwareSerial& serial, MQTTManager& mqtt)
         : _serial(serial), _mqtt(&mqtt),
           _bytesSeen(0), _lastByteAt(0), _hasFrame(false), _lastFrameAt(0),
-          _lastReport(0), _batchCount(0), _lastBatchPublish(0),
+          _framesSeen(0), _lastReport(0), _batchCount(0), _lastBatchPublish(0),
           _lastTargetsValid(false) {
         for (auto& t : _lastTargets)  t = {false, 0, 0, 0, 0};
         for (auto& t : _dedupTargets) t = {false, 0, 0, 0, 0};
@@ -108,6 +108,31 @@ public:
         }
         if (count > 0) {
             _parseBuffer(buf, count);
+        }
+
+        // Periodic diagnostic — log bytes/frame activity every 5 seconds
+        {
+            static unsigned long _lastDiag = 0;
+            static uint32_t _lastByteCount = 0;
+            static uint32_t _lastFrameCount = 0;
+            unsigned long now = millis();
+            if (now - _lastDiag >= 5000) {
+                uint32_t newBytes  = _bytesSeen   - _lastByteCount;
+                uint32_t newFrames = _framesSeen  - _lastFrameCount;
+                if (newBytes == 0) {
+                    Serial.println("[LD2450] No data received — check wiring (TX→G19, RX→G20) and 5V power");
+                } else if (newFrames == 0) {
+                    Serial.printf("[LD2450] %lu bytes but 0 frames — possible sync issue\n", newBytes);
+                } else {
+                    int activeCount = 0;
+                    for (int i = 0; i < 3; i++) if (_lastTargets[i].active) activeCount++;
+                    Serial.printf("[LD2450] %lu bytes, %lu frames, targets=%d, batch=%zu\n",
+                                  newBytes, newFrames, activeCount, _batchCount);
+                }
+                _lastByteCount  = _bytesSeen;
+                _lastFrameCount = _framesSeen;
+                _lastDiag = now;
+            }
         }
 
         // After parsing, handle batching and MQTT publishing
@@ -169,6 +194,7 @@ private:
     unsigned long _lastByteAt;
     bool          _hasFrame;
     unsigned long _lastFrameAt;
+    uint32_t      _framesSeen;
     Target        _lastTargets[3];
 
     unsigned long _lastReport;
@@ -208,6 +234,7 @@ private:
 
             _hasFrame    = true;
             _lastFrameAt = millis();
+            _framesSeen++;
             i += LD2450_FRAME_SIZE - 1;
         }
     }

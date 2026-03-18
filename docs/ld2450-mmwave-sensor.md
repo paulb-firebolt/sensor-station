@@ -17,12 +17,16 @@ as `thermal_detector.h`). It is enabled via the `ENABLE_LD2450` build flag, defa
 The sensor connects to the **Hat2-Bus** (2.54mm 16P) connector on the Unit PoE P4.
 The connector uses G-designations that map directly to ESP32-P4 GPIO numbers.
 
-| LD2450 Pin | Hat2-Bus label | ESP32-P4 GPIO | Notes                    |
-| ---------- | -------------- | ------------- | ------------------------ |
-| VCC        | 5V             | —             | SYS_5V (5 V) rail        |
-| GND        | GND            | —             | Ground                   |
-| TX         | G19            | GPIO 19       | Sensor output → UART1 RX |
-| RX         | G20            | GPIO 20       | UART1 TX → sensor input  |
+| LD2450 Pin | Hat2-Bus label | ESP32-P4 GPIO | Notes                         |
+| ---------- | -------------- | ------------- | ----------------------------- |
+| VCC        | 5V             | —             | SYS_5V (5 V) rail             |
+| GND        | GND            | —             | Ground                        |
+| **TX**     | **G19**        | GPIO 19       | Sensor TX → **ESP RX** (G19)  |
+| **RX**     | **G20**        | GPIO 20       | Sensor RX ← **ESP TX** (G20)  |
+
+> **Common mistake:** TX and RX must cross over — the sensor's TX goes to the ESP's RX pin
+> (G19) and the sensor's RX receives from the ESP's TX pin (G20). Swapping them results
+> in bytes arriving but no frames parsed.
 
 Pin assignments confirmed from board silkscreen (G-labels) and the M5Stack Unit PoE P4
 demo project (`main/app_gpio/user_gpio.h`).
