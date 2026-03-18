@@ -12,6 +12,7 @@
 #include "mqtt_manager.h"
 #include "ota_manager.h"
 #include "thermal_detector.h"
+#include "ld2450_sensor.h"
 #include "performance_metrics.h"
 
 // GPIO pin for factory reset button.
@@ -40,6 +41,16 @@ OTAManager otaManager;
 
 #if ENABLE_THERMAL_DETECTOR
 ThermalDetector thermalDetector(wifiManager, mqttManager);
+#endif
+
+// LD2450 mmWave radar sensor enable flag.
+// Can be overridden from platformio.ini build_flags: -DENABLE_LD2450=1
+#ifndef ENABLE_LD2450
+#define ENABLE_LD2450 0  // Default off until sensor is connected
+#endif
+
+#if ENABLE_LD2450
+LD2450Sensor ld2450(Serial1, mqttManager);
 #endif
 
 #if defined(ARDUINO_M5TAB5)
@@ -324,6 +335,11 @@ void setup() {
     thermalDetector.begin();
     #endif
 
+    // Initialize LD2450 mmWave sensor
+    #if ENABLE_LD2450
+    ld2450.begin();
+    #endif
+
     // Initialize performance metrics
     perfMetrics.begin();
 
@@ -412,6 +428,11 @@ void loop() {
         // Update thermal detector (reads SPI, detects, publishes)
         #if ENABLE_THERMAL_DETECTOR
         thermalDetector.update();
+        #endif
+
+        // Update LD2450 mmWave sensor (reads UART, parses frames, publishes)
+        #if ENABLE_LD2450
+        ld2450.update();
         #endif
 
         // Publish status data periodically if MQTT is connected
