@@ -57,7 +57,6 @@ public:
 
     // Publishing
     bool publish(const String& subtopic, const String& payload);
-    bool publishPresence(const JsonDocument& data);
 
     // Message callback
     void setMessageCallback(void (*callback)(char*, uint8_t*, unsigned int));

@@ -94,6 +94,16 @@ bool initEthernet(void) {
         return false;
     }
 
+    // Use the real hardware MAC (not the chip-ID-derived synthetic one) so
+    // that hostname and getMACAddress() match what DHCP and the network see.
+    ETH.macAddress(mac);
+    hostname = generateHostname();
+    Serial.print("Ethernet MAC: ");
+    Serial.println(getMACAddress());
+    Serial.print("Hostname (from ETH MAC): ");
+    Serial.print(hostname);
+    Serial.println(".local");
+
     // Wait for DHCP / link at boot (non-fatal if cable not present yet)
     Serial.print("Waiting for DHCP");
     unsigned long timeout = millis() + DHCP_TIMEOUT;
