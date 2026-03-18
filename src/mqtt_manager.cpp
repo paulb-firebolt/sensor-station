@@ -295,16 +295,6 @@ bool MQTTManager::publish(const String& subtopic, const String& payload) {
     return result;
 }
 
-bool MQTTManager::publishPresence(const JsonDocument& data) {
-    if (!isConnected()) {
-        return false;
-    }
-
-    String payload;
-    serializeJson(data, payload);
-
-    return publish("presence", payload);
-}
 
 void MQTTManager::setMessageCallback(void (*callback)(char*, uint8_t*, unsigned int)) {
     mqttClient.setCallback(callback);

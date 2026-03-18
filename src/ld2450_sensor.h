@@ -83,7 +83,7 @@ public:
 
     LD2450Sensor(HardwareSerial& serial, MQTTManager& mqtt)
         : _serial(serial), _mqtt(&mqtt),
-          _bytesSeen(0), _lastByteAt(0), _hasFrame(false), _lastFrameAt(0),
+          _bytesSeen(0), _lastByteAt(0), _hasFrame(false),
           _framesSeen(0), _lastReport(0), _batchCount(0), _lastBatchPublish(0),
           _lastTargetsValid(false) {
         for (auto& t : _lastTargets)  t = {false, 0, 0, 0, 0};
@@ -193,7 +193,6 @@ private:
     uint32_t      _bytesSeen;
     unsigned long _lastByteAt;
     bool          _hasFrame;
-    unsigned long _lastFrameAt;
     uint32_t      _framesSeen;
     Target        _lastTargets[3];
 
@@ -232,8 +231,7 @@ private:
                 _lastTargets[t].resolution_mm = rawRes;
             }
 
-            _hasFrame    = true;
-            _lastFrameAt = millis();
+            _hasFrame = true;
             _framesSeen++;
             i += LD2450_FRAME_SIZE - 1;
         }

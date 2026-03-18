@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.9"
+#define FIRMWARE_VERSION "0.0.10"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
