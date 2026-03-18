@@ -26,12 +26,12 @@
 // ============================================================================
 
 #if defined(ARDUINO_M5TAB5)
-// M5Stack Unit PoE P4 — GPIO 19/20 are M-Bus positions 6/7 (no conflicts)
+// M5Stack Unit PoE P4 — Hat2-Bus G19/G20 (no conflicts with LED, console, factory reset)
 #ifndef LD2450_RX_PIN
-#define LD2450_RX_PIN 19
+#define LD2450_RX_PIN 19  // G19 ← LD2450 TX
 #endif
 #ifndef LD2450_TX_PIN
-#define LD2450_TX_PIN 20
+#define LD2450_TX_PIN 20  // G20 → LD2450 RX
 #endif
 #else
 // ESP32-S3 — placeholder; adjust for your wiring

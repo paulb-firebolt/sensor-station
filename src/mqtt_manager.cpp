@@ -57,7 +57,7 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
 
     // Setup MQTT client
     mqttClient.setServer(broker.c_str(), port);
-    mqttClient.setBufferSize(1024);  // Increase buffer for larger messages
+    mqttClient.setBufferSize(8192);  // LD2450 batch (up to 20 frames × 3 targets) can reach ~4500 bytes
 
     Serial.println("[MQTT] Initialization complete (WiFi MQTTS only)");
 }
@@ -288,7 +288,8 @@ bool MQTTManager::publish(const String& subtopic, const String& payload) {
         lastPublishTime = millis();
     } else {
         Serial.print("[MQTT] Failed to publish to ");
-        Serial.println(fullTopic);
+        Serial.print(fullTopic);
+        Serial.printf(" (%u bytes)\n", payload.length());
     }
 
     return result;
