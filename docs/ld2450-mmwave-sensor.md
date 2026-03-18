@@ -10,6 +10,8 @@ The driver is implemented in `src/ld2450_sensor.h` (header-only, following the s
 as `thermal_detector.h`). It is enabled via the `ENABLE_LD2450` build flag, defaulting to 0
 (off) so the firmware builds and runs normally on devices without the sensor wired.
 
+![M5 with LD2450 Sensor](images/m5-ld2450.png)
+
 ## Hardware — M5Stack Unit PoE P4
 
 ### Wiring
