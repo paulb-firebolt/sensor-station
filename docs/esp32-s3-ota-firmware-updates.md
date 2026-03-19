@@ -1,3 +1,10 @@
+---
+title: ESP32 OTA Firmware Update System
+created: 2026-03-17T19:09:00Z
+updated: 2026-03-17T19:09:00Z
+---
+
+<!-- trunk-ignore(markdownlint/MD025) -->
 # ESP32 OTA Firmware Update System
 
 **Project:** Thermal Occupancy Counter with Ethernet + WiFi

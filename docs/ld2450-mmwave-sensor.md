@@ -1,3 +1,10 @@
+---
+title: HK-LD2450 mmWave Radar Sensor
+created: 2026-03-18T11:25:00Z
+updated: 2026-03-18T13:07:00Z
+---
+
+<!-- trunk-ignore(markdownlint/MD025) -->
 # HK-LD2450 mmWave Radar Sensor
 
 ## Overview

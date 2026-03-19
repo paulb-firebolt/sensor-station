@@ -1,3 +1,10 @@
+---
+title: Sensor MQTT People Counter Firmware
+created: 2026-03-16T15:48:00Z
+updated: 2026-03-19T00:00:00Z
+---
+
+<!-- trunk-ignore(markdownlint/MD025) -->
 # Sensor MQTT People Counter Firmware
 
 This documentation site explains what this project is trying to do, which hardware paths it currently supports, and where the detailed implementation notes fit.
@@ -21,6 +28,10 @@ The platform still needs the same field workflow regardless of the sensing metho
 - OTA update support
 
 The emphasis is not just on getting packets onto the wire. The project is trying to make deployment and maintenance practical when a device is installed remotely and may not have a screen, keyboard, or direct serial access.
+
+The longer-term direction is a **multi-node sensor hub**: a CC1312R sub-1GHz RF
+coordinator on the Hat2-Bus relays readings from remote sensor nodes to the ESP32-P4,
+which publishes them over MQTT. See [CC1312R RF Coordinator](cc1312r-rf-coordinator.md).
 
 ## Current hardware directions
 

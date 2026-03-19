@@ -1,3 +1,10 @@
+---
+title: M5Stack Unit PoE P4 — WiFi
+created: 2026-03-16T15:48:00Z
+updated: 2026-03-17T19:09:00Z
+---
+
+<!-- trunk-ignore(markdownlint/MD025) -->
 # M5Stack Unit PoE P4 — WiFi
 
 ## No WiFi Hardware

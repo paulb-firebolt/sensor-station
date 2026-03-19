@@ -1,3 +1,10 @@
+---
+title: Thermal Occupancy Counter - Hardware Configuration
+created: 2025-12-16T14:34:00Z
+updated: 2026-03-17T19:09:00Z
+---
+
+<!-- trunk-ignore(markdownlint/MD025) -->
 # Thermal Occupancy Counter - Hardware Configuration
 
 ## Overview
