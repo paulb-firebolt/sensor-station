@@ -4,8 +4,7 @@ created: 2026-03-19T00:00:00Z
 updated: 2026-03-19T00:00:00Z
 ---
 
-<!-- trunk-ignore(markdownlint/MD025) -->
-# CC1312R Sub-1GHz RF Coordinator
+# CC1312R Sub-1GHz RF Coordinator <!-- trunk-ignore(markdownlint/MD025) -->
 
 ## Overview
 
@@ -14,35 +13,39 @@ sub-1GHz RF coordinator attached to the M5Stack Unit PoE P4 (ESP32-P4). It cover
 why this hardware combination was chosen, how the two devices are wired, what
 protocol runs between them, and how the ESP32-P4 driver (`cc1312_manager.h`) works.
 
-The goal is to extend the sensor hub from a single-device station (LD2450 on the
-Hat2-Bus) toward a multi-node topology where remote sensor nodes transmit readings
-over 868/915 MHz RF, and the CC1312R coordinator relays them to the ESP32-P4, which
-publishes to MQTT over Ethernet.
+The goal is to extend the sensor hub from a single-device station toward a multi-node
+topology where remote CC1312R sensor nodes transmit readings over 868/915 MHz RF. A
+coordinator CC1312R (on a LaunchPad XL) receives those RF packets and relays them over
+UART to the ESP32-P4, which publishes to MQTT over Ethernet.
+
+Remote nodes can carry any sensor — PIR, door contact, LD2450 mmWave radar, time-of-flight
+ranger, temperature probe, or any future type. The protocol is designed to accommodate
+all of these without requiring changes to the framing or the ESP32-P4 driver.
 
 ## Network Topology
 
 ```text
 [Remote node A]        [Remote node B]       [Remote node C]
- CC1312R + sensor       CC1312R + sensor      CC1312R + sensor
+CC1312R + PIR          CC1312R + LD2450      CC1312R + ToF + temp
         |                      |                     |
-        +----------868/915 MHz RF-------------------+
+        +---------------868/915 MHz RF---------------+
                                |
-                    [Unit PoE P4]
-                    CC1312R LaunchPad XL (coordinator)
+                         [Unit PoE P4]
+               CC1312R LaunchPad XL (coordinator)
                                |
-                          UART2 / Serial2
-                          GPIO 22 (RX) / GPIO 23 (TX)
+                         UART2 / Serial2
+                  GPIO 22 (RX) / GPIO 23 (TX)
                                |
                          ESP32-P4 host
                                |
-                       RMII Ethernet
+                         RMII Ethernet
                                |
-                        MQTT broker
+                          MQTT broker
 ```
 
-Each remote node is a CC1312R with an attached sensor (temperature, door contact, PIR,
-humidity, etc.). The coordinator CC1312R on the LaunchPad XL receives RF packets from
-all nodes, decodes them, and forwards structured frames over UART to the ESP32-P4.
+Each remote node is a CC1312R with one or more attached sensors. The coordinator
+CC1312R on the LaunchPad XL receives RF packets from all nodes, decodes them, and
+forwards structured binary frames over UART to the ESP32-P4.
 
 ## Interface Choice: Why UART
 
@@ -67,8 +70,6 @@ Key reasons UART was chosen:
   (Option B below) requires no hardware changes.
 - **No level shifters.** The CC1312R LaunchPad XL is 3.3 V; the ESP32-P4 GPIO pins
   are 3.3 V. Direct connection is safe.
-- **Minimal CC1312R firmware.** A simple UART output loop is much faster to get
-  working than an SPI slave implementation.
 
 ## Hardware — Wiring
 
@@ -82,10 +83,8 @@ The CC1312R LaunchPad XL connects to the Unit PoE P4 via the **Hat2-Bus** (2.54m
 | Power              | 3V3            | —             | 3.3 V for CC1312R LaunchPad logic rail |
 | Ground             | GND            | —             | Common ground required                 |
 
-> **TX/RX cross-over:** The CC1312R transmit (TX) wire goes to G22, which is the
-> ESP32-P4 receive (RX) pin. The ESP32-P4 transmit (TX) goes to G23, which feeds the
-> CC1312R receive pin. This is the standard serial cross-over — same convention as the
-> LD2450 on G19/G20.
+> **TX/RX cross-over:** The CC1312R transmit wire goes to G22 (ESP RX). The ESP transmit
+> goes to G23 (CC1312R RX). Same convention as the LD2450 on G19/G20.
 
 ### Conflict Check
 
@@ -109,46 +108,67 @@ G22/G23 are clear of all existing peripherals.
 The CC1312R LaunchPad XL (LAUNCHXL-CC1312R1) exposes two UART paths:
 
 - **Back-channel UART** — via the XDS110 USB debug probe. Good for development but
-  not for a permanent wired connection (the USB connector is the interface, not pins).
+  not suitable for a permanent wired connection.
 - **Header-exposed UART** — UART0 is on LaunchPad header pins (DIO2 = RX, DIO3 = TX
   by default in TI SDK examples). Use these for the permanent Hat2-Bus connection.
 
-Check the specific CC1312R firmware's `Board.h` or pin-mux configuration to confirm
-which DIO pins are mapped to the UART you are using.
+Check the CC1312R firmware's `Board.h` or pin-mux configuration to confirm which
+DIO pins are mapped to the active UART.
 
-## CC1312R Firmware — Two Options
+## CC1312R Firmware Options
 
 ### Option A — Custom Protocol (Recommended for PoC)
 
-The CC1312R runs EasyLink (TI SimpleLink sub-1GHz RF driver) or a bare proprietary
-868/915 MHz application. Remote nodes transmit sensor readings as raw RF packets.
-The coordinator receives each packet and forwards it over UART using the frame format
+The CC1312R runs EasyLink or a bare proprietary 868/915 MHz application. Remote nodes
+transmit sensor readings as RF packets. The coordinator receives each packet, identifies
+the sensor type, and forwards a structured binary frame over UART using the protocol
 described below.
 
-TI's SDK includes ready-to-build EasyLink examples (`rfEasyLinkRx`, `rfPacketRx`)
-that already print received packet data over UART. The modification needed is:
+TI's SDK includes ready-to-build EasyLink examples (`rfEasyLinkRx`, `rfPacketRx`) that
+already receive packets and can print data to UART. The modifications required are:
 
-1. Replace the `printf` with a binary frame write in the format below.
-2. Include node ID and RSSI from the EasyLink `rxPacket` struct.
+1. Replace the debug `printf` with a binary frame write in the format below.
+2. Populate the node address from the received packet source address field.
+3. Populate `rssi` from `rxPacket.rssi`.
+4. Include a sensor class byte that identifies what sensor the remote node carries.
 
 **Pros:** Full control, fastest to build, no TI host driver needed on the ESP32-P4.
 
 ### Option B — TI Network Processor Interface (NPI)
 
-Flash the CC1312R with a TI CoP (Coprocessor) image such as the EasyLink NP or
-Sub-1GHz Network Processor. The ESP32-P4 host then sends MT-protocol commands over
-UART to control the RF stack.
+Flash the CC1312R with a TI CoP (Coprocessor) image. The ESP32-P4 host sends
+MT-protocol commands over UART to control the RF stack.
 
-**Pros:** Better long-term maintainability if TI stack features (addressing, security,
-network management) are needed.
-
-**Cons:** Requires implementing or porting TI's MT-protocol host driver. Significantly
-more work for a PoC.
+**Cons:** Requires implementing TI's MT-protocol host driver — significantly more work
+for a PoC.
 
 **For a PoC, use Option A.** Option B remains a viable upgrade path with no hardware
 changes required.
 
-## UART Protocol (Option A Custom Framing)
+## Prior Art — Legacy RAIS2.1 Protocol
+
+A previous implementation (`retail-aware-rais2.1-cc1312-fw`) used a text-based
+CSV protocol at 57600 baud, 8E1:
+
+```text
+telemetry=12341234,-67,4,0\n
+```
+
+That design had no CRC (relying only on UART parity), mixed text and binary concerns,
+and embedded a complex node-table management state machine in the coordinator firmware.
+
+The protocol defined here departs from that approach:
+
+- Binary framing with CRC8 — deterministic error detection, more compact than CSV
+- 115200 8N1 — standard, compatible with any UART tool
+- No node table management — the coordinator is a transparent relay; node discovery
+  is handled by the MQTT backend
+- Sensor class in the payload — extensible without protocol revision
+
+The sensor data semantics (PIR trigger single/dual, door state, battery voltage,
+temperature in centi-degrees, tx_count) are carried forward from the legacy data model.
+
+## UART Protocol
 
 | Parameter | Value           |
 | --------- | --------------- |
@@ -159,60 +179,165 @@ changes required.
 ### Frame Structure
 
 ```text
-[0xAA] [LEN] [TYPE] [PAYLOAD × LEN bytes] [CRC8]
+[0xAA] [LEN] [MSG_TYPE] [NODE_ADDR × 4] [RSSI] [...payload...] [CRC8]
 ```
 
-| Byte      | Field   | Description                                           |
-| --------- | ------- | ----------------------------------------------------- |
-| 0         | Start   | Always `0xAA`                                         |
-| 1         | LEN     | Payload length in bytes (excludes start/LEN/TYPE/CRC) |
-| 2         | TYPE    | Message type                                          |
-| 3…(2+LEN) | PAYLOAD | LEN bytes of message data                             |
-| 3+LEN     | CRC8    | Dallas/Maxim CRC8 over [TYPE + PAYLOAD]               |
+| Byte      | Field     | Description                                                     |
+| --------- | --------- | --------------------------------------------------------------- |
+| 0         | Start     | Always `0xAA`                                                   |
+| 1         | LEN       | Byte count of MSG_TYPE + NODE_ADDR + RSSI + payload (excl. CRC) |
+| 2         | MSG_TYPE  | Message type (see below)                                        |
+| 3–6       | NODE_ADDR | 32-bit node address, big-endian                                 |
+| 7         | RSSI      | int8, RF signal strength in dBm at the coordinator              |
+| 8…(1+LEN) | Payload   | Message-type-specific bytes (see below)                         |
+| 2+LEN     | CRC8      | Dallas/Maxim CRC8 over [MSG_TYPE + NODE_ADDR + RSSI + payload]  |
+
+NODE_ADDR uses big-endian (network byte order) matching the legacy system and TI RF
+packet headers. All other multi-byte values in payloads are little-endian.
 
 ### Message Types
 
-| TYPE | Name             | Payload length | Description                       |
-| ---- | ---------------- | -------------- | --------------------------------- |
-| 0x01 | Node sensor read | 5 bytes        | Reading from a remote sensor node |
+| MSG_TYPE | Name           | Payload after RSSI                      |
+| -------- | -------------- | --------------------------------------- |
+| 0x01     | NODE_STATUS    | battery_mv(2) temp_cdeg(2) tx_count(4)  |
+| 0x02     | SENSOR_READING | sensor_class(1) + sensor-specific bytes |
+| 0x03     | SENSOR_EVENT   | sensor_class(1) + sensor-specific bytes |
 
-### TYPE 0x01 — Node Sensor Reading (5 bytes)
+NODE_STATUS is a periodic heartbeat sent by every node regardless of sensor type.
+SENSOR_READING carries a periodic measured value. SENSOR_EVENT carries a triggered
+occurrence (motion detected, door opened, presence changed).
 
-| Byte | Field       | Type     | Description                        |
-| ---- | ----------- | -------- | ---------------------------------- |
-| 0    | node_id     | uint8    | Remote node identifier (1–255)     |
-| 1    | sensor_type | uint8    | Sensor type code (see table below) |
-| 2–3  | value       | int16 LE | Sensor value, scaled (see below)   |
-| 4    | rssi        | int8     | RF signal strength in dBm          |
+### NODE_STATUS Payload (8 bytes after RSSI)
 
-### Sensor Type Codes
+| Bytes | Field      | Type   | Description                          |
+| ----- | ---------- | ------ | ------------------------------------ |
+| 0–1   | battery_mv | uint16 | Battery voltage in millivolts        |
+| 2–3   | temp_cdeg  | int16  | Node MCU temperature, centi-degrees  |
+| 4–7   | tx_count   | uint32 | Total packets transmitted since boot |
 
-| Code | Name        | Value scaling        | Example             |
-| ---- | ----------- | -------------------- | ------------------- |
-| 0x01 | temperature | °C × 10              | 215 → 21.5 °C       |
-| 0x02 | door        | 0 = closed, 1 = open | —                   |
-| 0x03 | pir         | 0 = idle, 1 = motion | —                   |
-| 0x04 | humidity    | %RH × 10             | 652 → 65.2 %RH      |
-| 0xFF | raw         | raw int16            | application-defined |
+### Sensor Class Registry
+
+The first byte of a SENSOR_READING or SENSOR_EVENT payload identifies the sensor.
+
+| Sensor class   | Name        | ID   |
+| -------------- | ----------- | ---- |
+| PIR            | pir         | 0x01 |
+| LD2450         | ld2450      | 0x02 |
+| Time-of-flight | tof         | 0x03 |
+| Door / state   | door        | 0x04 |
+| Temperature    | temperature | 0x05 |
+| Raw / other    | raw         | 0xFF |
+
+### Sensor-Specific Payloads
+
+#### PIR (0x01)
+
+Only produces events — no periodic reading.
+
+| Bytes | Field        | Type  | Description                    |
+| ----- | ------------ | ----- | ------------------------------ |
+| 0     | trigger_type | uint8 | 0 = single detection, 1 = dual |
+
+#### LD2450 (0x02)
+
+Only produces readings — position data is periodic, not event-driven.
+
+| Bytes | Field     | Type    | Description                           |
+| ----- | --------- | ------- | ------------------------------------- |
+| 0     | n_targets | uint8   | Number of targets (0–3)               |
+| 1–6   | Target 0  | 3×int16 | x_mm, y_mm, speed_cms (little-endian) |
+| 7–12  | Target 1  | 3×int16 | (if n_targets ≥ 2)                    |
+| 13–18 | Target 2  | 3×int16 | (if n_targets = 3)                    |
+
+Values are standard two's complement int16 (no offset encoding — the coordinator
+firmware converts before transmitting).
+
+#### Time-of-Flight (0x03)
+
+Produces both readings (periodic distance) and events (presence change).
+
+SENSOR_READING payload:
+
+| Bytes | Field       | Type   | Description                      |
+| ----- | ----------- | ------ | -------------------------------- |
+| 0–1   | distance_mm | uint16 | Measured distance in millimetres |
+| 2     | quality     | uint8  | Confidence 0–100                 |
+
+SENSOR_EVENT payload:
+
+| Bytes | Field    | Type  | Description                  |
+| ----- | -------- | ----- | ---------------------------- |
+| 0     | presence | uint8 | 0 = zone clear, 1 = occupied |
+
+#### Door / State (0x04)
+
+Produces both readings (polled state) and events (state change).
+
+| Bytes | Field | Type  | Description                   |
+| ----- | ----- | ----- | ----------------------------- |
+| 0     | state | uint8 | 0 = closed/low, 1 = open/high |
+
+#### Temperature (0x05)
+
+Only produces readings.
+
+| Bytes | Field     | Type  | Description                             |
+| ----- | --------- | ----- | --------------------------------------- |
+| 0–3   | temp_cdeg | int32 | Temperature in centi-degrees (°C × 100) |
+
+#### Raw (0xFF)
+
+Arbitrary bytes. Published as a hex string in the JSON `data` field. Used for
+sensors without an assigned class ID.
 
 ### CRC8 Algorithm
 
-Dallas/Maxim CRC8 (polynomial `0x8C`, bit-reversed). The CRC is computed over
-[TYPE byte + all PAYLOAD bytes]. The start byte and LEN byte are excluded from the CRC.
+Dallas/Maxim CRC8 (polynomial `0x8C`, bit-reversed). Computed over [MSG_TYPE +
+NODE_ADDR + RSSI + payload]. The start byte and LEN byte are excluded.
 
-### Frame Example
+### Frame Examples
 
-Node 3 reporting temperature of 22.1 °C with RSSI −72 dBm:
+**PIR single-detection event from node `0x12345678`, RSSI −68 dBm:**
 
 ```text
-AA        — start
-05        — LEN = 5 (payload bytes)
-01        — TYPE = node sensor reading
-03        — node_id = 3
-01        — sensor_type = temperature
-D9 00     — value = 0x00D9 = 217 → 21.7 °C (little-endian)
-B8        — rssi = 0xB8 = −72 (signed byte)
-XX        — CRC8 over [01 03 01 D9 00 B8]
+AA           — start
+08           — LEN = 8 (1 type + 4 addr + 1 rssi + 1 sc + 1 data)
+03           — MSG_TYPE = SENSOR_EVENT
+12 34 56 78  — NODE_ADDR (big-endian)
+BC           — RSSI = −68 (0xBC as signed byte)
+01           — sensor_class = PIR
+00           — trigger_type = single
+XX           — CRC8 over [03 12 34 56 78 BC 01 00]
+```
+
+**NODE_STATUS from node `0xABCD1234`, battery 3200 mV, temp 24.50 °C, tx_count 512:**
+
+```text
+AA               — start
+0E               — LEN = 14 (1 + 4 + 1 + 8)
+01               — MSG_TYPE = NODE_STATUS
+AB CD 12 34      — NODE_ADDR
+B8               — RSSI = −72
+80 0C            — battery_mv = 0x0C80 = 3200 LE
+82 09            — temp_cdeg = 0x0982 = 2434 (24.34 °C) LE
+00 02 00 00      — tx_count = 512 LE
+XX               — CRC8
+```
+
+**LD2450 reading, 1 target at x=−782 mm, y=1713 mm, speed=−16 cm/s:**
+
+```text
+AA               — start
+0D               — LEN = 13 (1 + 4 + 1 + 1 + 1 + 6)
+02               — MSG_TYPE = SENSOR_READING
+12 34 56 78      — NODE_ADDR
+B8               — RSSI = −72
+02               — sensor_class = LD2450
+01               — n_targets = 1
+12 FD            — x_mm = −782 (0xFD12 as int16 LE = −750... use correct LE encoding)
+B1 06            — y_mm = 1713 (0x06B1 LE)
+F0 FF            — speed_cms = −16 (0xFFF0 LE)
+XX               — CRC8
 ```
 
 ## MQTT
@@ -225,57 +350,74 @@ cc1312/nodes
 
 ### Payload
 
-Readings are upserted per node+sensor pair (latest reading wins) and published as a
-JSON snapshot every 10 seconds when MQTT is connected. The `age_ms` field shows how
-long ago the reading arrived.
+All pending messages (upserted by node address + message type + sensor class) are
+published as a JSON snapshot every 10 seconds when MQTT is connected. The `age_ms`
+field shows how long ago that message was last received.
 
 ```json
 {
   "timestamp": 145230,
-  "nodes": [
+  "messages": [
     {
-      "node_id": 1,
-      "sensor": "temperature",
-      "value": 215,
-      "rssi_dbm": -68,
-      "age_ms": 2300
+      "node": "12345678",
+      "msg": "status",
+      "rssi_dbm": -67,
+      "battery_mv": 3200,
+      "temp_cdeg": 2450,
+      "tx_count": 1523,
+      "age_ms": 800
     },
     {
-      "node_id": 1,
-      "sensor": "humidity",
-      "value": 612,
-      "rssi_dbm": -68,
-      "age_ms": 2300
-    },
-    {
-      "node_id": 2,
-      "sensor": "door",
-      "value": 1,
-      "rssi_dbm": -81,
-      "age_ms": 7100
-    },
-    {
-      "node_id": 3,
+      "node": "12345678",
+      "msg": "event",
       "sensor": "pir",
-      "value": 0,
+      "rssi_dbm": -67,
+      "trigger": "single",
+      "age_ms": 400
+    },
+    {
+      "node": "ABCD1234",
+      "msg": "reading",
+      "sensor": "ld2450",
       "rssi_dbm": -72,
-      "age_ms": 1500
+      "targets": [
+        { "x_mm": -782, "y_mm": 1713, "speed_cms": -16 },
+        { "x_mm": 210, "y_mm": 2100, "speed_cms": 5 }
+      ],
+      "age_ms": 1200
+    },
+    {
+      "node": "DEAD0001",
+      "msg": "reading",
+      "sensor": "tof",
+      "rssi_dbm": -81,
+      "distance_mm": 1250,
+      "quality": 94,
+      "age_ms": 3100
+    },
+    {
+      "node": "DEAD0001",
+      "msg": "reading",
+      "sensor": "temperature",
+      "rssi_dbm": -81,
+      "temp_cdeg": 2150,
+      "age_ms": 3100
+    },
+    {
+      "node": "CAFE0002",
+      "msg": "event",
+      "sensor": "door",
+      "rssi_dbm": -75,
+      "state": "open",
+      "age_ms": 6200
     }
   ]
 }
 ```
 
-| Field       | Description                                        |
-| ----------- | -------------------------------------------------- |
-| `timestamp` | Publish time (ms since boot)                       |
-| `node_id`   | Remote node identifier                             |
-| `sensor`    | Sensor type name string                            |
-| `value`     | Scaled integer value (see sensor type table above) |
-| `rssi_dbm`  | RF signal strength in dBm at the coordinator       |
-| `age_ms`    | Milliseconds since this reading was last updated   |
-
-The pending buffer is cleared after each publish. If no readings arrive between
-publish intervals the topic is not published (nothing to report).
+The pending buffer is cleared after each publish. Entries are upserted — if the same
+node sends the same message type and sensor class multiple times between publishes, only
+the most recent reading is retained.
 
 ## ESP32-P4 Driver — `src/cc1312_manager.h`
 
@@ -283,38 +425,45 @@ The driver follows the same pattern as `ld2450_sensor.h`:
 
 - Header-only class, no `.cpp` file.
 - Constructor takes `HardwareSerial&` and `MQTTManager&`.
-- `begin()` initialises `Serial2` on the configured pins.
-- `update()` is called every loop iteration; drains UART bytes, runs the frame parser,
-  and triggers periodic MQTT publishes.
+- `begin()` initialises Serial2 on the configured pins.
+- `update()` drains UART bytes, runs the frame parser, and triggers periodic MQTT publishes.
 - `isActive()` returns true if a byte was received within the last 5 seconds.
-- `getBytesSeen()` returns total byte count (useful for diagnostics).
 
-### Frame Parser State Machine
+### Frame Parser
 
-`_parseByte()` implements a minimal state machine:
+`_parseByte()` implements a byte-at-a-time state machine:
 
-1. Wait for `0xAA` start byte — resets and enters frame mode.
-2. Receive LEN byte — validate it is ≤ `CC1312_MAX_PAYLOAD` (32); abort if not.
-3. Accumulate bytes until `1 (start) + 1 (LEN) + 1 (TYPE) + LEN + 1 (CRC)` bytes
-   are in the buffer.
-4. Compute CRC8 over `[TYPE + PAYLOAD]`; compare to received CRC. Drop frame on mismatch.
+1. Wait for `0xAA` start byte — enter frame mode.
+2. Receive LEN byte — abort if LEN > `CC1312_MAX_PAYLOAD` (64).
+3. Accumulate bytes until `start(1) + LEN(1) + payload(LEN) + CRC(1)` are buffered.
+4. Validate CRC8 over `[MSG_TYPE + NODE_ADDR + RSSI + sensor payload]`.
 5. Dispatch to `_dispatchFrame()`.
 
-### Reading Upsert Logic
+### Upsert Logic
 
-`_dispatchFrame()` searches `_pending[]` for an existing entry with the same
-`node_id` and `sensor_type`. If found, it overwrites in place (latest reading wins).
-If not found and capacity allows, it appends. This means the publish snapshot always
-contains the most recent reading per node+sensor, not a raw fifo.
+Each decoded message is stored in `_pending[]` keyed on `(node_addr, msg_type,
+sensor_class)`. If an entry with the same key already exists it is overwritten in
+place. This means the published snapshot always reflects the most recent value for
+each node/message/sensor combination.
+
+A node carrying both an LD2450 and a temperature sensor will produce two separate
+entries in `_pending[]` — one `SENSOR_READING/LD2450` and one `SENSOR_READING/TEMPERATURE`
+— both attributed to the same node address.
 
 ### Diagnostic Logging
 
-Every 5 seconds `update()` logs to Serial:
+Every 5 seconds:
 
 - **No data:** `[CC1312] No data — check wiring (CC1312 TX→G22, RX→G23) and 3.3V power`
-- **Data arriving:** `[CC1312] N bytes received, M readings pending`
+- **Data arriving:** `[CC1312] N bytes received, M messages pending`
 
-Per decoded frame: `[CC1312] Node N sensor=V (rssi=D dBm)`
+Per decoded frame (examples):
+
+```text
+[CC1312] 12345678 status bat=3200mV temp=2450 cdeg (rssi=-67)
+[CC1312] 12345678 event/pir len=1 (rssi=-67)
+[CC1312] ABCD1234 reading/ld2450 len=19 (rssi=-72)
+```
 
 ## Build Configuration
 
@@ -337,32 +486,28 @@ Pin overrides (if wiring differs from default):
 
 ### Step 1 — Prepare CC1312R Firmware
 
-Flash the CC1312R LaunchPad XL with a firmware that outputs frames in the protocol
-above. The fastest starting point is TI's `rfPacketRx` example from the
-SimpleLink CC13xx SDK, modified to:
+Flash the LaunchPad XL with coordinator firmware that:
 
-1. Replace the debug `printf` with a binary frame write using the Type 0x01 format.
-2. Populate `node_id` from the received packet source address.
-3. Populate `rssi` from `rxPacket.rssi`.
+1. Receives RF packets from remote nodes via EasyLink.
+2. Identifies the node address and sensor class of each packet.
+3. Writes binary frames in the format above to UART0 (DIO2/DIO3 header pins).
 
-Alternatively, use the back-channel UART temporarily to verify raw bytes before
-switching to header pins.
+Starting point: TI's `rfEasyLinkRx` example, modified to replace the debug `printf`
+with a binary frame write. Use the back-channel UART first to verify frame output
+before switching to the header pins.
 
-### Step 2 — Verify Raw UART Before Enabling the Driver
+### Step 2 — Verify Raw UART
 
-Before enabling `ENABLE_CC1312`, configure a temporary loopback test:
+Before enabling the driver, add a temporary raw hex dump to `setup()`:
 
 ```cpp
-// In setup(), temporary only:
 Serial2.begin(115200, SERIAL_8N1, 22, 23);
 ```
 
-Then in loop, print raw hex. Confirm frames arrive and CRC bytes are correct before
-proceeding.
+Print bytes as hex in `loop()` and confirm frames arrive with correct CRC before
+enabling the full driver.
 
 ### Step 3 — Enable the Driver
-
-In `platformio.ini` for the target environment:
 
 ```ini
 -DENABLE_CC1312=1
@@ -381,14 +526,6 @@ Expected boot log:
 [CC1312] Initialized on UART2 RX=22 TX=23 @ 115200
 ```
 
-Expected runtime log (when nodes are transmitting):
-
-```text
-[CC1312] Node 1 temperature=215 (rssi=-68 dBm)
-[CC1312] Node 2 door=1 (rssi=-81 dBm)
-[CC1312] Published 3 node readings (187 bytes)
-```
-
 ### Step 4 — Verify MQTT Output
 
 ```bash
@@ -402,15 +539,14 @@ mosquitto_sub \
 
 ## Relationship to Other Sensors
 
-All three sensors share the Hat2-Bus without conflict:
+All sensors share the Hat2-Bus without conflict:
 
-| Sensor      | UART  | Pins     | Power |
-| ----------- | ----- | -------- | ----- |
-| LD2450      | UART1 | G19, G20 | 5V    |
-| CC1312R     | UART2 | G22, G23 | 3.3V  |
-| Thermal SPI | —     | G18–G21  | —     |
+| Sensor      | Interface | Pins     | Power |
+| ----------- | --------- | -------- | ----- |
+| LD2450      | UART1     | G19, G20 | 5V    |
+| CC1312R     | UART2     | G22, G23 | 3.3V  |
+| Thermal SPI | SPI       | G18–G21  | —     |
 
-The thermal SPI option uses G18–G21. If both the CC1312R (G22/G23) and a thermal
-detector (G18–G21) are wired simultaneously, there is no overlap. The LD2450 on
-G19/G20 does overlap with the thermal SPI suggestion (G19/G20 shared) — those two
-cannot be used at the same time.
+The thermal SPI option (G18–G21) and CC1312R (G22/G23) can coexist. The LD2450
+(G19/G20) conflicts with the thermal SPI suggestion — those two cannot be used
+simultaneously.

@@ -13,6 +13,7 @@
 #include "ota_manager.h"
 #include "thermal_detector.h"
 #include "ld2450_sensor.h"
+#include "cc1312_manager.h"
 #include "performance_metrics.h"
 
 // GPIO pin for factory reset button.
@@ -51,6 +52,16 @@ ThermalDetector thermalDetector(wifiManager, mqttManager);
 
 #if ENABLE_LD2450
 LD2450Sensor ld2450(Serial1, mqttManager);
+#endif
+
+// CC1312R sub-1GHz RF coordinator enable flag.
+// Can be overridden from platformio.ini build_flags: -DENABLE_CC1312=1
+#ifndef ENABLE_CC1312
+#define ENABLE_CC1312 0  // Default off until CC1312R LaunchPad XL is wired
+#endif
+
+#if ENABLE_CC1312
+CC1312Manager cc1312(Serial2, mqttManager);
 #endif
 
 #if defined(ARDUINO_M5TAB5)
@@ -340,6 +351,11 @@ void setup() {
     ld2450.begin();
     #endif
 
+    // Initialize CC1312R sub-1GHz RF coordinator
+    #if ENABLE_CC1312
+    cc1312.begin();
+    #endif
+
     // Initialize performance metrics
     perfMetrics.begin();
 
@@ -433,6 +449,11 @@ void loop() {
         // Update LD2450 mmWave sensor (reads UART, parses frames, publishes)
         #if ENABLE_LD2450
         ld2450.update();
+        #endif
+
+        // Update CC1312R RF coordinator (reads UART, parses frames, publishes)
+        #if ENABLE_CC1312
+        cc1312.update();
         #endif
 
         // Publish status data periodically if MQTT is connected
