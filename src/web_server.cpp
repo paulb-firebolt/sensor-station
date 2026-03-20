@@ -3,6 +3,9 @@
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
     : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
+#if ENABLE_CC1312
+      cc1312Manager(nullptr),
+#endif
       webServer(WIFI_WEB_SERVER_PORT),
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
       ethServer(nullptr),
@@ -22,6 +25,13 @@ void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* 
     mqttManager = mqttMgr;
     Serial.println("[Web] MQTT managers set");
 }
+
+#if ENABLE_CC1312
+void DeviceWebServer::setCC1312Manager(CC1312Manager* mgr) {
+    cc1312Manager = mgr;
+    Serial.println("[Web] CC1312 manager set");
+}
+#endif
 
 // Start web server and DNS (if in AP mode)
 void DeviceWebServer::begin(void) {
@@ -52,6 +62,11 @@ void DeviceWebServer::begin(void) {
         webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
         webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
         webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
+#if ENABLE_CC1312
+        webServer.on("/cc1312", HTTP_GET, [this]() { handleCC1312Page(); });
+        webServer.on("/api/cc1312/status", HTTP_GET, [this]() { handleCC1312Status(); });
+        webServer.on("/api/cc1312/action", HTTP_POST, [this]() { handleCC1312Action(); });
+#endif
         webServer.onNotFound([this]() { handleNotFound(); });
 
         webServer.begin();
@@ -546,6 +561,81 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             serializeJson(doc, jsonResponse);
             sendEthernetResponse(client, 200, "application/json", jsonResponse);
         }
+#if ENABLE_CC1312
+    } else if (requestLine.startsWith("GET /cc1312")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "text/plain", "CC1312 not enabled");
+        } else {
+            sendEthernetResponse(client, 200, "text/html", generateCC1312Page());
+        }
+    } else if (requestLine.startsWith("GET /api/cc1312/status")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        } else {
+            JsonDocument doc;
+            doc["discovery_mode"] = cc1312Manager->isDiscoveryMode();
+            doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
+            JsonArray enrolled = doc["enrolled"].to<JsonArray>();
+            char addrBuf[9];
+            for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
+                snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->enrolledAddr(i));
+                enrolled.add(addrBuf);
+            }
+            JsonArray seen = doc["seen"].to<JsonArray>();
+            for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
+                JsonObject n = seen.add<JsonObject>();
+                snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->seenAddr(i));
+                n["addr"] = addrBuf;
+                n["rssi_dbm"] = cc1312Manager->seenRssi(i);
+            }
+            String json;
+            serializeJson(doc, json);
+            sendEthernetResponse(client, 200, "application/json", json);
+        }
+    } else if (requestLine.startsWith("POST /api/cc1312/action")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        } else {
+            int bodyStart = request.indexOf("\r\n\r\n") + 4;
+            String body = request.substring(bodyStart);
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, body);
+            if (err) {
+                sendEthernetResponse(client, 400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            } else {
+                String action = doc["action"] | "";
+                cc1312Manager->handleCommand(action, doc);
+                sendEthernetResponse(client, 200, "application/json", "{\"ok\":true}");
+            }
+        }
+#endif
     } else {
         // 404 Not Found
         Serial.println("[Eth] 404 Not Found");
@@ -2004,3 +2094,287 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
 </body>
 </html>)HTML";
 }
+
+// ============================================================================
+// CC1312 Node Management
+// ============================================================================
+#if ENABLE_CC1312
+
+void DeviceWebServer::handleCC1312Page(void) {
+    if (!requireAuth()) return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "text/plain", "CC1312 not enabled");
+        return;
+    }
+    webServer.send(200, "text/html", generateCC1312Page());
+}
+
+void DeviceWebServer::handleCC1312Status(void) {
+    if (!requireAuth()) return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        return;
+    }
+    JsonDocument doc;
+    doc["discovery_mode"]    = cc1312Manager->isDiscoveryMode();
+    doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
+    JsonArray enrolled = doc["enrolled"].to<JsonArray>();
+    char addrBuf[9];
+    for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
+        snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->enrolledAddr(i));
+        enrolled.add(addrBuf);
+    }
+    JsonArray seen = doc["seen"].to<JsonArray>();
+    for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
+        JsonObject n = seen.add<JsonObject>();
+        snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->seenAddr(i));
+        n["addr"]     = addrBuf;
+        n["rssi_dbm"] = cc1312Manager->seenRssi(i);
+    }
+    String json;
+    serializeJson(doc, json);
+    webServer.send(200, "application/json", json);
+}
+
+void DeviceWebServer::handleCC1312Action(void) {
+    if (!requireAuth()) return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        return;
+    }
+    String body = webServer.arg("plain");
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body);
+    if (err) {
+        webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    String action = doc["action"] | "";
+    cc1312Manager->handleCommand(action, doc);
+    webServer.send(200, "application/json", "{\"ok\":true}");
+}
+
+String DeviceWebServer::generateCC1312Page(void) {
+    return R"HTML(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CC1312 Node Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 { font-size: 28px; margin-bottom: 5px; color: #333; }
+    .subtitle { color: #888; margin-bottom: 25px; font-size: 14px; }
+    h2 {
+      font-size: 18px;
+      margin: 0 0 15px 0;
+      color: #667eea;
+      border-bottom: 2px solid #667eea;
+      padding-bottom: 8px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .badge-green  { background: #d4edda; color: #155724; }
+    .badge-red    { background: #f8d7da; color: #721c24; }
+    .badge-blue   { background: #cce5ff; color: #004085; }
+    .badge-grey   { background: #e2e3e5; color: #383d41; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      color: #555;
+      font-weight: 600;
+      border-bottom: 2px solid #dee2e6;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #dee2e6;
+      font-family: monospace;
+    }
+    td:last-child { font-family: sans-serif; }
+    tr:last-child td { border-bottom: none; }
+    .empty { color: #aaa; font-style: italic; font-family: sans-serif; }
+    .btn {
+      display: inline-block;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-red    { background: #dc3545; color: white; }
+    .btn-green  { background: #28a745; color: white; }
+    .btn-blue   { background: #667eea; color: white; }
+    .btn-grey   { background: #6c757d; color: white; }
+    .nav { margin-bottom: 15px; }
+    .nav a { color: #667eea; text-decoration: none; font-size: 14px; }
+    .nav a:hover { text-decoration: underline; }
+    #msg { min-height: 20px; font-size: 13px; color: #28a745; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="nav"><a href="/">&#8592; Status</a></div>
+    <h1>CC1312 Node Manager</h1>
+    <p class="subtitle">Sub-1 GHz RF sensor network</p>
+
+    <h2>Coordinator</h2>
+    <div class="status-row">
+      <span>Coordinator: <span id="coord-status" class="badge badge-grey">&#x2026;</span></span>
+      <span>Discovery: <span id="disc-status" class="badge badge-grey">&#x2026;</span></span>
+      <button id="disc-btn" class="btn btn-blue" onclick="toggleDiscovery()">&#x2026;</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Enrolled Nodes</h2>
+    <table id="enrolled-table">
+      <thead><tr><th>Address</th><th>Action</th></tr></thead>
+      <tbody id="enrolled-body"><tr><td colspan="2" class="empty">Loading&#x2026;</td></tr></tbody>
+    </table>
+  </div>
+
+  <div id="seen-card" class="card" style="display:none">
+    <h2>Seen Nodes <span style="font-size:13px;font-weight:normal;color:#888">(discovered, not yet accepted)</span></h2>
+    <table id="seen-table">
+      <thead><tr><th>Address</th><th>RSSI</th><th>Action</th></tr></thead>
+      <tbody id="seen-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let discoveryMode = false;
+
+  async function load() {
+    try {
+      const res = await fetch('/api/cc1312/status');
+      const d = await res.json();
+      discoveryMode = d.discovery_mode;
+
+      document.getElementById('coord-status').textContent =
+        d.coordinator_alive ? 'Alive' : 'Not responding';
+      document.getElementById('coord-status').className =
+        'badge ' + (d.coordinator_alive ? 'badge-green' : 'badge-red');
+
+      document.getElementById('disc-status').textContent =
+        discoveryMode ? 'ON' : 'OFF';
+      document.getElementById('disc-status').className =
+        'badge ' + (discoveryMode ? 'badge-blue' : 'badge-grey');
+      document.getElementById('disc-btn').textContent =
+        discoveryMode ? 'Stop Discovery' : 'Start Discovery';
+      document.getElementById('disc-btn').className =
+        'btn ' + (discoveryMode ? 'btn-grey' : 'btn-blue');
+
+      // Enrolled nodes
+      const eb = document.getElementById('enrolled-body');
+      if (d.enrolled.length === 0) {
+        eb.innerHTML = '<tr><td colspan="2" class="empty">No enrolled nodes</td></tr>';
+      } else {
+        eb.innerHTML = d.enrolled.map(addr =>
+          `<tr>
+            <td>${addr}</td>
+            <td><button class="btn btn-red" onclick="removeNode('${addr}')">Remove</button></td>
+          </tr>`
+        ).join('');
+      }
+
+      // Seen nodes
+      const sc = document.getElementById('seen-card');
+      const sb = document.getElementById('seen-body');
+      if (d.seen.length > 0) {
+        sc.style.display = '';
+        sb.innerHTML = d.seen.map(n =>
+          `<tr>
+            <td>${n.addr}</td>
+            <td>${n.rssi_dbm} dBm</td>
+            <td><button class="btn btn-green" onclick="acceptNode('${n.addr}')">Accept</button></td>
+          </tr>`
+        ).join('');
+      } else {
+        sc.style.display = 'none';
+      }
+    } catch (e) {
+      showMsg('Error loading status', true);
+    }
+  }
+
+  async function action(payload) {
+    try {
+      const res = await fetch('/api/cc1312/action', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await load();
+    } catch (e) {
+      showMsg('Error: ' + e.message, true);
+    }
+  }
+
+  function toggleDiscovery() {
+    action({action: discoveryMode ? 'discovery_off' : 'discovery_on'});
+  }
+
+  function acceptNode(addr) {
+    showMsg('Accepting ' + addr + '...');
+    action({action: 'accept_node', addr: addr});
+  }
+
+  function removeNode(addr) {
+    if (!confirm('Remove node ' + addr + '?')) return;
+    action({action: 'remove_node', addr: addr});
+  }
+
+  function showMsg(text, isErr) {
+    const el = document.getElementById('msg');
+    el.textContent = text;
+    el.style.color = isErr ? '#dc3545' : '#28a745';
+    setTimeout(() => { el.textContent = ''; }, 3000);
+  }
+
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>)HTML";
+}
+
+#endif // ENABLE_CC1312

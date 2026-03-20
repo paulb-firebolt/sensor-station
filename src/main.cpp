@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.10"
+#define FIRMWARE_VERSION "0.0.11"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -243,6 +243,14 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
             Serial.println("[FindMe] No LED on this board");
 #endif
         }
+#if ENABLE_CC1312
+        else if (action == "accept_node"   || action == "remove_node"  ||
+                 action == "discovery_on"  || action == "discovery_off" ||
+                 action == "sync_node_list"|| action == "get_node_list" ||
+                 action == "ping"       || action == "get_status") {
+            cc1312.handleCommand(action, doc);
+        }
+#endif
     }
 }
 
@@ -259,7 +267,7 @@ void setup() {
     }
 
     Serial.println("\n\n========================================");
-    Serial.println("ESP32 Dual-Stack Network Sensor");
+    Serial.println("ESP32 Sensor Station");
     Serial.println("Ethernet + WiFi with Web Provisioning");
     Serial.println("========================================\n");
 
@@ -334,6 +342,9 @@ void setup() {
 
     // Set MQTT managers for web interface
     webServer.setMQTTManagers(&certManager, &mqttManager);
+#if ENABLE_CC1312
+    webServer.setCC1312Manager(&cc1312);
+#endif
 
 #if defined(ARDUINO_M5TAB5)
     webServer.setFindMeCallback(triggerFindMe);
@@ -520,6 +531,10 @@ void loop() {
                 // OTA status
                 doc["ota"]["current_version"] = otaManager.getCurrentVersion();
                 doc["ota"]["previous_version"] = otaManager.getPreviousVersion();
+
+#if ENABLE_CC1312
+                doc["cc1312"]["coordinator_alive"] = cc1312.isCoordinatorAlive();
+#endif
 
                 String payload;
                 serializeJson(doc, payload);

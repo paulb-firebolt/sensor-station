@@ -41,6 +41,8 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
+#include <driver/gpio.h>
 #include "mqtt_manager.h"
 
 // ============================================================================
@@ -65,10 +67,24 @@ constexpr uint8_t  CC1312_START_BYTE  = 0xAA;
 constexpr size_t   CC1312_MAX_PAYLOAD = 64;   // max frame payload (covers LD2450 × 3 targets)
 constexpr size_t   CC1312_MAX_DATA    = 24;   // max sensor-specific bytes stored per message
 
-// Message types
-constexpr uint8_t CC1312_MSG_STATUS  = 0x01;
-constexpr uint8_t CC1312_MSG_READING = 0x02;
-constexpr uint8_t CC1312_MSG_EVENT   = 0x03;
+// Uplink message types (CC1312R → ESP32-P4)
+constexpr uint8_t CC1312_MSG_STATUS        = 0x01;
+constexpr uint8_t CC1312_MSG_READING       = 0x02;
+constexpr uint8_t CC1312_MSG_EVENT         = 0x03;
+constexpr uint8_t CC1312_MSG_NODE_SEEN     = 0x04;
+constexpr uint8_t CC1312_MSG_LIST_REQUEST  = 0x05;
+constexpr uint8_t CC1312_MSG_HEARTBEAT     = 0x06;
+constexpr uint8_t CC1312_MSG_PONG          = 0x07;
+
+// Downlink command types (ESP32-P4 → CC1312R)
+constexpr uint8_t CC1312_CMD_LIST_ENTRY    = 0x10;
+constexpr uint8_t CC1312_CMD_LIST_END      = 0x11;
+constexpr uint8_t CC1312_CMD_ACCEPT_NODE   = 0x12;
+constexpr uint8_t CC1312_CMD_REMOVE_NODE   = 0x13;
+constexpr uint8_t CC1312_CMD_DISCOVERY_ON  = 0x14;
+constexpr uint8_t CC1312_CMD_DISCOVERY_OFF = 0x15;
+constexpr uint8_t CC1312_CMD_PING          = 0x16;
+constexpr uint8_t CC1312_CMD_GET_STATUS    = 0x20;  // request status from a node (or broadcast)
 
 // Sensor class codes
 constexpr uint8_t CC1312_SC_PIR         = 0x01;
@@ -82,10 +98,19 @@ constexpr uint8_t CC1312_SC_RAW         = 0xFF;
 constexpr unsigned long CC1312_ACTIVE_WINDOW_MS  = 5000;
 constexpr unsigned long CC1312_REPORT_INTERVAL_MS = 10000;
 
-constexpr const char* CC1312_TOPIC = "cc1312/nodes";
+constexpr const char* CC1312_TOPIC        = "cc1312/nodes";
+constexpr const char* CC1312_SEEN_TOPIC   = "cc1312/seen";
+constexpr const char* CC1312_CONFIG_TOPIC = "cc1312/config";
+
+// NVS
+constexpr const char* CC1312_NVS_NS  = "cc1312_nodes";
+constexpr size_t      CC1312_MAX_ENROLLED = 32;
 
 // Max pending messages across all nodes/sensors (upserted by node+type+class key)
 constexpr size_t CC1312_MAX_PENDING = 32;
+
+// Max nodes seen during discovery (RAM cache, cleared on reboot)
+constexpr size_t CC1312_MAX_SEEN = 32;
 
 // ============================================================================
 // Name helpers
@@ -121,12 +146,59 @@ public:
         : _serial(serial), _mqtt(&mqtt),
           _bytesSeen(0), _lastByteAt(0),
           _pendingCount(0), _lastPublish(0),
-          _rxPos(0), _inFrame(false), _frameLen(0) {}
+          _rxPos(0), _inFrame(false), _frameLen(0),
+          _enrolledCount(0), _lastHeartbeat(0), _lastPingSent(0),
+          _seenCount(0), _discoveryMode(false) {}
 
     void begin() {
         _serial.begin(CC1312_BAUD, SERIAL_8N1, CC1312_RX_PIN, CC1312_TX_PIN);
+        gpio_pullup_en((gpio_num_t)CC1312_RX_PIN);  // hold RX high while CC1312 TX is Hi-Z during boot
         Serial.printf("[CC1312] Initialized on UART2 RX=%d TX=%d @ %u\n",
                       CC1312_RX_PIN, CC1312_TX_PIN, CC1312_BAUD);
+        _loadEnrolled();
+    }
+
+    void handleCommand(const String& action, JsonDocument& doc) {
+        if (action == "accept_node") {
+            uint32_t addr = strtoul(doc["addr"].as<const char*>(), nullptr, 16);
+            _enrollNode(addr);
+            _sendDownlink(CC1312_CMD_ACCEPT_NODE, addr);
+            Serial.printf("[CC1312] Enrolled %08X\n", (unsigned)addr);
+            _syncNodeList();
+            _publishConfig();
+        } else if (action == "remove_node") {
+            uint32_t addr = strtoul(doc["addr"].as<const char*>(), nullptr, 16);
+            _removeNode(addr);
+            _sendDownlink(CC1312_CMD_REMOVE_NODE, addr);
+            _syncNodeList();
+            Serial.printf("[CC1312] Removed %08X\n", (unsigned)addr);
+            _publishConfig();
+        } else if (action == "discovery_on") {
+            _discoveryMode = true;
+            _sendDownlink(CC1312_CMD_DISCOVERY_ON, 0);
+            Serial.println("[CC1312] Discovery mode ON");
+        } else if (action == "discovery_off") {
+            _discoveryMode = false;
+            _sendDownlink(CC1312_CMD_DISCOVERY_OFF, 0);
+            Serial.println("[CC1312] Discovery mode OFF");
+        } else if (action == "sync_node_list") {
+            _syncNodeList();
+        } else if (action == "get_node_list") {
+            _publishConfig();
+        } else if (action == "ping") {
+            ping();
+        } else if (action == "get_status") {
+            const char* addrStr = doc["addr"] | "FFFFFFFF";
+            uint32_t addr = strtoul(addrStr, nullptr, 16);
+            _sendDownlink(CC1312_CMD_GET_STATUS, addr);
+            Serial.printf("[CC1312] CMD_GET_STATUS → %08X\n", (unsigned)addr);
+        }
+    }
+
+    void ping() {
+        _lastPingSent = millis();
+        _sendDownlink(CC1312_CMD_PING, 0);
+        Serial.println("[CC1312] Ping sent");
     }
 
     void update() {
@@ -144,9 +216,9 @@ public:
             unsigned long now = millis();
             if (now - _lastDiag >= 5000) {
                 uint32_t newBytes = _bytesSeen - _lastByteCount;
-                if (newBytes == 0) {
+                if (newBytes == 0 && (millis() - _lastByteAt) > 30000) {
                     Serial.println("[CC1312] No data — check wiring (CC1312 TX→G22, RX→G23) and 3.3V power");
-                } else {
+                } else if (newBytes > 0) {
                     Serial.printf("[CC1312] %lu bytes received, %zu messages pending\n",
                                   newBytes, _pendingCount);
                 }
@@ -166,9 +238,28 @@ public:
         return _lastByteAt > 0 && (millis() - _lastByteAt) < CC1312_ACTIVE_WINDOW_MS;
     }
 
+    // Returns true if a heartbeat was received within the last 90 seconds (3 missed intervals)
+    bool isCoordinatorAlive() const {
+        return _lastHeartbeat > 0 && (millis() - _lastHeartbeat) < 90000;
+    }
+
     uint32_t getBytesSeen() const { return _bytesSeen; }
 
+    // Node list accessors (for web UI)
+    size_t   enrolledCount() const { return _enrolledCount; }
+    uint32_t enrolledAddr(size_t i) const { return _enrolled[i]; }
+    size_t   seenCount() const { return _seenCount; }
+    uint32_t seenAddr(size_t i) const { return _seen[i].addr; }
+    int8_t   seenRssi(size_t i) const { return _seen[i].rssi; }
+    bool     isDiscoveryMode() const { return _discoveryMode; }
+
 private:
+    // Node seen during discovery (RAM cache)
+    struct SeenNode {
+        uint32_t addr;
+        int8_t   rssi;
+    };
+
     // Pending message — upserted by (node_addr, msg_type, sensor_class)
     struct PendingMsg {
         uint32_t      node_addr;
@@ -195,6 +286,19 @@ private:
     size_t   _rxPos;
     bool     _inFrame;
     uint8_t  _frameLen;
+
+    // Enrolled node list (persisted in NVS)
+    uint32_t _enrolled[CC1312_MAX_ENROLLED];
+    size_t   _enrolledCount;
+
+    // Coordinator health
+    unsigned long _lastHeartbeat;
+    unsigned long _lastPingSent;
+
+    // Discovery state
+    bool     _discoveryMode;
+    SeenNode _seen[CC1312_MAX_SEEN];
+    size_t   _seenCount;
 
     // Dallas/Maxim CRC8 (polynomial 0x8C, bit-reversed)
     static uint8_t _crc8(const uint8_t* data, size_t len) {
@@ -267,6 +371,15 @@ private:
         const uint8_t* body    = payload + 5;
         uint8_t        bodyLen = len - 5;
 
+        // Drop data frames from unenrolled nodes unless in discovery mode
+        bool isDataFrame = (msgType == CC1312_MSG_STATUS ||
+                            msgType == CC1312_MSG_READING ||
+                            msgType == CC1312_MSG_EVENT);
+        if (isDataFrame && !_discoveryMode && !_isEnrolled(addr)) {
+            Serial.printf("[CC1312] Dropped frame from unenrolled node %08X\n", (unsigned)addr);
+            return;
+        }
+
         if (msgType == CC1312_MSG_STATUS) {
             if (bodyLen < 8) {
                 Serial.printf("[CC1312] STATUS too short from %08X\n", (unsigned)addr);
@@ -290,6 +403,26 @@ private:
             Serial.printf("[CC1312] %08X %s/%s len=%u (rssi=%d)\n",
                           (unsigned)addr, _cc1312MsgName(msgType),
                           _cc1312SensorName(sc), sdataLen, rssi);
+
+        } else if (msgType == CC1312_MSG_NODE_SEEN) {
+            Serial.printf("[CC1312] Node seen: %08X (rssi=%d)\n", (unsigned)addr, rssi);
+            _upsertSeen(addr, rssi);
+            _publishSeen(addr, rssi);
+
+        } else if (msgType == CC1312_MSG_PONG) {
+            unsigned long rtt = _lastPingSent ? millis() - _lastPingSent : 0;
+            _lastPingSent = 0;
+            Serial.printf("[CC1312] PONG from %08X (rssi=%d, rtt=%lums)\n",
+                          (unsigned)addr, rssi, rtt);
+
+        } else if (msgType == CC1312_MSG_HEARTBEAT) {
+            _lastHeartbeat = millis();
+            Serial.println("[CC1312] Coordinator heartbeat");
+
+        } else if (msgType == CC1312_MSG_LIST_REQUEST) {
+            Serial.printf("[CC1312] Node list requested — sending %zu entries\n", _enrolledCount);
+            _syncNodeList();
+
         } else {
             Serial.printf("[CC1312] Unknown msg type=0x%02X from %08X\n",
                           msgType, (unsigned)addr);
@@ -403,9 +536,140 @@ private:
         }
     }
 
+    // Send a downlink frame (ESP32-P4 → CC1312R). No payload — addr and msgType only.
+    void _sendDownlink(uint8_t msgType, uint32_t addr) {
+        uint8_t buf[10];
+        uint8_t pos = 0;
+        uint8_t len = 6;  // type(1) + addr(4) + rssi(1)
+        buf[pos++] = 0xAA;
+        buf[pos++] = len;
+        buf[pos++] = msgType;
+        buf[pos++] = (addr >> 24) & 0xFF;
+        buf[pos++] = (addr >> 16) & 0xFF;
+        buf[pos++] = (addr >>  8) & 0xFF;
+        buf[pos++] =  addr        & 0xFF;
+        buf[pos++] = 0x00;  // rssi = 0 for downlink
+        buf[pos++] = _crc8(&buf[2], len);
+        _serial.write(buf, pos);
+    }
+
+    void _enrollNode(uint32_t addr) {
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            if (_enrolled[i] == addr) return;  // already enrolled
+        }
+        if (_enrolledCount >= CC1312_MAX_ENROLLED) return;
+        _enrolled[_enrolledCount++] = addr;
+        _saveEnrolled();
+        // Remove from seen list
+        for (size_t i = 0; i < _seenCount; i++) {
+            if (_seen[i].addr == addr) {
+                _seen[i] = _seen[--_seenCount];
+                break;
+            }
+        }
+    }
+
+    bool _isEnrolled(uint32_t addr) const {
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            if (_enrolled[i] == addr) return true;
+        }
+        return false;
+    }
+
+    void _upsertSeen(uint32_t addr, int8_t rssi) {
+        // Skip if already enrolled
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            if (_enrolled[i] == addr) return;
+        }
+        // Update if already in seen list
+        for (size_t i = 0; i < _seenCount; i++) {
+            if (_seen[i].addr == addr) { _seen[i].rssi = rssi; return; }
+        }
+        // Add new
+        if (_seenCount < CC1312_MAX_SEEN) {
+            _seen[_seenCount++] = {addr, rssi};
+        }
+    }
+
+    void _removeNode(uint32_t addr) {
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            if (_enrolled[i] == addr) {
+                _enrolled[i] = _enrolled[--_enrolledCount];
+                _saveEnrolled();
+                return;
+            }
+        }
+    }
+
+    void _loadEnrolled() {
+        Preferences prefs;
+        if (!prefs.begin(CC1312_NVS_NS, true)) {
+            _enrolledCount = 0;
+            return;
+        }
+        _enrolledCount = prefs.getUInt("count", 0);
+        if (_enrolledCount > CC1312_MAX_ENROLLED) _enrolledCount = CC1312_MAX_ENROLLED;
+        char key[5];
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            snprintf(key, sizeof(key), "n%u", (unsigned)i);
+            _enrolled[i] = prefs.getUInt(key, 0);
+        }
+        prefs.end();
+        Serial.printf("[CC1312] Loaded %zu enrolled nodes from NVS\n", _enrolledCount);
+    }
+
+    void _saveEnrolled() {
+        Preferences prefs;
+        if (!prefs.begin(CC1312_NVS_NS, false)) return;
+        prefs.putUInt("count", _enrolledCount);
+        char key[5];
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            snprintf(key, sizeof(key), "n%u", (unsigned)i);
+            prefs.putUInt(key, _enrolled[i]);
+        }
+        prefs.end();
+    }
+
+    void _publishSeen(uint32_t addr, int8_t rssi) {
+        JsonDocument doc;
+        JsonArray arr = doc["nodes"].to<JsonArray>();
+        JsonObject node = arr.add<JsonObject>();
+        char addrStr[9];
+        snprintf(addrStr, sizeof(addrStr), "%08X", (unsigned)addr);
+        node["addr"]     = addrStr;
+        node["rssi_dbm"] = rssi;
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt->publish(CC1312_SEEN_TOPIC, payload);
+    }
+
+    void _syncNodeList() {
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            _sendDownlink(CC1312_CMD_LIST_ENTRY, _enrolled[i]);
+        }
+        _sendDownlink(CC1312_CMD_LIST_END, 0);
+        Serial.printf("[CC1312] Synced %zu nodes to coordinator\n", _enrolledCount);
+    }
+
+    void _publishConfig() {
+        JsonDocument doc;
+        JsonArray arr = doc["enrolled"].to<JsonArray>();
+        char addrStr[9];
+        for (size_t i = 0; i < _enrolledCount; i++) {
+            snprintf(addrStr, sizeof(addrStr), "%08X", (unsigned)_enrolled[i]);
+            arr.add(addrStr);
+        }
+        String payload;
+        serializeJson(doc, payload);
+        _mqtt->publish(CC1312_CONFIG_TOPIC, payload);
+    }
+
     void _publishPending(unsigned long now) {
         JsonDocument doc;
         doc["timestamp"] = now;
+        doc["coordinator_alive"] = isCoordinatorAlive();
+        if (_lastHeartbeat > 0)
+            doc["heartbeat_age_ms"] = static_cast<long>(now - _lastHeartbeat);
         JsonArray msgs = doc["messages"].to<JsonArray>();
 
         for (size_t i = 0; i < _pendingCount; i++) {
