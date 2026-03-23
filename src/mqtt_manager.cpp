@@ -1,7 +1,49 @@
 #include "mqtt_manager.h"
+#include "mbedtls/x509_crt.h"
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <Ethernet.h>
 #endif
+
+// Log subject, issuer and SANs from a PEM certificate using mbedTLS
+static void logCertInfo(const char* label, const char* pem) {
+    if (!pem || pem[0] == '\0') {
+        Serial.printf("[MQTT] %s: (empty)\n", label);
+        return;
+    }
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+    int ret = mbedtls_x509_crt_parse(&crt,
+                                     reinterpret_cast<const unsigned char*>(pem),
+                                     strlen(pem) + 1);
+    if (ret != 0) {
+        Serial.printf("[MQTT] %s: parse error -0x%04X\n", label, -ret);
+        mbedtls_x509_crt_free(&crt);
+        return;
+    }
+    char buf[256];
+    mbedtls_x509_dn_gets(buf, sizeof(buf), &crt.subject);
+    Serial.printf("[MQTT] %s subject: %s\n", label, buf);
+    mbedtls_x509_dn_gets(buf, sizeof(buf), &crt.issuer);
+    Serial.printf("[MQTT] %s issuer:  %s\n", label, buf);
+
+    // Walk the SAN sequence
+    const mbedtls_x509_sequence* san = &crt.subject_alt_names;
+    bool first = true;
+    while (san != nullptr && san->buf.len > 0) {
+        if (first) { Serial.printf("[MQTT] %s SANs:\n", label); first = false; }
+        int tag = san->buf.tag & 0x1F;  // strip class/constructed bits
+        if (tag == 2) {  // dNSName
+            Serial.printf("[MQTT]   DNS: %.*s\n", (int)san->buf.len, san->buf.p);
+        } else if (tag == 7 && san->buf.len == 4) {  // iPAddress (IPv4)
+            Serial.printf("[MQTT]   IP:  %d.%d.%d.%d\n",
+                san->buf.p[0], san->buf.p[1], san->buf.p[2], san->buf.p[3]);
+        } else {
+            Serial.printf("[MQTT]   SAN tag=%d len=%zu\n", tag, san->buf.len);
+        }
+        san = san->next;
+    }
+    mbedtls_x509_crt_free(&crt);
+}
 
 MQTTManager::MQTTManager()
     : certManager(nullptr)
@@ -59,7 +101,7 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     mqttClient.setServer(broker.c_str(), port);
     mqttClient.setBufferSize(8192);  // LD2450 batch (up to 20 frames × 3 targets) can reach ~4500 bytes
 
-    Serial.println("[MQTT] Initialization complete (WiFi MQTTS only)");
+    Serial.println("[MQTT] Initialization complete (MQTTS over WiFi + RMII Ethernet)");
 }
 
 void MQTTManager::update(void) {
@@ -359,12 +401,24 @@ void MQTTManager::setupTLS(void) {
 
     Serial.print("[MQTT] Certificate source: ");
     Serial.println(certManager->getCertificateSource());
+    logCertInfo("CA cert",     ca);
+    logCertInfo("Client cert", cert);
+    Serial.printf("[MQTT] Client key:  %zu bytes\n", key ? strlen(key) : 0);
 
     secureClient.setCACert(ca);
     secureClient.setCertificate(cert);
     secureClient.setPrivateKey(key);
 
     Serial.println("[MQTT] TLS certificates configured");
+}
+
+void MQTTManager::refreshCerts(void) {
+    setupTLS();
+    // Force reconnect on next loop so new certs are used immediately
+    lastReconnectAttempt = 0;
+    if (mqttClient.connected()) {
+        mqttClient.disconnect();
+    }
 }
 
 String MQTTManager::getClientId(void) {

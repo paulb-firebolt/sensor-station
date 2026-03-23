@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.11"
+#define FIRMWARE_VERSION "0.0.12"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -342,6 +342,7 @@ void setup() {
 
     // Set MQTT managers for web interface
     webServer.setMQTTManagers(&certManager, &mqttManager);
+    webServer.setOTAManager(&otaManager);
 #if ENABLE_CC1312
     webServer.setCC1312Manager(&cc1312);
 #endif
@@ -421,12 +422,14 @@ void setup() {
     // Initialize OTA manager
     otaManager.begin();
 
-    // Initialize firmware version on first boot
-    if (otaManager.isFirstBoot()) {
-        Serial.println("[Setup] First boot detected - initializing firmware version");
-        otaManager.saveVersionInfo(FIRMWARE_VERSION);
-        Serial.print("[Setup] Firmware version set to: ");
+    // Sync firmware version — update NVS whenever the compiled-in version differs
+    // (covers first boot and direct flash via PlatformIO, not just OTA updates)
+    if (otaManager.getCurrentVersion() != FIRMWARE_VERSION) {
+        Serial.print("[Setup] Firmware version updated: ");
+        Serial.print(otaManager.getCurrentVersion());
+        Serial.print(" -> ");
         Serial.println(FIRMWARE_VERSION);
+        otaManager.saveVersionInfo(FIRMWARE_VERSION);
     }
 }
 

@@ -3,6 +3,7 @@
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
     : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
+      otaManager_(nullptr),
 #if ENABLE_CC1312
       cc1312Manager(nullptr),
 #endif
@@ -24,6 +25,10 @@ void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* 
     certManager = certMgr;
     mqttManager = mqttMgr;
     Serial.println("[Web] MQTT managers set");
+}
+
+void DeviceWebServer::setOTAManager(OTAManager* otaMgr) {
+    otaManager_ = otaMgr;
 }
 
 #if ENABLE_CC1312
@@ -60,6 +65,7 @@ void DeviceWebServer::begin(void) {
         webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
         webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
         webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
+        webServer.on("/api/mqtt/upload-all", HTTP_POST, [this]() { handleMQTTUploadAllCerts(); });
         webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
         webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
 #if ENABLE_CC1312
@@ -68,6 +74,10 @@ void DeviceWebServer::begin(void) {
         webServer.on("/api/cc1312/action", HTTP_POST, [this]() { handleCC1312Action(); });
 #endif
         webServer.onNotFound([this]() { handleNotFound(); });
+
+        // Collect headers needed for diagnostics and auth
+        const char* headers[] = {"Content-Type", "Content-Length", "Authorization"};
+        webServer.collectHeaders(headers, 3);
 
         webServer.begin();
         Serial.println("[Web] WiFi server started on port 80");
@@ -526,6 +536,67 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         } else {
             sendEthernetResponse(client, 500, "text/plain", "Failed to save MQTT configuration");
         }
+    } else if (requestLine.startsWith("POST /api/mqtt/upload-all")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (certManager == nullptr) {
+            sendEthernetResponse(client, 503, "text/plain", "Certificate manager not initialized");
+            return;
+        }
+        int bodyStart = request.indexOf("\r\n\r\n") + 4;
+        String body = request.substring(bodyStart);
+        auto extractAndDecode = [&](const String& prefix) -> String {
+            int pos = body.indexOf(prefix);
+            if (pos < 0) return "";
+            int start = pos + prefix.length();
+            int end = body.indexOf("&", start);
+            if (end < 0) end = body.length();
+            String val = body.substring(start, end);
+            // URL decode common PEM characters
+            val.replace("+", " ");
+            val.replace("%0A", "\n");
+            val.replace("%0D", "");
+            val.replace("%2B", "+");
+            val.replace("%2F", "/");
+            val.replace("%3D", "=");
+            val.replace("%20", " ");
+            return val;
+        };
+        String caCert = extractAndDecode("ca_cert=");
+        String clientCert = extractAndDecode("client_cert=");
+        String clientKey = extractAndDecode("client_key=");
+        if (caCert.length() == 0 && clientCert.length() == 0 && clientKey.length() == 0) {
+            sendEthernetResponse(client, 400, "text/plain", "No certificate data provided");
+            return;
+        }
+        int saved = 0, failed = 0;
+        if (caCert.length() > 0) { if (certManager->saveCACert(caCert)) saved++; else failed++; }
+        if (clientCert.length() > 0) { if (certManager->saveClientCert(clientCert)) saved++; else failed++; }
+        if (clientKey.length() > 0) { if (certManager->saveClientKey(clientKey)) saved++; else failed++; }
+        if (failed == 0) {
+            sendEthernetResponse(client, 200, "text/plain", "Saved " + String(saved) + " certificate(s)");
+        } else {
+            sendEthernetResponse(client, 500, "text/plain", String(failed) + " certificate(s) failed to save");
+        }
+    } else if (requestLine.startsWith("POST /api/mqtt/clear")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (certManager != nullptr) certManager->clearCertificates();
+        sendEthernetResponse(client, 200, "text/plain", "All certificates cleared");
     } else if (requestLine.startsWith("GET /api/mqtt/status")) {
         // MQTT status JSON - requires authentication
         if (!requireEthernetAuth(request)) {
@@ -594,15 +665,15 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             doc["discovery_mode"] = cc1312Manager->isDiscoveryMode();
             doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
             JsonArray enrolled = doc["enrolled"].to<JsonArray>();
-            char addrBuf[9];
+            char addrBuf[17];
             for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
-                snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->enrolledAddr(i));
+                snprintf(addrBuf, sizeof(addrBuf), "%016llX", (unsigned long long)cc1312Manager->enrolledAddr(i));
                 enrolled.add(addrBuf);
             }
             JsonArray seen = doc["seen"].to<JsonArray>();
             for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
                 JsonObject n = seen.add<JsonObject>();
-                snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->seenAddr(i));
+                snprintf(addrBuf, sizeof(addrBuf), "%016llX", (unsigned long long)cc1312Manager->seenAddr(i));
                 n["addr"] = addrBuf;
                 n["rssi_dbm"] = cc1312Manager->seenRssi(i);
             }
@@ -1193,8 +1264,33 @@ String DeviceWebServer::generateStatusPage(void) {
 
     html += R"HTML(
 
-      <div style="margin-top:20px;">
+)HTML";
+
+    // Firmware section
+    String currentVer = otaManager_ ? otaManager_->getCurrentVersion() : "unknown";
+    String previousVer = otaManager_ ? otaManager_->getPreviousVersion() : "";
+    html += R"HTML(
+      <h2>Firmware</h2>
+      <div class="status-item">
+        <span class="label">Running Version</span>
+        <span class="value">)HTML" + currentVer + R"HTML(</span>
+      </div>)HTML";
+    if (previousVer.length() > 0) {
+        html += R"HTML(
+      <div class="status-item">
+        <span class="label">Previous Version</span>
+        <span class="value">)HTML" + previousVer + R"HTML(</span>
+      </div>)HTML";
+    }
+    html += R"HTML(
+
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <button onclick="fetch('/api/findme',{method:'POST'})" style="padding:10px 20px;background:#667eea;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Find Me</button>
+        <a href="/mqtt" style="padding:10px 20px;background:#764ba2;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">MQTT</a>)HTML"
+#if ENABLE_CC1312
+        R"HTML(<a href="/cc1312" style="padding:10px 20px;background:#28a745;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">Sub-1GHz</a>)HTML"
+#endif
+        R"HTML(
       </div>
 
       <div class="info" style="margin-top:15px;">
@@ -1777,6 +1873,57 @@ void DeviceWebServer::handleMQTTUploadCert(void) {
     }
 }
 
+void DeviceWebServer::handleMQTTUploadAllCerts(void) {
+    Serial.println("[Web] Upload-all handler entered");
+
+    if (!requireAuth()) {
+        Serial.println("[Web] Upload-all: auth failed");
+        return;
+    }
+    Serial.println("[Web] Upload-all: auth OK");
+
+    if (certManager == nullptr) {
+        Serial.println("[Web] Upload-all: certManager null");
+        webServer.send(503, "text/plain", "Certificate manager not initialized");
+        return;
+    }
+
+    String caCert = webServer.arg("ca_cert");
+    String clientCert = webServer.arg("client_cert");
+    String clientKey = webServer.arg("client_key");
+
+    Serial.printf("[Web] Upload-all received: CA=%d client=%d key=%d bytes\n",
+        caCert.length(), clientCert.length(), clientKey.length());
+
+    if (caCert.length() == 0 && clientCert.length() == 0 && clientKey.length() == 0) {
+        Serial.println("[Web] Upload-all: all fields empty - body not parsed?");
+        Serial.printf("[Web] Content-Type: %s\n", webServer.header("Content-Type").c_str());
+        Serial.printf("[Web] Content-Length: %s\n", webServer.header("Content-Length").c_str());
+        webServer.send(400, "text/plain", "No certificate data provided");
+        return;
+    }
+
+    int saved = 0;
+    int failed = 0;
+
+    if (caCert.length() > 0) {
+        if (certManager->saveCACert(caCert)) saved++; else failed++;
+    }
+    if (clientCert.length() > 0) {
+        if (certManager->saveClientCert(clientCert)) saved++; else failed++;
+    }
+    if (clientKey.length() > 0) {
+        if (certManager->saveClientKey(clientKey)) saved++; else failed++;
+    }
+
+    if (failed == 0) {
+        if (mqttManager) mqttManager->refreshCerts();
+        webServer.send(200, "text/plain", "Saved " + String(saved) + " certificate(s)");
+    } else {
+        webServer.send(500, "text/plain", String(failed) + " certificate(s) failed to save");
+    }
+}
+
 void DeviceWebServer::handleMQTTClearCerts(void) {
     // Require authentication
     if (!requireAuth()) return;
@@ -1889,10 +2036,28 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       margin-right: 8px;
     }
     textarea {
-      min-height: 150px;
+      min-height: 100px;
       font-family: monospace;
       font-size: 12px;
     }
+    .drop-zone {
+      border: 2px dashed #667eea;
+      border-radius: 8px;
+      padding: 18px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      color: #667eea;
+      background: #f8f9ff;
+      margin-bottom: 8px;
+      font-size: 13px;
+      user-select: none;
+    }
+    .drop-zone:hover { background: #eef0ff; }
+    .drop-zone.drag-over { background: #dde1ff; border-color: #4a5fd4; border-style: solid; }
+    .drop-zone.loaded { border-color: #43a047; background: #f1f8e9; color: #2e7d32; border-style: solid; }
+    .drop-zone .dz-icon { font-size: 22px; display: block; margin-bottom: 6px; }
+    .cert-clear { font-size: 12px; color: #888; cursor: pointer; text-decoration: underline; float: right; margin-top: -24px; }
     button {
       padding: 10px 20px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1924,26 +2089,33 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       font-size: 13px;
       color: #e65100;
     }
-    .nav {
-      margin-bottom: 20px;
+    .nav { margin-bottom: 15px; }
+    .nav a { color: #667eea; text-decoration: none; font-size: 14px; }
+    .nav a:hover { text-decoration: underline; }
+    #modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 100;
+      align-items: center; justify-content: center;
     }
-    .nav a {
-      color: white;
-      text-decoration: none;
-      padding: 10px 20px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 6px;
-      display: inline-block;
+    #modal-overlay.active { display: flex; }
+    #modal-box {
+      background: white; border-radius: 12px; padding: 28px 28px 20px;
+      max-width: 380px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: modal-in 0.15s ease;
     }
+    @keyframes modal-in { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    #modal-icon { font-size: 32px; margin-bottom: 10px; }
+    #modal-icon:empty { display: none; }
+    #modal-title { font-size: 17px; font-weight: 700; color: #333; margin-bottom: 8px; }
+    #modal-msg { font-size: 14px; color: #555; line-height: 1.5; margin-bottom: 20px; }
+    #modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+    #modal-btns button { margin: 0; padding: 9px 20px; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="nav">
-      <a href="/">← Back to Status</a>
-    </div>
-
     <div class="card">
+      <div class="nav"><a href="/">&#8592; Status</a></div>
       <h1>MQTT Configuration</h1>
 
 )HTML"
@@ -1999,29 +2171,42 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       <h2>TLS Certificates</h2>
 
       <div class="info">
-        <strong>Current Certificate Source:</strong> )HTML" + certSource + R"HTML(<br>
+        <strong>Current Certificate Source:</strong> <span id="cert-source-label">)HTML" + certSource + R"HTML(</span><br>
+        <span id="cert-status-flags"></span>
         Upload custom certificates for production, or use compiled-in defaults for testing.
       </div>
 
       <div class="form-group">
-        <label>CA Certificate</label>
-        <textarea id="ca-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-        <button onclick="uploadCert('ca')">Upload CA Cert</button>
+        <label>CA Certificate <span style="font-weight:normal;color:#888">(ca.crt)</span></label>
+        <div id="dz-ca" class="drop-zone">
+          <span class="dz-icon">&#128196;</span>Drop ca.crt here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('ca-cert','dz-ca','ca.crt')">clear</span>
+        <textarea id="ca-cert" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
       </div>
 
       <div class="form-group">
-        <label>Client Certificate</label>
-        <textarea id="client-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-        <button onclick="uploadCert('client')">Upload Client Cert</button>
+        <label>Client Certificate <span style="font-weight:normal;color:#888">(client.crt)</span></label>
+        <div id="dz-client-cert" class="drop-zone">
+          <span class="dz-icon">&#128196;</span>Drop client.crt here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('client-cert','dz-client-cert','client.crt')">clear</span>
+        <textarea id="client-cert" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
       </div>
 
       <div class="form-group">
-        <label>Client Private Key</label>
-        <textarea id="client-key" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
-        <button onclick="uploadCert('key')">Upload Client Key</button>
+        <label>Client Private Key <span style="font-weight:normal;color:#888">(client.key)</span></label>
+        <div id="dz-client-key" class="drop-zone">
+          <span class="dz-icon">&#128274;</span>Drop client.key here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('client-key','dz-client-key','client.key')">clear</span>
+        <textarea id="client-key" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
       </div>
 
-      <button class="btn-danger" onclick="clearCerts()">Clear All Certificates</button>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button type="button" onclick="uploadAll()" style="flex:1;padding:13px 20px;font-size:15px">&#8679; Upload All Certificates</button>
+        <button type="button" class="btn-danger" onclick="clearCerts()" style="flex:0 0 auto">Clear All</button>
+      </div>
 
       <h2>Status</h2>
       <div id="status-info">Loading...</div>
@@ -2029,60 +2214,179 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     </div>
   </div>
 
-  <script>
-    async function uploadCert(type) {
-      let data = '';
-      if (type === 'ca') data = document.getElementById('ca-cert').value;
-      else if (type === 'client') data = document.getElementById('client-cert').value;
-      else if (type === 'key') data = document.getElementById('client-key').value;
+  <div id="modal-overlay">
+    <div id="modal-box">
+      <div id="modal-icon"></div>
+      <div id="modal-title"></div>
+      <div id="modal-msg"></div>
+      <div id="modal-btns"></div>
+    </div>
+  </div>
 
-      if (!data) {
-        alert('Please paste certificate data first');
+  <script>
+    function loadFileIntoField(file, textareaId, zoneId) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        document.getElementById(textareaId).value = e.target.result;
+        const zone = document.getElementById(zoneId);
+        zone.classList.remove('drag-over');
+        zone.classList.add('loaded');
+        zone.innerHTML = '<span class="dz-icon">&#10003;</span>' + file.name;
+      };
+      reader.readAsText(file);
+    }
+
+    function clearField(textareaId, zoneId, label) {
+      document.getElementById(textareaId).value = '';
+      const zone = document.getElementById(zoneId);
+      zone.classList.remove('loaded', 'drag-over');
+      const icon = zoneId.includes('key') ? '&#128274;' : '&#128196;';
+      zone.innerHTML = '<span class="dz-icon">' + icon + '</span>Drop ' + label + ' here or <strong>click to browse</strong>';
+    }
+
+    function setupDropZone(zoneId, textareaId, accept, label) {
+      const zone = document.getElementById(zoneId);
+      zone.addEventListener('click', () => {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = accept;
+        inp.onchange = e => loadFileIntoField(e.target.files[0], textareaId, zoneId);
+        inp.click();
+      });
+      zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+      zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
+      zone.addEventListener('drop', e => {
+        e.preventDefault();
+        loadFileIntoField(e.dataTransfer.files[0], textareaId, zoneId);
+      });
+    }
+
+    setupDropZone('dz-ca', 'ca-cert', '.crt,.pem,.cer', 'ca.crt');
+    setupDropZone('dz-client-cert', 'client-cert', '.crt,.pem,.cer', 'client.crt');
+    setupDropZone('dz-client-key', 'client-key', '.key,.pem', 'client.key');
+
+    // Modal helpers
+    function showModal(icon, title, msg, buttons) {
+      document.getElementById('modal-icon').innerHTML = icon;
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-msg').innerHTML = msg.replace(/\n/g, '<br>');
+      const btns = document.getElementById('modal-btns');
+      btns.innerHTML = '';
+      buttons.forEach(b => {
+        const el = document.createElement('button');
+        el.textContent = b.label;
+        if (b.danger) el.classList.add('btn-danger');
+        el.onclick = () => { closeModal(); b.action(); };
+        btns.appendChild(el);
+      });
+      document.getElementById('modal-overlay').classList.add('active');
+    }
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.remove('active');
+    }
+    function toast(icon, title, msg) {
+      return new Promise(resolve => {
+        showModal(icon, title, msg, [{ label: 'OK', action: resolve }]);
+      });
+    }
+    function confirm2(icon, title, msg, confirmLabel, danger) {
+      return new Promise(resolve => {
+        showModal(icon, title, msg, [
+          { label: 'Cancel', action: () => resolve(false) },
+          { label: confirmLabel, danger: danger, action: () => resolve(true) }
+        ]);
+      });
+    }
+    document.getElementById('modal-overlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('modal-overlay')) closeModal();
+    });
+
+    async function uploadAll() {
+      const ca = document.getElementById('ca-cert').value.trim();
+      const cert = document.getElementById('client-cert').value.trim();
+      const key = document.getElementById('client-key').value.trim();
+
+      if (!ca && !cert && !key) {
+        await toast('', 'Nothing to upload', 'No certificate data entered. Drop files or paste PEM text first.');
         return;
       }
 
+      const overwriting = [
+        ca   && certStatus.has_ca_cert     ? 'CA Certificate' : null,
+        cert && certStatus.has_client_cert ? 'Client Certificate' : null,
+        key  && certStatus.has_client_key  ? 'Client Key' : null,
+      ].filter(Boolean);
+
+      if (overwriting.length > 0) {
+        const ok = await confirm2('', 'Overwrite existing certificates?',
+          'The following are already stored and will be replaced:\n\u2022 ' + overwriting.join('\n\u2022 '),
+          'Overwrite', true);
+        if (!ok) return;
+      }
+
+      const params = new URLSearchParams();
+      if (ca) params.append('ca_cert', ca);
+      if (cert) params.append('client_cert', cert);
+      if (key) params.append('client_key', key);
+
       try {
-        const res = await fetch('/api/mqtt/upload', {
+        const res = await fetch('/api/mqtt/upload-all', {
           method: 'POST',
+          credentials: 'include',
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: 'cert_type=' + type + '&cert_data=' + encodeURIComponent(data)
+          body: params.toString()
         });
         if (res.ok) {
-          alert('Certificate uploaded successfully');
+          await toast('', 'Certificates saved', await res.text());
+          await updateStatus();
           location.reload();
         } else {
-          alert('Upload failed: ' + await res.text());
+          await toast('', 'Upload failed', await res.text());
         }
       } catch (e) {
-        alert('Upload error: ' + e.message);
+        await toast('', 'Upload error', e.message);
       }
     }
 
     async function clearCerts() {
-      if (!confirm('Clear all certificates? Device will use compiled-in defaults.')) return;
+      const ok = await confirm2('', 'Clear certificates?',
+        'All stored certificates will be removed. The device will fall back to compiled-in defaults.',
+        'Clear All', true);
+      if (!ok) return;
 
       try {
-        const res = await fetch('/api/mqtt/clear', {method: 'POST'});
+        const res = await fetch('/api/mqtt/clear', {method: 'POST', credentials: 'include'});
         if (res.ok) {
-          alert('Certificates cleared');
+          await toast('', 'Certificates cleared', 'Device will reconnect using compiled-in defaults.');
           location.reload();
         } else {
-          alert('Failed to clear certificates');
+          await toast('', 'Failed', 'Could not clear certificates.');
         }
       } catch (e) {
-        alert('Error: ' + e.message);
+        await toast('', 'Error', e.message);
       }
     }
 
+    let certStatus = { has_ca_cert: false, has_client_cert: false, has_client_key: false };
+
     async function updateStatus() {
       try {
-        const res = await fetch('/api/mqtt/status');
+        const res = await fetch('/api/mqtt/status', {credentials: 'include'});
         const data = await res.json();
+        certStatus = { has_ca_cert: data.has_ca_cert, has_client_cert: data.has_client_cert, has_client_key: data.has_client_key };
         document.getElementById('status-info').innerHTML =
           '<strong>Status:</strong> ' + data.status + '<br>' +
           '<strong>Broker:</strong> ' + data.broker + ':' + data.port + '<br>' +
-          '<strong>Topic:</strong> ' + data.topic + '<br>' +
-          '<strong>Certificate Source:</strong> ' + data.cert_source;
+          '<strong>Topic:</strong> ' + data.topic;
+        const srcLabel = document.getElementById('cert-source-label');
+        if (srcLabel) srcLabel.textContent = data.cert_source;
+        const flags = document.getElementById('cert-status-flags');
+        if (flags) {
+          const ca = data.has_ca_cert ? '&#10003; CA' : '&#10007; CA';
+          const cc = data.has_client_cert ? '&#10003; Client Cert' : '&#10007; Client Cert';
+          const ck = data.has_client_key ? '&#10003; Client Key' : '&#10007; Client Key';
+          flags.innerHTML = '<span style="font-family:monospace;font-size:12px;color:#555">' + ca + ' &nbsp; ' + cc + ' &nbsp; ' + ck + '</span><br>';
+        }
       } catch (e) {
         document.getElementById('status-info').innerHTML = 'Error loading status';
       }
@@ -2118,16 +2422,23 @@ void DeviceWebServer::handleCC1312Status(void) {
     JsonDocument doc;
     doc["discovery_mode"]    = cc1312Manager->isDiscoveryMode();
     doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
+    char coordId[17];
+    snprintf(coordId, sizeof(coordId), "%016llX", (unsigned long long)cc1312Manager->coordinatorAddr());
+    doc["coordinator_id"] = coordId;
     JsonArray enrolled = doc["enrolled"].to<JsonArray>();
-    char addrBuf[9];
+    char addrBuf[17];
+    unsigned long nowMs = millis();
     for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
-        snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->enrolledAddr(i));
-        enrolled.add(addrBuf);
+        JsonObject n = enrolled.add<JsonObject>();
+        snprintf(addrBuf, sizeof(addrBuf), "%016llX", (unsigned long long)cc1312Manager->enrolledAddr(i));
+        n["addr"] = addrBuf;
+        unsigned long ls = cc1312Manager->nodeLastSeen(i);
+        n["last_seen_ago_ms"] = (ls == 0) ? -1 : (long)(nowMs - ls);
     }
     JsonArray seen = doc["seen"].to<JsonArray>();
     for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
         JsonObject n = seen.add<JsonObject>();
-        snprintf(addrBuf, sizeof(addrBuf), "%08X", (unsigned)cc1312Manager->seenAddr(i));
+        snprintf(addrBuf, sizeof(addrBuf), "%016llX", (unsigned long long)cc1312Manager->seenAddr(i));
         n["addr"]     = addrBuf;
         n["rssi_dbm"] = cc1312Manager->seenRssi(i);
     }
@@ -2240,10 +2551,41 @@ String DeviceWebServer::generateCC1312Page(void) {
     .btn-green  { background: #28a745; color: white; }
     .btn-blue   { background: #667eea; color: white; }
     .btn-grey   { background: #6c757d; color: white; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
     .nav { margin-bottom: 15px; }
     .nav a { color: #667eea; text-decoration: none; font-size: 14px; }
     .nav a:hover { text-decoration: underline; }
     #msg { min-height: 20px; font-size: 13px; color: #28a745; margin-top: 8px; }
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 28px 24px 20px;
+      max-width: 340px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal h3 { font-size: 17px; margin-bottom: 8px; color: #333; }
+    .modal p  { font-size: 14px; color: #666; margin-bottom: 20px; word-break: break-all; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
   </style>
 </head>
 <body>
@@ -2256,8 +2598,8 @@ String DeviceWebServer::generateCC1312Page(void) {
     <h2>Coordinator</h2>
     <div class="status-row">
       <span>Coordinator: <span id="coord-status" class="badge badge-grey">&#x2026;</span></span>
-      <span>Discovery: <span id="disc-status" class="badge badge-grey">&#x2026;</span></span>
-      <button id="disc-btn" class="btn btn-blue" onclick="toggleDiscovery()">&#x2026;</button>
+      <span id="coord-id" style="font-family:monospace;font-size:13px;color:#555"></span>
+      <button id="disc-btn" class="btn btn-green" onclick="toggleDiscovery()">&#x2026;</button>
     </div>
     <div id="msg"></div>
   </div>
@@ -2265,9 +2607,20 @@ String DeviceWebServer::generateCC1312Page(void) {
   <div class="card">
     <h2>Enrolled Nodes</h2>
     <table id="enrolled-table">
-      <thead><tr><th>Address</th><th>Action</th></tr></thead>
-      <tbody id="enrolled-body"><tr><td colspan="2" class="empty">Loading&#x2026;</td></tr></tbody>
+      <thead><tr><th>Address</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody id="enrolled-body"><tr><td colspan="3" class="empty">Loading&#x2026;</td></tr></tbody>
     </table>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <h3>Remove Node</h3>
+      <p id="modal-addr"></p>
+      <div class="modal-actions">
+        <button class="btn btn-grey" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-red" onclick="confirmRemove()">Remove</button>
+      </div>
+    </div>
   </div>
 
   <div id="seen-card" class="card" style="display:none">
@@ -2292,27 +2645,37 @@ String DeviceWebServer::generateCC1312Page(void) {
         d.coordinator_alive ? 'Alive' : 'Not responding';
       document.getElementById('coord-status').className =
         'badge ' + (d.coordinator_alive ? 'badge-green' : 'badge-red');
+      const zeroId = '0000000000000000';
+      document.getElementById('coord-id').textContent =
+        d.coordinator_id && d.coordinator_id !== zeroId ? d.coordinator_id : '';
 
-      document.getElementById('disc-status').textContent =
-        discoveryMode ? 'ON' : 'OFF';
-      document.getElementById('disc-status').className =
-        'badge ' + (discoveryMode ? 'badge-blue' : 'badge-grey');
-      document.getElementById('disc-btn').textContent =
-        discoveryMode ? 'Stop Discovery' : 'Start Discovery';
-      document.getElementById('disc-btn').className =
-        'btn ' + (discoveryMode ? 'btn-grey' : 'btn-blue');
+      const btn = document.getElementById('disc-btn');
+      if (discoveryMode) {
+        btn.innerHTML = '<span class="spinner"></span>Discovering&hellip;';
+        btn.className = 'btn btn-grey';
+      } else {
+        btn.innerHTML = 'Start Discovery';
+        btn.className = 'btn btn-green';
+      }
 
       // Enrolled nodes
       const eb = document.getElementById('enrolled-body');
       if (d.enrolled.length === 0) {
-        eb.innerHTML = '<tr><td colspan="2" class="empty">No enrolled nodes</td></tr>';
+        eb.innerHTML = '<tr><td colspan="3" class="empty">No enrolled nodes</td></tr>';
       } else {
-        eb.innerHTML = d.enrolled.map(addr =>
-          `<tr>
-            <td>${addr}</td>
-            <td><button class="btn btn-red" onclick="removeNode('${addr}')">Remove</button></td>
-          </tr>`
-        ).join('');
+        eb.innerHTML = d.enrolled.map(n => {
+          const ago = n.last_seen_ago_ms;
+          let badge;
+          if (ago < 0)           badge = '<span class="badge badge-grey">No data</span>';
+          else if (ago < 60000)  badge = '<span class="badge badge-green">Active</span>';
+          else if (ago < 300000) badge = '<span class="badge badge-blue">Idle</span>';
+          else                   badge = '<span class="badge badge-red">Offline</span>';
+          return `<tr>
+            <td>${n.addr}</td>
+            <td>${badge}</td>
+            <td><button class="btn btn-red" onclick="removeNode('${n.addr}')">Remove</button></td>
+          </tr>`;
+        }).join('');
       }
 
       // Seen nodes
@@ -2358,10 +2721,28 @@ String DeviceWebServer::generateCC1312Page(void) {
     action({action: 'accept_node', addr: addr});
   }
 
+  let _pendingRemove = null;
+
   function removeNode(addr) {
-    if (!confirm('Remove node ' + addr + '?')) return;
-    action({action: 'remove_node', addr: addr});
+    _pendingRemove = addr;
+    document.getElementById('modal-addr').textContent = addr;
+    document.getElementById('modal-overlay').classList.add('open');
   }
+
+  function closeModal() {
+    _pendingRemove = null;
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  function confirmRemove() {
+    const addr = _pendingRemove;
+    closeModal();
+    if (addr) action({action: 'remove_node', addr: addr});
+  }
+
+  document.getElementById('modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
 
   function showMsg(text, isErr) {
     const el = document.getElementById('msg');

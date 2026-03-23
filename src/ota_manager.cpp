@@ -82,8 +82,8 @@ void OTAManager::saveVersionInfo(const String& newVersion) {
 
     prefs.end();
 
-    currentVersion = newVersion;
     previousVersion = currentVersion;
+    currentVersion = newVersion;
     bootCount = 0;
 
     Serial.print("[OTA] Version saved: ");

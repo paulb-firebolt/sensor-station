@@ -66,6 +66,9 @@ public:
     unsigned long getLastConnected(void);
     unsigned long getLastPublish(void);
 
+    // Re-apply certs to secureClient after an NVS upload without full reboot
+    void refreshCerts(void);
+
 private:
     // Manager references
     CertificateManager* certManager;

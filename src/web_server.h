@@ -13,6 +13,7 @@
 #include "wifi_manager.h"
 #include "certificate_manager.h"
 #include "mqtt_manager.h"
+#include "ota_manager.h"
 #if ENABLE_CC1312
 #include "cc1312_manager.h"
 #endif
@@ -37,6 +38,9 @@ public:
     // Set MQTT managers (for MQTT configuration page)
     void setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr);
 
+    // Set OTA manager (for firmware version display)
+    void setOTAManager(OTAManager* otaMgr);
+
 #if ENABLE_CC1312
     void setCC1312Manager(CC1312Manager* mgr);
 #endif
@@ -48,6 +52,7 @@ private:
     WiFiManager& wifiManager;
     CertificateManager* certManager;
     MQTTManager* mqttManager;
+    OTAManager* otaManager_;
 #if ENABLE_CC1312
     CC1312Manager* cc1312Manager;
 #endif
@@ -89,6 +94,7 @@ private:
     void handleMQTTConfig(void);
     void handleMQTTSave(void);
     void handleMQTTUploadCert(void);
+    void handleMQTTUploadAllCerts(void);
     void handleMQTTClearCerts(void);
     void handleMQTTStatus(void);
 

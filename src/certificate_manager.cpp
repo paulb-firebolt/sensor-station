@@ -85,14 +85,11 @@ bool CertificateManager::saveCACert(const String& cert) {
 
     if (success) {
         Serial.println("[CertMgr] CA certificate saved to NVS");
-        // Reload from NVS
         if (nvs_ca_cert != nullptr) {
             free(nvs_ca_cert);
-            nvs_ca_cert = nullptr;
         }
-        prefs.begin(CERT_NVS_NAMESPACE, true);  // Read-only
-        using_nvs_ca = loadCertFromNVS(CERT_CA_KEY, &nvs_ca_cert);
-        prefs.end();
+        nvs_ca_cert = strdup(cert.c_str());
+        using_nvs_ca = (nvs_ca_cert != nullptr);
     } else {
         Serial.println("[CertMgr] ERROR: Failed to save CA certificate");
     }
@@ -122,14 +119,11 @@ bool CertificateManager::saveClientCert(const String& cert) {
 
     if (success) {
         Serial.println("[CertMgr] Client certificate saved to NVS");
-        // Reload from NVS
         if (nvs_client_cert != nullptr) {
             free(nvs_client_cert);
-            nvs_client_cert = nullptr;
         }
-        prefs.begin(CERT_NVS_NAMESPACE, true);  // Read-only
-        using_nvs_client = loadCertFromNVS(CERT_CLIENT_KEY, &nvs_client_cert);
-        prefs.end();
+        nvs_client_cert = strdup(cert.c_str());
+        using_nvs_client = (nvs_client_cert != nullptr);
     } else {
         Serial.println("[CertMgr] ERROR: Failed to save client certificate");
     }
@@ -159,14 +153,11 @@ bool CertificateManager::saveClientKey(const String& key) {
 
     if (success) {
         Serial.println("[CertMgr] Client key saved to NVS");
-        // Reload from NVS
         if (nvs_client_key != nullptr) {
             free(nvs_client_key);
-            nvs_client_key = nullptr;
         }
-        prefs.begin(CERT_NVS_NAMESPACE, true);  // Read-only
-        using_nvs_key = loadCertFromNVS(CERT_PRIV_KEY, &nvs_client_key);
-        prefs.end();
+        nvs_client_key = strdup(key.c_str());
+        using_nvs_key = (nvs_client_key != nullptr);
     } else {
         Serial.println("[CertMgr] ERROR: Failed to save client key");
     }
@@ -250,30 +241,20 @@ unsigned long CertificateManager::getLastUploadTime(void) {
 }
 
 bool CertificateManager::loadCertFromNVS(const char* key, char** buffer) {
-    // Check if key exists
     if (!prefs.isKey(key)) {
         return false;
     }
 
-    // Get size
-    size_t size = prefs.getString(key, nullptr, 0);
-    if (size == 0) {
+    // getString(key, default) returns a String object — works even with large values
+    String value = prefs.getString(key, "");
+    if (value.length() == 0) {
         return false;
     }
 
-    // Allocate buffer
-    *buffer = (char*)malloc(size);
+    *buffer = strdup(value.c_str());
     if (*buffer == nullptr) {
         Serial.print("[CertMgr] ERROR: Failed to allocate memory for ");
         Serial.println(key);
-        return false;
-    }
-
-    // Load certificate
-    size_t loaded = prefs.getString(key, *buffer, size);
-    if (loaded == 0) {
-        free(*buffer);
-        *buffer = nullptr;
         return false;
     }
 

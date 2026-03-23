@@ -101,29 +101,25 @@ Suggested initial RF message types:
 
 Suggested initial addresses:
 
-- `0x00000001` — coordinator
-- `0xDEAD0001` and up — sensor nodes
-- `0xFFFFFFFF` — broadcast
+- `0x0000000000000001` — coordinator
+- factory IEEE 802.15.4 EUI-64 — sensor nodes
+- `0xFFFFFFFFFFFFFFFF` — broadcast
 
 For the current bring-up code, the remote sensor node address is defined in
-`rfNode/nodeIdentity.h` so each programmed board can keep a stable identity
-across resets and power cycles.
+`rfNode/nodeIdentity.h` and is read from the CC1312's hardware IEEE address, so
+each board keeps a stable identity across resets and power cycles without using
+application NVS.
 
 Recommended near-term approach:
 
-- assign one fixed `RF_NODE_ADDRESS` per physical sensor board
-- keep the shared high word as the fleet prefix, e.g. `0xDEADxxxx`
-- allocate the low word uniquely per board, e.g. `0xDEAD0001`, `0xDEAD0002`
-- record that mapping alongside the board sticker/serial, e.g. `L20007YD`
-
-Recommended longer-term persistent approach:
-
-- factory-program the node address into non-volatile storage on first provision
-- read it at boot instead of compiling it into the image
-- keep the same address map and reserve `0xFFFFFFFF` for broadcast
+- use the CC1312 factory-programmed IEEE 802.15.4 EUI-64 as the node address
+- enroll that immutable hardware ID on the ESP32/coordinator side
+- store any human-friendly alias or deployment metadata against that ID
+- reserve `0xFFFFFFFFFFFFFFFF` for broadcast
 
 This RF frame is internal to the CC1312 link. The UART framing to the ESP32 can stay
-compatible with the current `rfPacketRx` design.
+compatible in structure with the current `rfPacketRx` design, but now carries an
+8-byte node address.
 
 The initial shared scaffold for these constants lives in `rfCommon/rfLinkProtocol.h`.
 
@@ -153,38 +149,38 @@ The first implementation step after adding the header is:
 The coordinator UART framing stays compatible with the current `rfPacketRx` format:
 
 ```text
-[0xAA] [LEN] [MSG_TYPE] [NODE_ADDR × 4 BE] [RSSI] [...payload...] [CRC8]
+[0xAA] [LEN] [MSG_TYPE] [NODE_ADDR × 8 BE] [RSSI] [...payload...] [CRC8]
 ```
 
 For coordinator downlink commands from the ESP32:
 
 - `MSG_TYPE = 0x20` — `UART_CMD_GET_STATUS`
-- `NODE_ADDR` = target node address, or `0xFFFFFFFF` for broadcast
+- `NODE_ADDR` = target node address, or `0xFFFFFFFFFFFFFFFF` for broadcast
 - `RSSI = 0x00`
 - no payload
 
-### Unicast `CMD_GET_STATUS` to node `0xDEAD0001`
+### Unicast `CMD_GET_STATUS` to node `0x00124B0012345678`
 
 ```text
-AA 06 20 DE AD 00 01 00 BA
+AA 0A 20 00 12 4B 00 12 34 56 78 00 E8
 ```
 
 ### Broadcast `CMD_GET_STATUS`
 
 ```text
-AA 06 20 FF FF FF FF 00 C7
+AA 0A 20 FF FF FF FF FF FF FF FF 00 CE
 ```
 
 ### Example forwarded `NODE_STATUS` response
 
-Example response for node `0xDEAD0001` with:
+Example response for node `0x00124B0012345678` with:
 
 - `battery_mv = 3300` (`0x0CE4`, little-endian)
 - `temp_cdeg = 2500` (`0x09C4`, little-endian)
 - `telemetry_count = 0x00001234`
 
 ```text
-AA 0E 01 DE AD 00 01 00 E4 0C C4 09 34 12 00 00 83
+AA 12 01 00 12 4B 00 12 34 56 78 00 E4 0C C4 09 34 12 00 00 47
 ```
 
 ## First Milestone

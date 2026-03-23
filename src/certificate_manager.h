@@ -7,7 +7,7 @@
 // NVS namespace and keys for certificate storage
 const char* const CERT_NVS_NAMESPACE = "certificates";
 const char* const CERT_CA_KEY = "mqtt_ca_cert";
-const char* const CERT_CLIENT_KEY = "mqtt_client_cert";
+const char* const CERT_CLIENT_KEY = "mqtt_clt_cert";  // max 15 chars for NVS
 const char* const CERT_PRIV_KEY = "mqtt_client_key";
 const char* const CERT_UPLOAD_TIME_KEY = "last_upload";
 
