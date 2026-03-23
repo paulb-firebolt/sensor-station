@@ -59,4 +59,4 @@ private:
     void freeCertBuffers(void);
 };
 
-#endif // CERTIFICATE_MANAGER_H
+#endif  // CERTIFICATE_MANAGER_H

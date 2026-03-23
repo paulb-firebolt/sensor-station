@@ -56,9 +56,9 @@ private:
 #if ENABLE_CC1312
     CC1312Manager* cc1312Manager;
 #endif
-    WebServer webServer;           // For WiFi (AP and STA mode)
+    WebServer webServer;  // For WiFi (AP and STA mode)
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-    EthernetServer* ethServer;     // For Ethernet
+    EthernetServer* ethServer;  // For Ethernet
 #endif
     DNSServer dnsServer;
     bool dnsActive;
@@ -108,7 +108,8 @@ private:
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // Ethernet HTTP handlers
     void handleEthernetClient(void);
-    void sendEthernetResponse(EthernetClient& client, int code, const String& contentType, const String& content);
+    void sendEthernetResponse(EthernetClient& client, int code, const String& contentType,
+                              const String& content);
     void handleEthernetRequest(EthernetClient& client, const String& request);
     bool requireEthernetAuth(const String& request);
 #endif
@@ -117,17 +118,17 @@ private:
 #if ENABLE_CC1312
     String generateCC1312Page(void);
 #endif
-    String generateProvisioningPage(void);          // WiFi AP - with scanning
+    String generateProvisioningPage(void);  // WiFi AP - with scanning
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     String generateEthernetProvisioningPage(void);  // Ethernet - manual input
 #endif
 #if WIFI_DISABLED
-    String generateDeviceSetupPage(void);           // No-WiFi first-run setup
+    String generateDeviceSetupPage(void);  // No-WiFi first-run setup
 #endif
     String generateStatusPage(void);
     String generateSaveSuccessPage(void);
-    String generateMQTTConfigPage(void);            // MQTT configuration
-    String generateMQTTSaveSuccessPage(void);       // MQTT settings saved
+    String generateMQTTConfigPage(void);       // MQTT configuration
+    String generateMQTTSaveSuccessPage(void);  // MQTT settings saved
 };
 
-#endif // WEB_SERVER_H
+#endif  // WEB_SERVER_H

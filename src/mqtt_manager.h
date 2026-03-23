@@ -45,8 +45,8 @@ public:
 
     // Configuration
     void loadConfig(void);
-    bool saveConfig(bool enabled, const String& broker, uint16_t port,
-                   const String& username, const String& password, const String& topic);
+    bool saveConfig(bool enabled, const String& broker, uint16_t port, const String& username,
+                    const String& password, const String& topic);
     bool isEnabled(void);
 
     // Get configuration
@@ -103,4 +103,4 @@ private:
     String getClientId(void);
 };
 
-#endif // MQTT_MANAGER_H
+#endif  // MQTT_MANAGER_H

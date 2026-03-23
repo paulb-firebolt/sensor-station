@@ -2,13 +2,12 @@
 #include "certs.h"
 
 CertificateManager::CertificateManager()
-    : nvs_ca_cert(nullptr)
-    , nvs_client_cert(nullptr)
-    , nvs_client_key(nullptr)
-    , using_nvs_ca(false)
-    , using_nvs_client(false)
-    , using_nvs_key(false) {
-}
+    : nvs_ca_cert(nullptr),
+      nvs_client_cert(nullptr),
+      nvs_client_key(nullptr),
+      using_nvs_ca(false),
+      using_nvs_client(false),
+      using_nvs_key(false) {}
 
 void CertificateManager::begin(void) {
     Serial.println("[CertMgr] Initializing certificate manager");
@@ -33,12 +32,18 @@ void CertificateManager::begin(void) {
         Serial.println("[CertMgr] No certificates in NVS, will use compiled-in defaults");
     } else {
         Serial.println("[CertMgr] WARNING: Partial certificates in NVS, using mixed sources");
-        if (using_nvs_ca) Serial.println("[CertMgr]   CA: NVS");
-        else Serial.println("[CertMgr]   CA: Compiled-in");
-        if (using_nvs_client) Serial.println("[CertMgr]   Client Cert: NVS");
-        else Serial.println("[CertMgr]   Client Cert: Compiled-in");
-        if (using_nvs_key) Serial.println("[CertMgr]   Client Key: NVS");
-        else Serial.println("[CertMgr]   Client Key: Compiled-in");
+        if (using_nvs_ca)
+            Serial.println("[CertMgr]   CA: NVS");
+        else
+            Serial.println("[CertMgr]   CA: Compiled-in");
+        if (using_nvs_client)
+            Serial.println("[CertMgr]   Client Cert: NVS");
+        else
+            Serial.println("[CertMgr]   Client Cert: Compiled-in");
+        if (using_nvs_key)
+            Serial.println("[CertMgr]   Client Key: NVS");
+        else
+            Serial.println("[CertMgr]   Client Key: Compiled-in");
     }
 }
 
