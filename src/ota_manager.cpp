@@ -4,11 +4,7 @@
 #include <mbedtls/md.h>
 
 OTAManager::OTAManager()
-    : currentVersion("0.0.0")
-    , previousVersion("0.0.0")
-    , bootCount(0)
-    , updateInProgress(false) {
-}
+    : currentVersion("0.0.0"), previousVersion("0.0.0"), bootCount(0), updateInProgress(false) {}
 
 void OTAManager::begin(void) {
     Serial.println("[OTA] Initializing OTA manager");
@@ -82,8 +78,8 @@ void OTAManager::saveVersionInfo(const String& newVersion) {
 
     prefs.end();
 
-    currentVersion = newVersion;
     previousVersion = currentVersion;
+    currentVersion = newVersion;
     bootCount = 0;
 
     Serial.print("[OTA] Version saved: ");
@@ -121,8 +117,10 @@ static bool isNewerVersion(const String& a, const String& b) {
     int bMaj = 0, bMin = 0, bPat = 0;
     sscanf(a.c_str(), "%d.%d.%d", &aMaj, &aMin, &aPat);
     sscanf(b.c_str(), "%d.%d.%d", &bMaj, &bMin, &bPat);
-    if (aMaj != bMaj) return aMaj > bMaj;
-    if (aMin != bMin) return aMin > bMin;
+    if (aMaj != bMaj)
+        return aMaj > bMaj;
+    if (aMin != bMin)
+        return aMin > bMin;
     return aPat > bPat;
 }
 
@@ -258,19 +256,13 @@ bool OTAManager::rollbackToPrevious(void) {
 
     if (running_partition->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) {
         // Currently on OTA_0, switch to OTA_1
-        other_partition = esp_partition_find_first(
-            ESP_PARTITION_TYPE_APP,
-            ESP_PARTITION_SUBTYPE_APP_OTA_1,
-            NULL
-        );
+        other_partition =
+            esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
         Serial.println("[OTA] Switching from OTA_0 to OTA_1");
     } else if (running_partition->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) {
         // Currently on OTA_1, switch to OTA_0
-        other_partition = esp_partition_find_first(
-            ESP_PARTITION_TYPE_APP,
-            ESP_PARTITION_SUBTYPE_APP_OTA_0,
-            NULL
-        );
+        other_partition =
+            esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
         Serial.println("[OTA] Switching from OTA_1 to OTA_0");
     }
 

@@ -2,14 +2,24 @@
 #include <mbedtls/base64.h>
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
-    : wifiManager(wifiMgr), certManager(nullptr), mqttManager(nullptr),
+    : wifiManager(wifiMgr),
+      certManager(nullptr),
+      mqttManager(nullptr),
+      otaManager_(nullptr),
+#if ENABLE_CC1312
+      cc1312Manager(nullptr),
+#endif
       webServer(WIFI_WEB_SERVER_PORT),
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
       ethServer(nullptr),
 #endif
-      dnsActive(false), ethServerActive(false),
-      ethernetIP(0, 0, 0, 0), ethernetConnected(false),
-      adminPassword(""), lastFailedAttempt(0), failedAttempts(0),
+      dnsActive(false),
+      ethServerActive(false),
+      ethernetIP(0, 0, 0, 0),
+      ethernetConnected(false),
+      adminPassword(""),
+      lastFailedAttempt(0),
+      failedAttempts(0),
       findMeCallback(nullptr) {
 }
 
@@ -22,6 +32,17 @@ void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* 
     mqttManager = mqttMgr;
     Serial.println("[Web] MQTT managers set");
 }
+
+void DeviceWebServer::setOTAManager(OTAManager* otaMgr) {
+    otaManager_ = otaMgr;
+}
+
+#if ENABLE_CC1312
+void DeviceWebServer::setCC1312Manager(CC1312Manager* mgr) {
+    cc1312Manager = mgr;
+    Serial.println("[Web] CC1312 manager set");
+}
+#endif
 
 // Start web server and DNS (if in AP mode)
 void DeviceWebServer::begin(void) {
@@ -50,9 +71,19 @@ void DeviceWebServer::begin(void) {
         webServer.on("/mqtt", HTTP_GET, [this]() { handleMQTTConfig(); });
         webServer.on("/api/mqtt/save", HTTP_POST, [this]() { handleMQTTSave(); });
         webServer.on("/api/mqtt/upload", HTTP_POST, [this]() { handleMQTTUploadCert(); });
+        webServer.on("/api/mqtt/upload-all", HTTP_POST, [this]() { handleMQTTUploadAllCerts(); });
         webServer.on("/api/mqtt/clear", HTTP_POST, [this]() { handleMQTTClearCerts(); });
         webServer.on("/api/mqtt/status", HTTP_GET, [this]() { handleMQTTStatus(); });
+#if ENABLE_CC1312
+        webServer.on("/cc1312", HTTP_GET, [this]() { handleCC1312Page(); });
+        webServer.on("/api/cc1312/status", HTTP_GET, [this]() { handleCC1312Status(); });
+        webServer.on("/api/cc1312/action", HTTP_POST, [this]() { handleCC1312Action(); });
+#endif
         webServer.onNotFound([this]() { handleNotFound(); });
+
+        // Collect headers needed for diagnostics and auth
+        const char* headers[] = {"Content-Type", "Content-Length", "Authorization"};
+        webServer.collectHeaders(headers, 3);
 
         webServer.begin();
         Serial.println("[Web] WiFi server started on port 80");
@@ -152,8 +183,9 @@ void DeviceWebServer::handleEthernetClient(void) {
             if (clPos > 0) {
                 int clEnd = request.indexOf("\r\n", clPos);
                 if (clEnd > clPos) {
-                    String clValue = request.substring(clPos + 15, clEnd); // "Content-Length:" is 15 chars
-                    clValue.trim(); // Remove any whitespace
+                    String clValue =
+                        request.substring(clPos + 15, clEnd);  // "Content-Length:" is 15 chars
+                    clValue.trim();                            // Remove any whitespace
                     contentLength = clValue.toInt();
                     Serial.print("[Eth] Parsed Content-Length: ");
                     Serial.println(contentLength);
@@ -208,7 +240,8 @@ void DeviceWebServer::handleEthernetClient(void) {
 }
 
 // Send HTTP response to Ethernet client
-void DeviceWebServer::sendEthernetResponse(EthernetClient& client, int code, const String& contentType, const String& content) {
+void DeviceWebServer::sendEthernetResponse(EthernetClient& client, int code,
+                                           const String& contentType, const String& content) {
     String statusText = (code == 200) ? "OK" : (code == 404) ? "Not Found" : "Error";
 
     // Send headers
@@ -277,11 +310,14 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
                 if (s[i] == '+') {
                     out += ' ';
                 } else if (s[i] == '%' && i + 2 < (int)s.length()) {
-                    char hi = s[i+1], lo = s[i+2];
+                    char hi = s[i + 1], lo = s[i + 2];
                     auto hexVal = [](char c) -> int {
-                        if (c >= '0' && c <= '9') return c - '0';
-                        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-                        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                        if (c >= '0' && c <= '9')
+                            return c - '0';
+                        if (c >= 'a' && c <= 'f')
+                            return c - 'a' + 10;
+                        if (c >= 'A' && c <= 'F')
+                            return c - 'A' + 10;
                         return 0;
                     };
                     out += (char)((hexVal(hi) << 4) | hexVal(lo));
@@ -296,10 +332,12 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         auto parseField = [&](const String& key) -> String {
             String search = key + "=";
             int pos = body.indexOf(search);
-            if (pos < 0) return "";
+            if (pos < 0)
+                return "";
             int start = pos + search.length();
             int end = body.indexOf('&', start);
-            if (end < 0) end = body.length();
+            if (end < 0)
+                end = body.length();
             return urlDecode(body.substring(start, end));
         };
 
@@ -307,11 +345,12 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         String confirm = parseField("admin_password_confirm");
 
         if (newPass.length() < 4) {
-            sendEthernetResponse(client, 400, "text/html",
+            sendEthernetResponse(
+                client, 400, "text/html",
                 "<h1>Error: Password must be at least 4 characters</h1><a href='/'>Back</a>");
         } else if (newPass != confirm) {
             sendEthernetResponse(client, 400, "text/html",
-                "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
+                                 "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
         } else {
             Preferences authPrefs;
             if (authPrefs.begin("auth", false)) {
@@ -360,11 +399,14 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 
             // Remove any trailing characters (like \r\n)
             int ssidEnd = ssid.indexOf('&');
-            if (ssidEnd > 0) ssid = ssid.substring(0, ssidEnd);
+            if (ssidEnd > 0)
+                ssid = ssid.substring(0, ssidEnd);
             int passEnd = password.indexOf('\r');
-            if (passEnd > 0) password = password.substring(0, passEnd);
+            if (passEnd > 0)
+                password = password.substring(0, passEnd);
             passEnd = password.indexOf('\n');
-            if (passEnd > 0) password = password.substring(0, passEnd);
+            if (passEnd > 0)
+                password = password.substring(0, passEnd);
 
             // URL decode
             ssid.replace("+", " ");
@@ -476,10 +518,12 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         // Helper function to extract value between prefix and &
         auto extractValue = [&](const String& prefix) -> String {
             int pos = body.indexOf(prefix);
-            if (pos < 0) return "";
+            if (pos < 0)
+                return "";
             int start = pos + prefix.length();
             int end = body.indexOf("&", start);
-            if (end < 0) end = body.length();
+            if (end < 0)
+                end = body.length();
             String value = body.substring(start, end);
             // URL decode
             value.replace("+", " ");
@@ -492,7 +536,8 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 
         broker = extractValue("broker=");
         String portStr = extractValue("port=");
-        if (portStr.length() > 0) port = portStr.toInt();
+        if (portStr.length() > 0)
+            port = portStr.toInt();
         username = extractValue("username=");
         password = extractValue("password=");
         topic = extractValue("topic=");
@@ -506,11 +551,93 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         Serial.print(", Topic: ");
         Serial.println(topic);
 
-        if (mqttManager && mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
+        if (mqttManager &&
+            mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
             sendEthernetResponse(client, 200, "text/html", generateMQTTSaveSuccessPage());
         } else {
             sendEthernetResponse(client, 500, "text/plain", "Failed to save MQTT configuration");
         }
+    } else if (requestLine.startsWith("POST /api/mqtt/upload-all")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (certManager == nullptr) {
+            sendEthernetResponse(client, 503, "text/plain", "Certificate manager not initialized");
+            return;
+        }
+        int bodyStart = request.indexOf("\r\n\r\n") + 4;
+        String body = request.substring(bodyStart);
+        auto extractAndDecode = [&](const String& prefix) -> String {
+            int pos = body.indexOf(prefix);
+            if (pos < 0)
+                return "";
+            int start = pos + prefix.length();
+            int end = body.indexOf("&", start);
+            if (end < 0)
+                end = body.length();
+            String val = body.substring(start, end);
+            // URL decode common PEM characters
+            val.replace("+", " ");
+            val.replace("%0A", "\n");
+            val.replace("%0D", "");
+            val.replace("%2B", "+");
+            val.replace("%2F", "/");
+            val.replace("%3D", "=");
+            val.replace("%20", " ");
+            return val;
+        };
+        String caCert = extractAndDecode("ca_cert=");
+        String clientCert = extractAndDecode("client_cert=");
+        String clientKey = extractAndDecode("client_key=");
+        if (caCert.length() == 0 && clientCert.length() == 0 && clientKey.length() == 0) {
+            sendEthernetResponse(client, 400, "text/plain", "No certificate data provided");
+            return;
+        }
+        int saved = 0, failed = 0;
+        if (caCert.length() > 0) {
+            if (certManager->saveCACert(caCert))
+                saved++;
+            else
+                failed++;
+        }
+        if (clientCert.length() > 0) {
+            if (certManager->saveClientCert(clientCert))
+                saved++;
+            else
+                failed++;
+        }
+        if (clientKey.length() > 0) {
+            if (certManager->saveClientKey(clientKey))
+                saved++;
+            else
+                failed++;
+        }
+        if (failed == 0) {
+            sendEthernetResponse(client, 200, "text/plain",
+                                 "Saved " + String(saved) + " certificate(s)");
+        } else {
+            sendEthernetResponse(client, 500, "text/plain",
+                                 String(failed) + " certificate(s) failed to save");
+        }
+    } else if (requestLine.startsWith("POST /api/mqtt/clear")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"MQTT Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (certManager != nullptr)
+            certManager->clearCertificates();
+        sendEthernetResponse(client, 200, "text/plain", "All certificates cleared");
     } else if (requestLine.startsWith("GET /api/mqtt/status")) {
         // MQTT status JSON - requires authentication
         if (!requireEthernetAuth(request)) {
@@ -524,7 +651,8 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         }
 
         if (mqttManager == nullptr || certManager == nullptr) {
-            sendEthernetResponse(client, 503, "application/json", "{\"error\":\"MQTT not initialized\"}");
+            sendEthernetResponse(client, 503, "application/json",
+                                 "{\"error\":\"MQTT not initialized\"}");
         } else {
             JsonDocument doc;
             doc["enabled"] = mqttManager->isEnabled();
@@ -546,13 +674,93 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             serializeJson(doc, jsonResponse);
             sendEthernetResponse(client, 200, "application/json", jsonResponse);
         }
+#if ENABLE_CC1312
+    } else if (requestLine.startsWith("GET /cc1312")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "text/plain", "CC1312 not enabled");
+        } else {
+            sendEthernetResponse(client, 200, "text/html", generateCC1312Page());
+        }
+    } else if (requestLine.startsWith("GET /api/cc1312/status")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "application/json",
+                                 "{\"error\":\"CC1312 not enabled\"}");
+        } else {
+            JsonDocument doc;
+            doc["discovery_mode"] = cc1312Manager->isDiscoveryMode();
+            doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
+            JsonArray enrolled = doc["enrolled"].to<JsonArray>();
+            char addrBuf[17];
+            for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
+                snprintf(addrBuf, sizeof(addrBuf), "%016llX",
+                         (unsigned long long)cc1312Manager->enrolledAddr(i));
+                enrolled.add(addrBuf);
+            }
+            JsonArray seen = doc["seen"].to<JsonArray>();
+            for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
+                JsonObject n = seen.add<JsonObject>();
+                snprintf(addrBuf, sizeof(addrBuf), "%016llX",
+                         (unsigned long long)cc1312Manager->seenAddr(i));
+                n["addr"] = addrBuf;
+                n["rssi_dbm"] = cc1312Manager->seenRssi(i);
+            }
+            String json;
+            serializeJson(doc, json);
+            sendEthernetResponse(client, 200, "application/json", json);
+        }
+    } else if (requestLine.startsWith("POST /api/cc1312/action")) {
+        if (!requireEthernetAuth(request)) {
+            client.println("HTTP/1.1 401 Unauthorized");
+            client.println("WWW-Authenticate: Basic realm=\"Device Configuration\"");
+            client.println("Content-Type: text/plain");
+            client.println("Connection: close");
+            client.println();
+            client.println("Authentication required");
+            return;
+        }
+        if (cc1312Manager == nullptr) {
+            sendEthernetResponse(client, 503, "application/json",
+                                 "{\"error\":\"CC1312 not enabled\"}");
+        } else {
+            int bodyStart = request.indexOf("\r\n\r\n") + 4;
+            String body = request.substring(bodyStart);
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, body);
+            if (err) {
+                sendEthernetResponse(client, 400, "application/json",
+                                     "{\"error\":\"Invalid JSON\"}");
+            } else {
+                String action = doc["action"] | "";
+                cc1312Manager->handleCommand(action, doc);
+                sendEthernetResponse(client, 200, "application/json", "{\"ok\":true}");
+            }
+        }
+#endif
     } else {
         // 404 Not Found
         Serial.println("[Eth] 404 Not Found");
         sendEthernetResponse(client, 404, "text/plain", "Not Found");
     }
 }
-#endif // ENABLE_ETHERNET
+#endif  // ENABLE_ETHERNET
 
 // Set Ethernet information
 void DeviceWebServer::setEthernetInfo(IPAddress ip, String mac, bool connected) {
@@ -582,13 +790,14 @@ void DeviceWebServer::handleDeviceSetup(void) {
     String confirm = webServer.arg("admin_password_confirm");
 
     if (newPass.length() < 4) {
-        webServer.send(400, "text/html",
+        webServer.send(
+            400, "text/html",
             "<h1>Error: Password must be at least 4 characters</h1><a href='/'>Back</a>");
         return;
     }
     if (newPass != confirm) {
         webServer.send(400, "text/html",
-            "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
+                       "<h1>Error: Passwords do not match</h1><a href='/'>Back</a>");
         return;
     }
 
@@ -600,14 +809,14 @@ void DeviceWebServer::handleDeviceSetup(void) {
         Serial.println("[Setup] Admin password saved");
     } else {
         webServer.send(500, "text/html",
-            "<h1>Error: Failed to save password</h1><a href='/'>Back</a>");
+                       "<h1>Error: Failed to save password</h1><a href='/'>Back</a>");
         return;
     }
 
     webServer.sendHeader("Location", "/");
     webServer.send(303);
 }
-#endif // WIFI_DISABLED
+#endif  // WIFI_DISABLED
 
 void DeviceWebServer::handleRoot(void) {
 #if WIFI_DISABLED
@@ -660,7 +869,7 @@ void DeviceWebServer::handleSave(void) {
         if (!webServer.hasArg("ssid") || !webServer.hasArg("password")) {
             Serial.println("[WiFi] Missing required fields");
             webServer.send(400, "text/html",
-                "<h1>Error: Missing WiFi credentials</h1><a href='/'>Back</a>");
+                           "<h1>Error: Missing WiFi credentials</h1><a href='/'>Back</a>");
             return;
         }
     }
@@ -678,12 +887,13 @@ void DeviceWebServer::handleSave(void) {
         if (adminPassword != adminPasswordConfirm) {
             Serial.println("[WiFi] Admin passwords do not match");
             webServer.send(400, "text/html",
-                "<h1>Error: Admin passwords do not match</h1><a href='/'>Back</a>");
+                           "<h1>Error: Admin passwords do not match</h1><a href='/'>Back</a>");
             return;
         }
         if (adminPassword.length() < 4) {
             Serial.println("[WiFi] Admin password too short");
-            webServer.send(400, "text/html",
+            webServer.send(
+                400, "text/html",
                 "<h1>Error: Admin password must be at least 4 characters</h1><a href='/'>Back</a>");
             return;
         }
@@ -758,7 +968,8 @@ String DeviceWebServer::generateProvisioningPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -809,7 +1020,8 @@ String DeviceWebServer::generateProvisioningPage(void) {
     button {
       width: 100%;
       padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -978,7 +1190,8 @@ String DeviceWebServer::generateStatusPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       padding: 20px;
     }
@@ -1048,26 +1261,28 @@ String DeviceWebServer::generateStatusPage(void) {
 <body>
   <div class="container">
     <div class="card">
-      <h1>)HTML" + hostname + R"HTML(</h1>
+      <h1>)HTML" + hostname +
+                  R"HTML(</h1>
 
       <h2>Ethernet Status</h2>
       <div class="status-item">
         <span class="label">Status</span>
         <span class="value">)HTML";
 
-    html += ethernetConnected ?
-        "<span class='status-badge status-online'>Connected</span>" :
-        "<span class='status-badge status-offline'>Disconnected</span>";
+    html += ethernetConnected ? "<span class='status-badge status-online'>Connected</span>"
+                              : "<span class='status-badge status-offline'>Disconnected</span>";
 
     html += R"HTML(</span>
       </div>
       <div class="status-item">
         <span class="label">IP Address</span>
-        <span class="value">)HTML" + ethernetIP.toString() + R"HTML(</span>
+        <span class="value">)HTML" +
+            ethernetIP.toString() + R"HTML(</span>
       </div>
       <div class="status-item">
         <span class="label">MAC Address</span>
-        <span class="value">)HTML" + ethernetMAC + R"HTML(</span>
+        <span class="value">)HTML" +
+            ethernetMAC + R"HTML(</span>
       </div>)HTML";
 
 #if !WIFI_DISABLED
@@ -1077,9 +1292,8 @@ String DeviceWebServer::generateStatusPage(void) {
         <span class="label">Status</span>
         <span class="value">)HTML";
 
-    html += wifiConnected ?
-        "<span class='status-badge status-online'>Connected</span>" :
-        "<span class='status-badge status-offline'>Disconnected</span>";
+    html += wifiConnected ? "<span class='status-badge status-online'>Connected</span>"
+                          : "<span class='status-badge status-offline'>Disconnected</span>";
 
     html += R"HTML(</span>
       </div>)HTML";
@@ -1088,23 +1302,54 @@ String DeviceWebServer::generateStatusPage(void) {
         html += R"HTML(
       <div class="status-item">
         <span class="label">Network</span>
-        <span class="value">)HTML" + wifiSSID + R"HTML(</span>
+        <span class="value">)HTML" +
+                wifiSSID + R"HTML(</span>
       </div>
       <div class="status-item">
         <span class="label">IP Address</span>
-        <span class="value">)HTML" + wifiIP.toString() + R"HTML(</span>
+        <span class="value">)HTML" +
+                wifiIP.toString() + R"HTML(</span>
       </div>
       <div class="status-item">
         <span class="label">Signal Strength</span>
-        <span class="value">)HTML" + String(wifiRSSI) + R"HTML( dBm</span>
+        <span class="value">)HTML" +
+                String(wifiRSSI) + R"HTML( dBm</span>
       </div>)HTML";
     }
 #endif
 
     html += R"HTML(
 
-      <div style="margin-top:20px;">
+)HTML";
+
+    // Firmware section
+    String currentVer = otaManager_ ? otaManager_->getCurrentVersion() : "unknown";
+    String previousVer = otaManager_ ? otaManager_->getPreviousVersion() : "";
+    html += R"HTML(
+      <h2>Firmware</h2>
+      <div class="status-item">
+        <span class="label">Running Version</span>
+        <span class="value">)HTML" +
+            currentVer + R"HTML(</span>
+      </div>)HTML";
+    if (previousVer.length() > 0) {
+        html += R"HTML(
+      <div class="status-item">
+        <span class="label">Previous Version</span>
+        <span class="value">)HTML" +
+                previousVer + R"HTML(</span>
+      </div>)HTML";
+    }
+    html +=
+        R"HTML(
+
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <button onclick="fetch('/api/findme',{method:'POST'})" style="padding:10px 20px;background:#667eea;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Find Me</button>
+        <a href="/mqtt" style="padding:10px 20px;background:#764ba2;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">MQTT</a>)HTML"
+#if ENABLE_CC1312
+        R"HTML(<a href="/cc1312" style="padding:10px 20px;background:#28a745;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">Sub-1GHz</a>)HTML"
+#endif
+        R"HTML(
       </div>
 
       <div class="info" style="margin-top:15px;">
@@ -1141,7 +1386,8 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1192,7 +1438,8 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     button {
       width: 100%;
       padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -1252,7 +1499,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
 </body>
 </html>)HTML";
 }
-#endif // ENABLE_ETHERNET
+#endif  // ENABLE_ETHERNET
 
 // Generate save success page
 String DeviceWebServer::generateSaveSuccessPage(void) {
@@ -1266,7 +1513,8 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1322,7 +1570,8 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1367,7 +1616,8 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
       transition: opacity 0.2s;
     }
     .btn-primary {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
     }
     .btn-secondary {
@@ -1419,7 +1669,8 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1446,7 +1697,8 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
     input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
     button {
       width: 100%; padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white; border: none; border-radius: 6px;
       font-weight: 600; cursor: pointer; margin-top: 20px; font-size: 16px;
     }
@@ -1481,7 +1733,7 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
 </body>
 </html>)HTML";
 }
-#endif // WIFI_DISABLED
+#endif  // WIFI_DISABLED
 
 // Load admin password from NVS
 void DeviceWebServer::loadAdminPassword(void) {
@@ -1512,7 +1764,7 @@ bool DeviceWebServer::requireAuth(void) {
     if (failedAttempts >= 5 && millis() - lastFailedAttempt < 60000) {
         Serial.println("[Web] Rate limit exceeded - too many failed attempts");
         webServer.send(429, "text/plain",
-            "Too many failed authentication attempts. Please wait 1 minute.");
+                       "Too many failed authentication attempts. Please wait 1 minute.");
         return false;
     }
 
@@ -1557,9 +1809,10 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     }
 
     // Extract Base64 encoded credentials
-    int authStart = authPos + 21; // Length of "Authorization: Basic "
+    int authStart = authPos + 21;  // Length of "Authorization: Basic "
     int authEnd = request.indexOf("\r\n", authStart);
-    if (authEnd < 0) authEnd = request.length();
+    if (authEnd < 0)
+        authEnd = request.length();
 
     String base64Creds = request.substring(authStart, authEnd);
     base64Creds.trim();
@@ -1569,8 +1822,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     size_t expectedLen;
 
     // Calculate required buffer size
-    mbedtls_base64_encode(NULL, 0, &expectedLen,
-                          (const unsigned char*)expectedCreds.c_str(),
+    mbedtls_base64_encode(NULL, 0, &expectedLen, (const unsigned char*)expectedCreds.c_str(),
                           expectedCreds.length());
 
     // Allocate buffer and encode
@@ -1581,9 +1833,9 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     }
 
     size_t actualLen;
-    int ret = mbedtls_base64_encode(expectedBase64Buf, expectedLen, &actualLen,
-                                    (const unsigned char*)expectedCreds.c_str(),
-                                    expectedCreds.length());
+    int ret =
+        mbedtls_base64_encode(expectedBase64Buf, expectedLen, &actualLen,
+                              (const unsigned char*)expectedCreds.c_str(), expectedCreds.length());
 
     if (ret != 0) {
         free(expectedBase64Buf);
@@ -1609,12 +1861,13 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     Serial.println("[Eth] Authentication successful");
     return true;
 }
-#endif // ENABLE_ETHERNET
+#endif  // ENABLE_ETHERNET
 
 // MQTT Configuration Handlers
 void DeviceWebServer::handleMQTTConfig(void) {
     // Require authentication
-    if (!requireAuth()) return;
+    if (!requireAuth())
+        return;
 
     if (mqttManager == nullptr || certManager == nullptr) {
         webServer.send(503, "text/plain", "MQTT not initialized");
@@ -1626,7 +1879,8 @@ void DeviceWebServer::handleMQTTConfig(void) {
 
 void DeviceWebServer::handleMQTTSave(void) {
     // Require authentication
-    if (!requireAuth()) return;
+    if (!requireAuth())
+        return;
 
     if (mqttManager == nullptr) {
         webServer.send(503, "text/plain", "MQTT manager not initialized");
@@ -1637,7 +1891,8 @@ void DeviceWebServer::handleMQTTSave(void) {
     bool enabled = webServer.hasArg("enabled");
     String broker = webServer.arg("broker");
     uint16_t port = webServer.arg("port").toInt();
-    if (port == 0) port = 8883;
+    if (port == 0)
+        port = 8883;
     String username = webServer.arg("username");
     String password = webServer.arg("password");
     String topic = webServer.arg("topic");
@@ -1652,7 +1907,8 @@ void DeviceWebServer::handleMQTTSave(void) {
 
 void DeviceWebServer::handleMQTTUploadCert(void) {
     // Require authentication
-    if (!requireAuth()) return;
+    if (!requireAuth())
+        return;
 
     if (certManager == nullptr) {
         webServer.send(503, "text/plain", "Certificate manager not initialized");
@@ -1687,9 +1943,71 @@ void DeviceWebServer::handleMQTTUploadCert(void) {
     }
 }
 
+void DeviceWebServer::handleMQTTUploadAllCerts(void) {
+    Serial.println("[Web] Upload-all handler entered");
+
+    if (!requireAuth()) {
+        Serial.println("[Web] Upload-all: auth failed");
+        return;
+    }
+    Serial.println("[Web] Upload-all: auth OK");
+
+    if (certManager == nullptr) {
+        Serial.println("[Web] Upload-all: certManager null");
+        webServer.send(503, "text/plain", "Certificate manager not initialized");
+        return;
+    }
+
+    String caCert = webServer.arg("ca_cert");
+    String clientCert = webServer.arg("client_cert");
+    String clientKey = webServer.arg("client_key");
+
+    Serial.printf("[Web] Upload-all received: CA=%d client=%d key=%d bytes\n", caCert.length(),
+                  clientCert.length(), clientKey.length());
+
+    if (caCert.length() == 0 && clientCert.length() == 0 && clientKey.length() == 0) {
+        Serial.println("[Web] Upload-all: all fields empty - body not parsed?");
+        Serial.printf("[Web] Content-Type: %s\n", webServer.header("Content-Type").c_str());
+        Serial.printf("[Web] Content-Length: %s\n", webServer.header("Content-Length").c_str());
+        webServer.send(400, "text/plain", "No certificate data provided");
+        return;
+    }
+
+    int saved = 0;
+    int failed = 0;
+
+    if (caCert.length() > 0) {
+        if (certManager->saveCACert(caCert))
+            saved++;
+        else
+            failed++;
+    }
+    if (clientCert.length() > 0) {
+        if (certManager->saveClientCert(clientCert))
+            saved++;
+        else
+            failed++;
+    }
+    if (clientKey.length() > 0) {
+        if (certManager->saveClientKey(clientKey))
+            saved++;
+        else
+            failed++;
+    }
+
+    if (failed == 0) {
+        if (mqttManager)
+            mqttManager->refreshCerts();
+        webServer.send(200, "text/plain", "Saved " + String(saved) + " certificate(s)");
+    } else {
+        webServer.send(500, "text/plain", String(failed) + " certificate(s) failed to save");
+    }
+}
+
 void DeviceWebServer::handleMQTTClearCerts(void) {
     // Require authentication
-    if (!requireAuth()) return;
+    if (!requireAuth())
+        return;
 
     if (certManager == nullptr) {
         webServer.send(503, "text/plain", "Certificate manager not initialized");
@@ -1702,7 +2020,8 @@ void DeviceWebServer::handleMQTTClearCerts(void) {
 
 void DeviceWebServer::handleMQTTStatus(void) {
     // Require authentication
-    if (!requireAuth()) return;
+    if (!requireAuth())
+        return;
 
     if (mqttManager == nullptr || certManager == nullptr) {
         webServer.send(503, "application/json", "{\"error\":\"MQTT not initialized\"}");
@@ -1750,7 +2069,8 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       padding: 20px;
     }
@@ -1799,13 +2119,32 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       margin-right: 8px;
     }
     textarea {
-      min-height: 150px;
+      min-height: 100px;
       font-family: monospace;
       font-size: 12px;
     }
+    .drop-zone {
+      border: 2px dashed #667eea;
+      border-radius: 8px;
+      padding: 18px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      color: #667eea;
+      background: #f8f9ff;
+      margin-bottom: 8px;
+      font-size: 13px;
+      user-select: none;
+    }
+    .drop-zone:hover { background: #eef0ff; }
+    .drop-zone.drag-over { background: #dde1ff; border-color: #4a5fd4; border-style: solid; }
+    .drop-zone.loaded { border-color: #43a047; background: #f1f8e9; color: #2e7d32; border-style: solid; }
+    .drop-zone .dz-icon { font-size: 22px; display: block; margin-bottom: 6px; }
+    .cert-clear { font-size: 12px; color: #888; cursor: pointer; text-decoration: underline; float: right; margin-top: -24px; }
     button {
       padding: 10px 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -1834,63 +2173,74 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       font-size: 13px;
       color: #e65100;
     }
-    .nav {
-      margin-bottom: 20px;
+    .nav { margin-bottom: 15px; }
+    .nav a { color: #667eea; text-decoration: none; font-size: 14px; }
+    .nav a:hover { text-decoration: underline; }
+    #modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 100;
+      align-items: center; justify-content: center;
     }
-    .nav a {
-      color: white;
-      text-decoration: none;
-      padding: 10px 20px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 6px;
-      display: inline-block;
+    #modal-overlay.active { display: flex; }
+    #modal-box {
+      background: white; border-radius: 12px; padding: 28px 28px 20px;
+      max-width: 380px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      animation: modal-in 0.15s ease;
     }
+    @keyframes modal-in { from { transform: scale(0.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    #modal-icon { font-size: 32px; margin-bottom: 10px; }
+    #modal-icon:empty { display: none; }
+    #modal-title { font-size: 17px; font-weight: 700; color: #333; margin-bottom: 8px; }
+    #modal-msg { font-size: 14px; color: #555; line-height: 1.5; margin-bottom: 20px; }
+    #modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
+    #modal-btns button { margin: 0; padding: 9px 20px; font-size: 14px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="nav">
-      <a href="/">← Back to Status</a>
-    </div>
-
     <div class="card">
+      <div class="nav"><a href="/">&#8592; Status</a></div>
       <h1>MQTT Configuration</h1>
 
 )HTML"
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-    R"HTML(      <div class="warning">
+           R"HTML(      <div class="warning">
         <strong>Note:</strong> MQTTS is not supported over W5500 Ethernet. TLS connections require WiFi.
       </div>)HTML"
 #else
-    R"HTML(      <div class="info">
+           R"HTML(      <div class="info">
         <strong>TLS supported</strong> — MQTTS (port 8883) works over both Ethernet and WiFi on this device.
       </div>)HTML"
 #endif
-    R"HTML(
+           R"HTML(
 
       <form method="POST" action="/api/mqtt/save">
         <h2>Connection Settings</h2>
 
         <div class="form-group">
           <label>
-            <input type="checkbox" name="enabled" )HTML" + String(enabled ? "checked" : "") + R"HTML(>
+            <input type="checkbox" name="enabled" )HTML" +
+           String(enabled ? "checked" : "") + R"HTML(>
             Enable MQTT
           </label>
         </div>
 
         <div class="form-group">
           <label>Broker (hostname or IP) *</label>
-          <input type="text" name="broker" placeholder="192.168.1.100 or mqtt.example.com" value=")HTML" + broker + R"HTML(" required>
+          <input type="text" name="broker" placeholder="192.168.1.100 or mqtt.example.com" value=")HTML" +
+           broker + R"HTML(" required>
         </div>
 
         <div class="form-group">
           <label>Port</label>
-          <input type="number" name="port" value=")HTML" + String(port) + R"HTML(" placeholder="8883">
+          <input type="number" name="port" value=")HTML" +
+           String(port) + R"HTML(" placeholder="8883">
         </div>
 
         <div class="form-group">
           <label>Username (optional)</label>
-          <input type="text" name="username" placeholder="mqtt_user" value=")HTML" + username + R"HTML(">
+          <input type="text" name="username" placeholder="mqtt_user" value=")HTML" +
+           username + R"HTML(">
         </div>
 
         <div class="form-group">
@@ -1900,7 +2250,8 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
 
         <div class="form-group">
           <label>Topic Prefix</label>
-          <input type="text" name="topic" placeholder="sensors/esp32" value=")HTML" + topic + R"HTML(">
+          <input type="text" name="topic" placeholder="sensors/esp32" value=")HTML" +
+           topic + R"HTML(">
         </div>
 
         <button type="submit">Save Settings</button>
@@ -1909,29 +2260,43 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
       <h2>TLS Certificates</h2>
 
       <div class="info">
-        <strong>Current Certificate Source:</strong> )HTML" + certSource + R"HTML(<br>
+        <strong>Current Certificate Source:</strong> <span id="cert-source-label">)HTML" +
+           certSource + R"HTML(</span><br>
+        <span id="cert-status-flags"></span>
         Upload custom certificates for production, or use compiled-in defaults for testing.
       </div>
 
       <div class="form-group">
-        <label>CA Certificate</label>
-        <textarea id="ca-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-        <button onclick="uploadCert('ca')">Upload CA Cert</button>
+        <label>CA Certificate <span style="font-weight:normal;color:#888">(ca.crt)</span></label>
+        <div id="dz-ca" class="drop-zone">
+          <span class="dz-icon">&#128196;</span>Drop ca.crt here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('ca-cert','dz-ca','ca.crt')">clear</span>
+        <textarea id="ca-cert" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
       </div>
 
       <div class="form-group">
-        <label>Client Certificate</label>
-        <textarea id="client-cert" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
-        <button onclick="uploadCert('client')">Upload Client Cert</button>
+        <label>Client Certificate <span style="font-weight:normal;color:#888">(client.crt)</span></label>
+        <div id="dz-client-cert" class="drop-zone">
+          <span class="dz-icon">&#128196;</span>Drop client.crt here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('client-cert','dz-client-cert','client.crt')">clear</span>
+        <textarea id="client-cert" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
       </div>
 
       <div class="form-group">
-        <label>Client Private Key</label>
-        <textarea id="client-key" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
-        <button onclick="uploadCert('key')">Upload Client Key</button>
+        <label>Client Private Key <span style="font-weight:normal;color:#888">(client.key)</span></label>
+        <div id="dz-client-key" class="drop-zone">
+          <span class="dz-icon">&#128274;</span>Drop client.key here or <strong>click to browse</strong>
+        </div>
+        <span class="cert-clear" onclick="clearField('client-key','dz-client-key','client.key')">clear</span>
+        <textarea id="client-key" placeholder="&#8203;— or paste PEM here —&#10;&#10;-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----"></textarea>
       </div>
 
-      <button class="btn-danger" onclick="clearCerts()">Clear All Certificates</button>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button type="button" onclick="uploadAll()" style="flex:1;padding:13px 20px;font-size:15px">&#8679; Upload All Certificates</button>
+        <button type="button" class="btn-danger" onclick="clearCerts()" style="flex:0 0 auto">Clear All</button>
+      </div>
 
       <h2>Status</h2>
       <div id="status-info">Loading...</div>
@@ -1939,60 +2304,179 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     </div>
   </div>
 
-  <script>
-    async function uploadCert(type) {
-      let data = '';
-      if (type === 'ca') data = document.getElementById('ca-cert').value;
-      else if (type === 'client') data = document.getElementById('client-cert').value;
-      else if (type === 'key') data = document.getElementById('client-key').value;
+  <div id="modal-overlay">
+    <div id="modal-box">
+      <div id="modal-icon"></div>
+      <div id="modal-title"></div>
+      <div id="modal-msg"></div>
+      <div id="modal-btns"></div>
+    </div>
+  </div>
 
-      if (!data) {
-        alert('Please paste certificate data first');
+  <script>
+    function loadFileIntoField(file, textareaId, zoneId) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        document.getElementById(textareaId).value = e.target.result;
+        const zone = document.getElementById(zoneId);
+        zone.classList.remove('drag-over');
+        zone.classList.add('loaded');
+        zone.innerHTML = '<span class="dz-icon">&#10003;</span>' + file.name;
+      };
+      reader.readAsText(file);
+    }
+
+    function clearField(textareaId, zoneId, label) {
+      document.getElementById(textareaId).value = '';
+      const zone = document.getElementById(zoneId);
+      zone.classList.remove('loaded', 'drag-over');
+      const icon = zoneId.includes('key') ? '&#128274;' : '&#128196;';
+      zone.innerHTML = '<span class="dz-icon">' + icon + '</span>Drop ' + label + ' here or <strong>click to browse</strong>';
+    }
+
+    function setupDropZone(zoneId, textareaId, accept, label) {
+      const zone = document.getElementById(zoneId);
+      zone.addEventListener('click', () => {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = accept;
+        inp.onchange = e => loadFileIntoField(e.target.files[0], textareaId, zoneId);
+        inp.click();
+      });
+      zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+      zone.addEventListener('dragleave', e => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over'); });
+      zone.addEventListener('drop', e => {
+        e.preventDefault();
+        loadFileIntoField(e.dataTransfer.files[0], textareaId, zoneId);
+      });
+    }
+
+    setupDropZone('dz-ca', 'ca-cert', '.crt,.pem,.cer', 'ca.crt');
+    setupDropZone('dz-client-cert', 'client-cert', '.crt,.pem,.cer', 'client.crt');
+    setupDropZone('dz-client-key', 'client-key', '.key,.pem', 'client.key');
+
+    // Modal helpers
+    function showModal(icon, title, msg, buttons) {
+      document.getElementById('modal-icon').innerHTML = icon;
+      document.getElementById('modal-title').textContent = title;
+      document.getElementById('modal-msg').innerHTML = msg.replace(/\n/g, '<br>');
+      const btns = document.getElementById('modal-btns');
+      btns.innerHTML = '';
+      buttons.forEach(b => {
+        const el = document.createElement('button');
+        el.textContent = b.label;
+        if (b.danger) el.classList.add('btn-danger');
+        el.onclick = () => { closeModal(); b.action(); };
+        btns.appendChild(el);
+      });
+      document.getElementById('modal-overlay').classList.add('active');
+    }
+    function closeModal() {
+      document.getElementById('modal-overlay').classList.remove('active');
+    }
+    function toast(icon, title, msg) {
+      return new Promise(resolve => {
+        showModal(icon, title, msg, [{ label: 'OK', action: resolve }]);
+      });
+    }
+    function confirm2(icon, title, msg, confirmLabel, danger) {
+      return new Promise(resolve => {
+        showModal(icon, title, msg, [
+          { label: 'Cancel', action: () => resolve(false) },
+          { label: confirmLabel, danger: danger, action: () => resolve(true) }
+        ]);
+      });
+    }
+    document.getElementById('modal-overlay').addEventListener('click', e => {
+      if (e.target === document.getElementById('modal-overlay')) closeModal();
+    });
+
+    async function uploadAll() {
+      const ca = document.getElementById('ca-cert').value.trim();
+      const cert = document.getElementById('client-cert').value.trim();
+      const key = document.getElementById('client-key').value.trim();
+
+      if (!ca && !cert && !key) {
+        await toast('', 'Nothing to upload', 'No certificate data entered. Drop files or paste PEM text first.');
         return;
       }
 
+      const overwriting = [
+        ca   && certStatus.has_ca_cert     ? 'CA Certificate' : null,
+        cert && certStatus.has_client_cert ? 'Client Certificate' : null,
+        key  && certStatus.has_client_key  ? 'Client Key' : null,
+      ].filter(Boolean);
+
+      if (overwriting.length > 0) {
+        const ok = await confirm2('', 'Overwrite existing certificates?',
+          'The following are already stored and will be replaced:\n\u2022 ' + overwriting.join('\n\u2022 '),
+          'Overwrite', true);
+        if (!ok) return;
+      }
+
+      const params = new URLSearchParams();
+      if (ca) params.append('ca_cert', ca);
+      if (cert) params.append('client_cert', cert);
+      if (key) params.append('client_key', key);
+
       try {
-        const res = await fetch('/api/mqtt/upload', {
+        const res = await fetch('/api/mqtt/upload-all', {
           method: 'POST',
+          credentials: 'include',
           headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: 'cert_type=' + type + '&cert_data=' + encodeURIComponent(data)
+          body: params.toString()
         });
         if (res.ok) {
-          alert('Certificate uploaded successfully');
+          await toast('', 'Certificates saved', await res.text());
+          await updateStatus();
           location.reload();
         } else {
-          alert('Upload failed: ' + await res.text());
+          await toast('', 'Upload failed', await res.text());
         }
       } catch (e) {
-        alert('Upload error: ' + e.message);
+        await toast('', 'Upload error', e.message);
       }
     }
 
     async function clearCerts() {
-      if (!confirm('Clear all certificates? Device will use compiled-in defaults.')) return;
+      const ok = await confirm2('', 'Clear certificates?',
+        'All stored certificates will be removed. The device will fall back to compiled-in defaults.',
+        'Clear All', true);
+      if (!ok) return;
 
       try {
-        const res = await fetch('/api/mqtt/clear', {method: 'POST'});
+        const res = await fetch('/api/mqtt/clear', {method: 'POST', credentials: 'include'});
         if (res.ok) {
-          alert('Certificates cleared');
+          await toast('', 'Certificates cleared', 'Device will reconnect using compiled-in defaults.');
           location.reload();
         } else {
-          alert('Failed to clear certificates');
+          await toast('', 'Failed', 'Could not clear certificates.');
         }
       } catch (e) {
-        alert('Error: ' + e.message);
+        await toast('', 'Error', e.message);
       }
     }
 
+    let certStatus = { has_ca_cert: false, has_client_cert: false, has_client_key: false };
+
     async function updateStatus() {
       try {
-        const res = await fetch('/api/mqtt/status');
+        const res = await fetch('/api/mqtt/status', {credentials: 'include'});
         const data = await res.json();
+        certStatus = { has_ca_cert: data.has_ca_cert, has_client_cert: data.has_client_cert, has_client_key: data.has_client_key };
         document.getElementById('status-info').innerHTML =
           '<strong>Status:</strong> ' + data.status + '<br>' +
           '<strong>Broker:</strong> ' + data.broker + ':' + data.port + '<br>' +
-          '<strong>Topic:</strong> ' + data.topic + '<br>' +
-          '<strong>Certificate Source:</strong> ' + data.cert_source;
+          '<strong>Topic:</strong> ' + data.topic;
+        const srcLabel = document.getElementById('cert-source-label');
+        if (srcLabel) srcLabel.textContent = data.cert_source;
+        const flags = document.getElementById('cert-status-flags');
+        if (flags) {
+          const ca = data.has_ca_cert ? '&#10003; CA' : '&#10007; CA';
+          const cc = data.has_client_cert ? '&#10003; Client Cert' : '&#10007; Client Cert';
+          const ck = data.has_client_key ? '&#10003; Client Key' : '&#10007; Client Key';
+          flags.innerHTML = '<span style="font-family:monospace;font-size:12px;color:#555">' + ca + ' &nbsp; ' + cc + ' &nbsp; ' + ck + '</span><br>';
+        }
       } catch (e) {
         document.getElementById('status-info').innerHTML = 'Error loading status';
       }
@@ -2004,3 +2488,392 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
 </body>
 </html>)HTML";
 }
+
+// ============================================================================
+// CC1312 Node Management
+// ============================================================================
+#if ENABLE_CC1312
+
+void DeviceWebServer::handleCC1312Page(void) {
+    if (!requireAuth())
+        return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "text/plain", "CC1312 not enabled");
+        return;
+    }
+    webServer.send(200, "text/html", generateCC1312Page());
+}
+
+void DeviceWebServer::handleCC1312Status(void) {
+    if (!requireAuth())
+        return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        return;
+    }
+    JsonDocument doc;
+    doc["discovery_mode"] = cc1312Manager->isDiscoveryMode();
+    doc["coordinator_alive"] = cc1312Manager->isCoordinatorAlive();
+    char coordId[17];
+    snprintf(coordId, sizeof(coordId), "%016llX",
+             (unsigned long long)cc1312Manager->coordinatorAddr());
+    doc["coordinator_id"] = coordId;
+    CC1312FwVersion coordVer = cc1312Manager->coordinatorVersion();
+    if (coordVer.known) {
+        char verStr[12];
+        snprintf(verStr, sizeof(verStr), "%u.%u.%u", coordVer.major, coordVer.minor, coordVer.patch);
+        doc["coordinator_fw"] = verStr;
+    }
+    JsonArray enrolled = doc["enrolled"].to<JsonArray>();
+    char addrBuf[17];
+    unsigned long nowMs = millis();
+    for (size_t i = 0; i < cc1312Manager->enrolledCount(); i++) {
+        JsonObject n = enrolled.add<JsonObject>();
+        snprintf(addrBuf, sizeof(addrBuf), "%016llX",
+                 (unsigned long long)cc1312Manager->enrolledAddr(i));
+        n["addr"] = addrBuf;
+        unsigned long ls = cc1312Manager->nodeLastSeen(i);
+        n["last_seen_ago_ms"] = (ls == 0) ? -1 : (long)(nowMs - ls);
+        CC1312FwVersion nv = cc1312Manager->nodeVersion(i);
+        if (nv.known) {
+            char nverStr[12];
+            snprintf(nverStr, sizeof(nverStr), "%u.%u.%u", nv.major, nv.minor, nv.patch);
+            n["fw_version"] = nverStr;
+            n["sensor_type"] = cc1312Manager->nodeSensorType(i);
+        }
+    }
+    JsonArray seen = doc["seen"].to<JsonArray>();
+    for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
+        JsonObject n = seen.add<JsonObject>();
+        snprintf(addrBuf, sizeof(addrBuf), "%016llX",
+                 (unsigned long long)cc1312Manager->seenAddr(i));
+        n["addr"] = addrBuf;
+        n["rssi_dbm"] = cc1312Manager->seenRssi(i);
+    }
+    String json;
+    serializeJson(doc, json);
+    webServer.send(200, "application/json", json);
+}
+
+void DeviceWebServer::handleCC1312Action(void) {
+    if (!requireAuth())
+        return;
+    if (cc1312Manager == nullptr) {
+        webServer.send(503, "application/json", "{\"error\":\"CC1312 not enabled\"}");
+        return;
+    }
+    String body = webServer.arg("plain");
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, body);
+    if (err) {
+        webServer.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    String action = doc["action"] | "";
+    cc1312Manager->handleCommand(action, doc);
+    webServer.send(200, "application/json", "{\"ok\":true}");
+}
+
+String DeviceWebServer::generateCC1312Page(void) {
+    return R"HTML(<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CC1312 Node Manager</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    h1 { font-size: 28px; margin-bottom: 5px; color: #333; }
+    .subtitle { color: #888; margin-bottom: 25px; font-size: 14px; }
+    h2 {
+      font-size: 18px;
+      margin: 0 0 15px 0;
+      color: #667eea;
+      border-bottom: 2px solid #667eea;
+      padding-bottom: 8px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .badge-green  { background: #d4edda; color: #155724; }
+    .badge-red    { background: #f8d7da; color: #721c24; }
+    .badge-blue   { background: #cce5ff; color: #004085; }
+    .badge-grey   { background: #e2e3e5; color: #383d41; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      color: #555;
+      font-weight: 600;
+      border-bottom: 2px solid #dee2e6;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #dee2e6;
+      font-family: monospace;
+    }
+    td:last-child { font-family: sans-serif; }
+    tr:last-child td { border-bottom: none; }
+    .empty { color: #aaa; font-style: italic; font-family: sans-serif; }
+    .btn {
+      display: inline-block;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-red    { background: #dc3545; color: white; }
+    .btn-green  { background: #28a745; color: white; }
+    .btn-blue   { background: #667eea; color: white; }
+    .btn-grey   { background: #6c757d; color: white; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    .nav { margin-bottom: 15px; }
+    .nav a { color: #667eea; text-decoration: none; font-size: 14px; }
+    .nav a:hover { text-decoration: underline; }
+    #msg { min-height: 20px; font-size: 13px; color: #28a745; margin-top: 8px; }
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: white;
+      border-radius: 12px;
+      padding: 28px 24px 20px;
+      max-width: 340px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .modal h3 { font-size: 17px; margin-bottom: 8px; color: #333; }
+    .modal p  { font-size: 14px; color: #666; margin-bottom: 20px; word-break: break-all; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <div class="nav"><a href="/">&#8592; Status</a></div>
+    <h1>CC1312 Node Manager</h1>
+    <p class="subtitle">Sub-1 GHz RF sensor network</p>
+
+    <h2>Coordinator</h2>
+    <div class="status-row">
+      <span>Coordinator: <span id="coord-status" class="badge badge-grey">&#x2026;</span></span>
+      <span id="coord-id" style="font-family:monospace;font-size:13px;color:#555"></span>
+      <span id="coord-fw" style="font-size:12px;color:#888"></span>
+      <button id="disc-btn" class="btn btn-green" onclick="toggleDiscovery()">&#x2026;</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Enrolled Nodes</h2>
+    <table id="enrolled-table">
+      <thead><tr><th>Address</th><th>Status</th><th>Firmware</th><th>Sensor</th><th>Action</th></tr></thead>
+      <tbody id="enrolled-body"><tr><td colspan="5" class="empty">Loading&#x2026;</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <h3>Remove Node</h3>
+      <p id="modal-addr"></p>
+      <div class="modal-actions">
+        <button class="btn btn-grey" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-red" onclick="confirmRemove()">Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="seen-card" class="card" style="display:none">
+    <h2>Seen Nodes <span style="font-size:13px;font-weight:normal;color:#888">(discovered, not yet accepted)</span></h2>
+    <table id="seen-table">
+      <thead><tr><th>Address</th><th>RSSI</th><th>Action</th></tr></thead>
+      <tbody id="seen-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let discoveryMode = false;
+
+  async function load() {
+    try {
+      const res = await fetch('/api/cc1312/status');
+      const d = await res.json();
+      discoveryMode = d.discovery_mode;
+
+      document.getElementById('coord-status').textContent =
+        d.coordinator_alive ? 'Alive' : 'Not responding';
+      document.getElementById('coord-status').className =
+        'badge ' + (d.coordinator_alive ? 'badge-green' : 'badge-red');
+      const zeroId = '0000000000000000';
+      document.getElementById('coord-id').textContent =
+        d.coordinator_id && d.coordinator_id !== zeroId ? d.coordinator_id : '';
+      document.getElementById('coord-fw').textContent =
+        d.coordinator_fw ? 'fw ' + d.coordinator_fw : '';
+
+      const btn = document.getElementById('disc-btn');
+      if (discoveryMode) {
+        btn.innerHTML = '<span class="spinner"></span>Discovering&hellip;';
+        btn.className = 'btn btn-grey';
+      } else {
+        btn.innerHTML = 'Start Discovery';
+        btn.className = 'btn btn-green';
+      }
+
+      // Enrolled nodes
+      const eb = document.getElementById('enrolled-body');
+      if (d.enrolled.length === 0) {
+        eb.innerHTML = '<tr><td colspan="5" class="empty">No enrolled nodes</td></tr>';
+      } else {
+        const sensorNames = {1:'PIR',2:'LD2450',3:'ToF',4:'Door',5:'Temperature',255:'Raw'};
+        eb.innerHTML = d.enrolled.map(n => {
+          const ago = n.last_seen_ago_ms;
+          let badge;
+          if (ago < 0)           badge = '<span class="badge badge-grey">No data</span>';
+          else if (ago < 60000)  badge = '<span class="badge badge-green">Active</span>';
+          else if (ago < 300000) badge = '<span class="badge badge-blue">Idle</span>';
+          else                   badge = '<span class="badge badge-red">Offline</span>';
+          const fw = n.fw_version || '<span style="color:#aaa">&#x2014;</span>';
+          const sensor = n.fw_version ? (sensorNames[n.sensor_type] || 'Unknown') : '<span style="color:#aaa">&#x2014;</span>';
+          return `<tr>
+            <td>${n.addr}</td>
+            <td>${badge}</td>
+            <td style="font-family:monospace;font-size:13px">${fw}</td>
+            <td>${sensor}</td>
+            <td><button class="btn btn-red" onclick="removeNode('${n.addr}')">Remove</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Seen nodes
+      const sc = document.getElementById('seen-card');
+      const sb = document.getElementById('seen-body');
+      if (d.seen.length > 0) {
+        sc.style.display = '';
+        sb.innerHTML = d.seen.map(n =>
+          `<tr>
+            <td>${n.addr}</td>
+            <td>${n.rssi_dbm} dBm</td>
+            <td><button class="btn btn-green" onclick="acceptNode('${n.addr}')">Accept</button></td>
+          </tr>`
+        ).join('');
+      } else {
+        sc.style.display = 'none';
+      }
+    } catch (e) {
+      showMsg('Error loading status', true);
+    }
+  }
+
+  async function action(payload) {
+    try {
+      const res = await fetch('/api/cc1312/action', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await load();
+    } catch (e) {
+      showMsg('Error: ' + e.message, true);
+    }
+  }
+
+  function toggleDiscovery() {
+    action({action: discoveryMode ? 'discovery_off' : 'discovery_on'});
+  }
+
+  function acceptNode(addr) {
+    showMsg('Accepting ' + addr + '...');
+    action({action: 'accept_node', addr: addr});
+  }
+
+  let _pendingRemove = null;
+
+  function removeNode(addr) {
+    _pendingRemove = addr;
+    document.getElementById('modal-addr').textContent = addr;
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function closeModal() {
+    _pendingRemove = null;
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+
+  function confirmRemove() {
+    const addr = _pendingRemove;
+    closeModal();
+    if (addr) action({action: 'remove_node', addr: addr});
+  }
+
+  document.getElementById('modal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  function showMsg(text, isErr) {
+    const el = document.getElementById('msg');
+    el.textContent = text;
+    el.style.color = isErr ? '#dc3545' : '#28a745';
+    setTimeout(() => { el.textContent = ''; }, 3000);
+  }
+
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>)HTML";
+}
+
+#endif  // ENABLE_CC1312

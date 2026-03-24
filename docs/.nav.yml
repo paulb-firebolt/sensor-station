@@ -3,12 +3,17 @@ nav:
   - Ethernet TLS and Security: ethernet-tls-and-security.md
   - M5Stack Unit PoE P4: m5stack-unit-poe-p4-wifi-setup.md
   - MQTT Implementation Plan: mqtt-implementation-plan.md
+  - MQTT Command Reference: mqtt-command-reference.md
   - OTA Firmware Updates: esp32-s3-ota-firmware-updates.md
   - WiFi Provisioning: wifi-provisioning-implementation.md
   - Development:
     - Local Development Environment: dev-environment.md
+    - Active Development: development
   - Notes:
     - Ethernet TLS Limitation: ETHERNET_TLS_LIMITATION.md
   - Sensors:
     - Thermal Occupancy Counter: thermal-occupancy-counter.md
     - HK-LD2450 mmWave Sensor: ld2450-mmwave-sensor.md
+  - RF:
+    - Bidirectional RF Migration: bidirectional-rf-migration.md
+    - CC1312 Firmware Version Reporting: cc1312-firmware-version-reporting.md

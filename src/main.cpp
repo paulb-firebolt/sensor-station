@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.10"
+#define FIRMWARE_VERSION "0.0.13"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -13,6 +13,7 @@
 #include "ota_manager.h"
 #include "thermal_detector.h"
 #include "ld2450_sensor.h"
+#include "cc1312_manager.h"
 #include "performance_metrics.h"
 
 // GPIO pin for factory reset button.
@@ -24,7 +25,7 @@
 #define FACTORY_RESET_PIN 0  // Boot button on Waveshare ESP32-S3-POE-ETH
 #endif
 #endif
-const unsigned long FACTORY_RESET_HOLD_TIME = 5000; // 5 seconds
+const unsigned long FACTORY_RESET_HOLD_TIME = 5000;  // 5 seconds
 
 // Global objects
 WiFiManager wifiManager;
@@ -53,14 +54,24 @@ ThermalDetector thermalDetector(wifiManager, mqttManager);
 LD2450Sensor ld2450(Serial1, mqttManager);
 #endif
 
+// CC1312R sub-1GHz RF coordinator enable flag.
+// Can be overridden from platformio.ini build_flags: -DENABLE_CC1312=1
+#ifndef ENABLE_CC1312
+#define ENABLE_CC1312 0  // Default off until CC1312R LaunchPad XL is wired
+#endif
+
+#if ENABLE_CC1312
+CC1312Manager cc1312(Serial2, mqttManager);
+#endif
+
 #if defined(ARDUINO_M5TAB5)
 // RGB LED — common anode, GPIO R=17, G=15, B=16
 // Common anode: duty 0 = full brightness, duty 255 = off
 #define LED_R_PIN 17
 #define LED_G_PIN 15
 #define LED_B_PIN 16
-#define LED_FREQ  5000
-#define LED_RES   8   // 8-bit: 0–255
+#define LED_FREQ 5000
+#define LED_RES 8  // 8-bit: 0–255
 
 static void ledInit(void) {
     ledcAttach(LED_R_PIN, LED_FREQ, LED_RES);
@@ -85,16 +96,40 @@ static void ledHue(uint8_t hue) {
     uint8_t rem = (hue - region * 43) * 6;
     uint8_t q = 255 - rem;
     switch (region) {
-        case 0: r=255; g=rem; b=0;   break;
-        case 1: r=q;   g=255; b=0;   break;
-        case 2: r=0;   g=255; b=rem; break;
-        case 3: r=0;   g=q;   b=255; break;
-        case 4: r=rem; g=0;   b=255; break;
-        default: r=255; g=0;  b=q;   break;
+        case 0:
+            r = 255;
+            g = rem;
+            b = 0;
+            break;
+        case 1:
+            r = q;
+            g = 255;
+            b = 0;
+            break;
+        case 2:
+            r = 0;
+            g = 255;
+            b = rem;
+            break;
+        case 3:
+            r = 0;
+            g = q;
+            b = 255;
+            break;
+        case 4:
+            r = rem;
+            g = 0;
+            b = 255;
+            break;
+        default:
+            r = 255;
+            g = 0;
+            b = q;
+            break;
     }
     ledSet(r / 4, g / 4, b / 4);  // 25% brightness
 }
-#endif // ARDUINO_M5TAB5
+#endif  // ARDUINO_M5TAB5
 
 // Find-me state (LED rainbow for 15 seconds)
 #if defined(ARDUINO_M5TAB5)
@@ -214,17 +249,14 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
         if (action == "ota") {
             Serial.println("[MQTT] OTA command detected!");
             otaManager.handleOTACommand(doc);
-        }
-        else if (action == "rollback") {
+        } else if (action == "rollback") {
             Serial.println("[MQTT] Rollback command detected!");
             otaManager.rollbackToPrevious();
-        }
-        else if (action == "status") {
+        } else if (action == "status") {
             Serial.println("[MQTT] Status command detected!");
             String status = otaManager.getOTAStatus();
             mqttManager.publish("ota_status", status);
-        }
-        else if (action == "findme") {
+        } else if (action == "findme") {
             Serial.println("[MQTT] Find-me command detected!");
 #if defined(ARDUINO_M5TAB5)
             triggerFindMe();
@@ -232,6 +264,13 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
             Serial.println("[FindMe] No LED on this board");
 #endif
         }
+#if ENABLE_CC1312
+        else if (action == "accept_node" || action == "remove_node" || action == "discovery_on" ||
+                 action == "discovery_off" || action == "sync_node_list" ||
+                 action == "get_node_list" || action == "ping" || action == "get_status") {
+            cc1312.handleCommand(action, doc);
+        }
+#endif
     }
 }
 
@@ -244,11 +283,11 @@ void setup() {
     // Initialize serial for debugging
     Serial.begin(115200);
     while (!Serial && millis() < 3000) {
-        ; // Wait for serial port to connect (max 3 seconds)
+        ;  // Wait for serial port to connect (max 3 seconds)
     }
 
     Serial.println("\n\n========================================");
-    Serial.println("ESP32 Dual-Stack Network Sensor");
+    Serial.println("ESP32 Sensor Station");
     Serial.println("Ethernet + WiFi with Web Provisioning");
     Serial.println("========================================\n");
 
@@ -323,6 +362,10 @@ void setup() {
 
     // Set MQTT managers for web interface
     webServer.setMQTTManagers(&certManager, &mqttManager);
+    webServer.setOTAManager(&otaManager);
+#if ENABLE_CC1312
+    webServer.setCC1312Manager(&cc1312);
+#endif
 
 #if defined(ARDUINO_M5TAB5)
     webServer.setFindMeCallback(triggerFindMe);
@@ -330,15 +373,20 @@ void setup() {
 
     webServer.begin();
 
-    // Initialize thermal detector
-    #if ENABLE_THERMAL_DETECTOR
+// Initialize thermal detector
+#if ENABLE_THERMAL_DETECTOR
     thermalDetector.begin();
-    #endif
+#endif
 
-    // Initialize LD2450 mmWave sensor
-    #if ENABLE_LD2450
+// Initialize LD2450 mmWave sensor
+#if ENABLE_LD2450
     ld2450.begin();
-    #endif
+#endif
+
+// Initialize CC1312R sub-1GHz RF coordinator
+#if ENABLE_CC1312
+    cc1312.begin();
+#endif
 
     // Initialize performance metrics
     perfMetrics.begin();
@@ -394,12 +442,14 @@ void setup() {
     // Initialize OTA manager
     otaManager.begin();
 
-    // Initialize firmware version on first boot
-    if (otaManager.isFirstBoot()) {
-        Serial.println("[Setup] First boot detected - initializing firmware version");
-        otaManager.saveVersionInfo(FIRMWARE_VERSION);
-        Serial.print("[Setup] Firmware version set to: ");
+    // Sync firmware version — update NVS whenever the compiled-in version differs
+    // (covers first boot and direct flash via PlatformIO, not just OTA updates)
+    if (otaManager.getCurrentVersion() != FIRMWARE_VERSION) {
+        Serial.print("[Setup] Firmware version updated: ");
+        Serial.print(otaManager.getCurrentVersion());
+        Serial.print(" -> ");
         Serial.println(FIRMWARE_VERSION);
+        otaManager.saveVersionInfo(FIRMWARE_VERSION);
     }
 }
 
@@ -425,15 +475,20 @@ void loop() {
     if (isWiFiConnected() || isEthernetConnected()) {
         mqttManager.update();
 
-        // Update thermal detector (reads SPI, detects, publishes)
-        #if ENABLE_THERMAL_DETECTOR
+// Update thermal detector (reads SPI, detects, publishes)
+#if ENABLE_THERMAL_DETECTOR
         thermalDetector.update();
-        #endif
+#endif
 
-        // Update LD2450 mmWave sensor (reads UART, parses frames, publishes)
-        #if ENABLE_LD2450
+// Update LD2450 mmWave sensor (reads UART, parses frames, publishes)
+#if ENABLE_LD2450
         ld2450.update();
-        #endif
+#endif
+
+// Update CC1312R RF coordinator (reads UART, parses frames, publishes)
+#if ENABLE_CC1312
+        cc1312.update();
+#endif
 
         // Publish status data periodically if MQTT is connected
         if (mqttManager.isConnected()) {
@@ -480,9 +535,8 @@ void loop() {
                     doc["network"]["type"] = "wifi";
                     doc["network"]["ssid"] = wifiManager.getConnectedSSID();
                     doc["network"]["signal_dbm"] = metrics.wifi_rssi;
-                    doc["network"]["signal_quality"] = constrain(
-                        2 * (metrics.wifi_rssi + 100), 0, 100
-                    );
+                    doc["network"]["signal_quality"] =
+                        constrain(2 * (metrics.wifi_rssi + 100), 0, 100);
                     doc["network"]["channel"] = metrics.wifi_channel;
                 } else if (isEthernetConnected()) {
                     doc["network"]["type"] = "ethernet";
@@ -500,6 +554,10 @@ void loop() {
                 doc["ota"]["current_version"] = otaManager.getCurrentVersion();
                 doc["ota"]["previous_version"] = otaManager.getPreviousVersion();
 
+#if ENABLE_CC1312
+                doc["cc1312"]["coordinator_alive"] = cc1312.isCoordinatorAlive();
+#endif
+
                 String payload;
                 serializeJson(doc, payload);
 
@@ -510,13 +568,12 @@ void loop() {
                 // Log warnings locally
                 if (heap_usage_percent > 80) {
                     Serial.printf("[WARN] Heap usage high: %d%% (%u bytes free)\n",
-                        heap_usage_percent, metrics.free_heap_bytes);
+                                  heap_usage_percent, metrics.free_heap_bytes);
                 }
                 if (metrics.max_loop_time_ms > lastReportedLoopPeak) {
                     lastReportedLoopPeak = metrics.max_loop_time_ms;
                     Serial.printf("[WARN] New loop peak: %u ms\n", metrics.max_loop_time_ms);
                 }
-
             }
         }
     }
@@ -540,15 +597,15 @@ void loop() {
                     ledHue(hue);
                 }
             } else if (mqttManager.isConnected()) {
-                ledSet(0, 64, 0);   // dim green — MQTT connected
+                ledSet(0, 64, 0);  // dim green — MQTT connected
             } else if (mqttManager.isEnabled() && mqttManager.hasAttemptedConnect()) {
-                ledSet(64, 0, 0);   // dim red — MQTT failing
+                ledSet(64, 0, 0);  // dim red — MQTT failing
             } else {
-                ledSet(0, 0, 32);   // dim blue — starting up or MQTT not configured
+                ledSet(0, 0, 32);  // dim blue — starting up or MQTT not configured
             }
         }
     }
 #endif
 
-    delay(10); // Small delay to prevent watchdog issues
+    delay(10);  // Small delay to prevent watchdog issues
 }
