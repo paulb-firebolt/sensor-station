@@ -1,1 +1,0 @@
-/home/paulb/Documents/sensor-station/rfPacketTx/docs/cc1312r-rf-coordinator.md

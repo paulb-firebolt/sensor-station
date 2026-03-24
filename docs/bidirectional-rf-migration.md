@@ -90,7 +90,7 @@ That means:
 For the first bidirectional milestone, use a simple explicit RF frame body:
 
 ```text
-[src_addr:4][dst_addr:4][msg_type:1][seq:1][payload_len:1][payload:N]
+[src_addr:8][dst_addr:8][msg_type:1][seq:1][payload_len:1][payload:N]
 ```
 
 Suggested initial RF message types:
@@ -171,17 +171,25 @@ AA 0A 20 00 12 4B 00 12 34 56 78 00 E8
 AA 0A 20 FF FF FF FF FF FF FF FF 00 CE
 ```
 
-### Example forwarded `NODE_STATUS` response
+Current coordinator behavior for this broadcast command is to iterate the
+accepted-node whitelist and queue one deferred unicast `GET_STATUS` request per
+node. Each queued request is transmitted when that node next sends telemetry,
+so the poll lands inside the node's post-telemetry RX window.
 
-Example response for node `0x00124B0012345678` with:
+### Current Phase 2 forwarded `NODE_STATUS` response
 
-- `battery_mv = 3300` (`0x0CE4`, little-endian)
-- `temp_cdeg = 2500` (`0x09C4`, little-endian)
+For the temporary `CC1310` LaunchPad Phase 2 contract, the forwarded payload is:
+
+- `node_addr_low32 = 0x12345678` (`0x78 0x56 0x34 0x12`, little-endian)
 - `telemetry_count = 0x00001234`
 
 ```text
-AA 12 01 00 12 4B 00 12 34 56 78 00 E4 0C C4 09 34 12 00 00 47
+AA 12 01 00 12 4B 00 12 34 56 78 00 78 56 34 12 34 12 00 00 77
 ```
+
+Normal telemetry is also temporary in Phase 2 and currently cycles through the
+synthetic PIR-style payloads documented in
+`rfPacketTx/docs/pirw-phase-2-launchpad-simulated-telemetry.md`.
 
 ## First Milestone
 
@@ -204,7 +212,7 @@ Implement `rfCoordinator` in this order:
 1. Port the UART code from `rfPacketRx`
    - `crc8`
    - `writeFrame`
-   - `readUint32Be`
+   - `readUint64Be`
    - `processUartByte`
    - `processCommandFrame`
 2. Keep the RF queue / callback model from `rfEchoRx`

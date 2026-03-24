@@ -409,6 +409,7 @@ void MQTTManager::setupTLS(void) {
     secureClient.setCACert(ca);
     secureClient.setCertificate(cert);
     secureClient.setPrivateKey(key);
+    secureClient.setTimeout(5);  // 5s connect timeout — keeps web server responsive on failure
 
     Serial.println("[MQTT] TLS certificates configured");
 }

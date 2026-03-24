@@ -17,8 +17,15 @@
  *   0x02  SENSOR_READING — periodic sensor value
  *   0x03  SENSOR_EVENT  — triggered sensor event
  *
- * SENSOR_READING and SENSOR_EVENT payloads begin with a SENSOR_CLASS byte:
- *   0x01  PIR         event:   trigger_type(1)  0=single, 1=dual
+ * SENSOR_READING / SENSOR_EVENT body format depends on the first byte:
+ *
+ *   Phase 2 PIR (no sensor-class prefix — coordinator forwards raw RF payload):
+ *     0x10  PIR trigger  [trigger_kind:1][event_count LE:4][flags:1]
+ *                          trigger_kind: 0x01=single  0x02=dual
+ *     0x11  PIR dwell    [dwell_seconds LE:2][event_count LE:4]
+ *
+ *   Legacy sensor-class prefix (first byte identifies sensor type):
+ *   0x01  PIR         (legacy 1-byte) trigger_type: 0=single, 1=dual
  *   0x02  LD2450      reading: n_targets(1) + [x_mm(2) y_mm(2) speed_cms(2)] × n
  *   0x03  ToF         reading: distance_mm(2) quality(1)
  *                     event:   presence(1)
@@ -97,6 +104,8 @@ constexpr uint8_t CC1312_SC_RAW = 0xFF;
 // Timing
 constexpr unsigned long CC1312_ACTIVE_WINDOW_MS = 5000;
 constexpr unsigned long CC1312_REPORT_INTERVAL_MS = 10000;
+constexpr unsigned long CC1312_STATUS_POLL_INTERVAL_MS = 300000;  // poll nodes for STATUS every 5 min
+constexpr unsigned long CC1312_STATUS_POLL_INITIAL_MS  = 30000;   // first poll 30s after boot
 
 constexpr const char* CC1312_TOPIC = "cc1312/nodes";
 constexpr const char* CC1312_SEEN_TOPIC = "cc1312/seen";
@@ -150,6 +159,13 @@ static const char* _cc1312SensorName(uint8_t sc) {
 // CC1312 Manager Class
 // ============================================================================
 
+struct CC1312FwVersion {
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+    bool known;  // false until a frame carrying version bytes is received
+};
+
 class CC1312Manager {
 public:
     CC1312Manager(HardwareSerial& serial, MQTTManager& mqtt)
@@ -166,6 +182,8 @@ public:
           _lastHeartbeat(0),
           _lastPingSent(0),
           _coordinatorAddr(0),
+          _coordinatorVersion({0, 0, 0, false}),
+          _lastStatusPoll(0),
           _seenCount(0),
           _discoveryMode(false),
           _discoveryStarted(0) {}
@@ -177,6 +195,8 @@ public:
         Serial.printf("[CC1312] Initialized on UART2 RX=%d TX=%d @ %u\n", CC1312_RX_PIN,
                       CC1312_TX_PIN, CC1312_BAUD);
         memset(_nodeLastSeen, 0, sizeof(_nodeLastSeen));
+        memset(_nodeVersion, 0, sizeof(_nodeVersion));
+        memset(_nodeSensorType, CC1312_SC_RAW, sizeof(_nodeSensorType));
         _loadEnrolled();
     }
 
@@ -266,6 +286,15 @@ public:
             (now - _lastPublish >= CC1312_REPORT_INTERVAL_MS)) {
             _publishPending(now);
         }
+
+        // Periodically poll all enrolled nodes for STATUS (version + sensor type)
+        unsigned long statusDue = (_lastStatusPoll == 0) ? CC1312_STATUS_POLL_INITIAL_MS
+                                                         : CC1312_STATUS_POLL_INTERVAL_MS;
+        if (_enrolledCount > 0 && (now - _lastStatusPoll >= statusDue)) {
+            _lastStatusPoll = now;
+            _sendDownlink(CC1312_CMD_GET_STATUS, 0xFFFFFFFFFFFFFFFFULL);
+            Serial.println("[CC1312] Polling enrolled nodes for STATUS");
+        }
     }
 
     bool isActive() const {
@@ -285,6 +314,9 @@ public:
     size_t enrolledCount() const { return _enrolledCount; }
     uint64_t enrolledAddr(size_t i) const { return _enrolled[i]; }
     unsigned long nodeLastSeen(size_t i) const { return _nodeLastSeen[i]; }
+    CC1312FwVersion nodeVersion(size_t i) const { return _nodeVersion[i]; }
+    uint8_t nodeSensorType(size_t i) const { return _nodeSensorType[i]; }
+    CC1312FwVersion coordinatorVersion() const { return _coordinatorVersion; }
     size_t seenCount() const { return _seenCount; }
     uint64_t seenAddr(size_t i) const { return _seen[i].addr; }
     int8_t seenRssi(size_t i) const { return _seen[i].rssi; }
@@ -333,6 +365,12 @@ private:
     unsigned long _lastHeartbeat;
     unsigned long _lastPingSent;
     uint64_t _coordinatorAddr;
+    CC1312FwVersion _coordinatorVersion;
+    unsigned long _lastStatusPoll;
+
+    // Per-node version and sensor type (parallel to _enrolled[])
+    CC1312FwVersion _nodeVersion[CC1312_MAX_ENROLLED];
+    uint8_t _nodeSensorType[CC1312_MAX_ENROLLED];
 
     // Discovery state
     bool _discoveryMode;
@@ -383,6 +421,17 @@ private:
         if (_rxPos < fullLen)
             return;
 
+        // Log raw frame bytes
+        {
+            char hex[fullLen * 3 + 1];
+            size_t pos = 0;
+            for (size_t i = 0; i < fullLen; i++) {
+                pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", _rxBuf[i]);
+            }
+            if (pos > 0) hex[pos - 1] = '\0';  // trim trailing space
+            Serial.printf("[CC1312] RAW(%zu): %s\n", fullLen, hex);
+        }
+
         // Validate CRC over [MSG_TYPE..end of payload] = _frameLen bytes
         uint8_t expected = _crc8(&_rxBuf[2], _frameLen);
         uint8_t actual = _rxBuf[fullLen - 1];
@@ -395,7 +444,9 @@ private:
             return;
         }
 
-        _dispatchFrame(_rxBuf[2], &_rxBuf[3], _frameLen);
+        // _frameLen counts MSG_TYPE in its byte total; payload pointer skips MSG_TYPE,
+        // so pass len-1 to avoid the CRC byte bleeding into the body.
+        _dispatchFrame(_rxBuf[2], &_rxBuf[3], _frameLen - 1);
         _inFrame = false;
         _rxPos = 0;
     }
@@ -431,20 +482,45 @@ private:
                 return;
             }
             _upsert(addr, msgType, 0, rssi, body, bodyLen);
-            uint16_t bat = (uint16_t)(body[0] | (uint16_t(body[1]) << 8));
-            int16_t temp = (int16_t)(body[2] | (uint16_t(body[3]) << 8));
-            Serial.printf("[CC1312] %016llX status bat=%umV temp=%d cdeg (rssi=%d)\n",
-                          (unsigned long long)addr, bat, temp, rssi);
+            uint32_t addrLow32 = (uint32_t)(body[0] | ((uint32_t)body[1] << 8) |
+                                            ((uint32_t)body[2] << 16) | ((uint32_t)body[3] << 24));
+            uint32_t txCount  = (uint32_t)(body[4] | ((uint32_t)body[5] << 8) |
+                                           ((uint32_t)body[6] << 16) | ((uint32_t)body[7] << 24));
+            if (bodyLen >= 12) {
+                for (size_t i = 0; i < _enrolledCount; i++) {
+                    if (_enrolled[i] == addr) {
+                        _nodeVersion[i] = {body[8], body[9], body[10], true};
+                        _nodeSensorType[i] = body[11];
+                        break;
+                    }
+                }
+                Serial.printf("[CC1312] %016llX status addr_low=0x%08lX tx=%lu fw=%u.%u.%u sensor=%s (rssi=%d)\n",
+                              (unsigned long long)addr, (unsigned long)addrLow32, (unsigned long)txCount,
+                              body[8], body[9], body[10], _cc1312SensorName(body[11]), rssi);
+            } else {
+                Serial.printf("[CC1312] %016llX status addr_low=0x%08lX tx=%lu (rssi=%d)\n",
+                              (unsigned long long)addr, (unsigned long)addrLow32, (unsigned long)txCount, rssi);
+            }
 
         } else if (msgType == CC1312_MSG_READING || msgType == CC1312_MSG_EVENT) {
             if (bodyLen < 1) {
-                Serial.printf("[CC1312] Missing sensor class from %016llX\n",
-                              (unsigned long long)addr);
+                Serial.printf("[CC1312] Empty body from %016llX\n", (unsigned long long)addr);
                 return;
             }
-            uint8_t sc = body[0];
-            const uint8_t* sdata = body + 1;
-            uint8_t sdataLen = bodyLen - 1;
+            uint8_t sc;
+            const uint8_t* sdata;
+            uint8_t sdataLen;
+            // Phase 2 coordinator forwards the raw RF payload with no sensor-class prefix.
+            // PIR event types 0x10 (trigger) and 0x11 (dwell) land directly in body[0].
+            if (body[0] == 0x10 || body[0] == 0x11) {
+                sc = CC1312_SC_PIR;
+                sdata = body;      // include event-type byte so decoder can branch
+                sdataLen = bodyLen;
+            } else {
+                sc = body[0];      // legacy: first byte is sensor class
+                sdata = body + 1;
+                sdataLen = bodyLen - 1;
+            }
             _upsert(addr, msgType, sc, rssi, sdata, sdataLen);
             Serial.printf("[CC1312] %016llX %s/%s len=%u (rssi=%d)\n", (unsigned long long)addr,
                           _cc1312MsgName(msgType), _cc1312SensorName(sc), sdataLen, rssi);
@@ -465,8 +541,15 @@ private:
             _lastHeartbeat = millis();
             if (addr != 0)
                 _coordinatorAddr = addr;
-            Serial.printf("[CC1312] Coordinator heartbeat (id=%016llX)\n",
-                          (unsigned long long)_coordinatorAddr);
+            if (bodyLen >= 3) {
+                _coordinatorVersion = {body[0], body[1], body[2], true};
+                Serial.printf("[CC1312] Coordinator heartbeat (id=%016llX) fw=%u.%u.%u\n",
+                              (unsigned long long)_coordinatorAddr,
+                              body[0], body[1], body[2]);
+            } else {
+                Serial.printf("[CC1312] Coordinator heartbeat (id=%016llX)\n",
+                              (unsigned long long)_coordinatorAddr);
+            }
 
         } else if (msgType == CC1312_MSG_LIST_REQUEST) {
             Serial.printf("[CC1312] Node list requested — sending %zu entries\n", _enrolledCount);
@@ -527,10 +610,16 @@ private:
 
         if (m.msg_type == CC1312_MSG_STATUS) {
             if (dl >= 8) {
-                obj["battery_mv"] = (uint16_t)(d[0] | (uint16_t(d[1]) << 8));
-                obj["temp_cdeg"] = (int16_t)(d[2] | (uint16_t(d[3]) << 8));
-                obj["tx_count"] = (uint32_t)(d[4] | ((uint32_t)d[5] << 8) | ((uint32_t)d[6] << 16) |
-                                             ((uint32_t)d[7] << 24));
+                obj["node_addr_low32"] = (uint32_t)(d[0] | ((uint32_t)d[1] << 8) |
+                                                    ((uint32_t)d[2] << 16) | ((uint32_t)d[3] << 24));
+                obj["telemetry_count"] = (uint32_t)(d[4] | ((uint32_t)d[5] << 8) |
+                                                    ((uint32_t)d[6] << 16) | ((uint32_t)d[7] << 24));
+            }
+            if (dl >= 12) {
+                char verStr[12];
+                snprintf(verStr, sizeof(verStr), "%u.%u.%u", d[8], d[9], d[10]);
+                obj["fw_version"] = verStr;
+                obj["sensor_type"] = _cc1312SensorName(d[11]);
             }
             return;
         }
@@ -540,8 +629,25 @@ private:
 
         switch (m.sensor_class) {
             case CC1312_SC_PIR:
-                if (dl >= 1)
+                // Phase 2 format: d[0] is event_type (0x10 trigger, 0x11 dwell)
+                if (dl >= 1 && d[0] == 0x10) {
+                    // Trigger: [0x10][trigger_kind:1][event_count LE:4][flags:1]
+                    obj["msg"] = "event";
+                    obj["event"] = "trigger";
+                    if (dl >= 2) obj["trigger_kind"] = (d[1] == 0x01) ? "single" : "dual";
+                    if (dl >= 6) obj["event_count"] = (uint32_t)(d[2] | ((uint32_t)d[3] << 8) |
+                                                                 ((uint32_t)d[4] << 16) | ((uint32_t)d[5] << 24));
+                    if (dl >= 7) obj["flags"] = d[6];
+                } else if (dl >= 1 && d[0] == 0x11) {
+                    // Dwell: [0x11][dwell_seconds LE:2][event_count LE:4]
+                    obj["event"] = "dwell";
+                    if (dl >= 3) obj["dwell_seconds"] = (uint16_t)(d[1] | ((uint16_t)d[2] << 8));
+                    if (dl >= 7) obj["event_count"] = (uint32_t)(d[3] | ((uint32_t)d[4] << 8) |
+                                                                 ((uint32_t)d[5] << 16) | ((uint32_t)d[6] << 24));
+                } else if (dl >= 1) {
+                    // Legacy 1-byte format
                     obj["trigger"] = (d[0] == 0) ? "single" : "dual";
+                }
                 break;
 
             case CC1312_SC_LD2450: {
@@ -742,6 +848,12 @@ private:
         doc["coordinator_alive"] = isCoordinatorAlive();
         if (_lastHeartbeat > 0)
             doc["heartbeat_age_ms"] = static_cast<long>(now - _lastHeartbeat);
+        if (_coordinatorVersion.known) {
+            char verStr[12];
+            snprintf(verStr, sizeof(verStr), "%u.%u.%u",
+                     _coordinatorVersion.major, _coordinatorVersion.minor, _coordinatorVersion.patch);
+            doc["coordinator_fw"] = verStr;
+        }
         JsonArray msgs = doc["messages"].to<JsonArray>();
 
         for (size_t i = 0; i < _pendingCount; i++) {

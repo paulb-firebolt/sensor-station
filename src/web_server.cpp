@@ -968,7 +968,8 @@ String DeviceWebServer::generateProvisioningPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1019,7 +1020,8 @@ String DeviceWebServer::generateProvisioningPage(void) {
     button {
       width: 100%;
       padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -1188,7 +1190,8 @@ String DeviceWebServer::generateStatusPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       padding: 20px;
     }
@@ -1383,7 +1386,8 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1434,7 +1438,8 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     button {
       width: 100%;
       padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -1508,7 +1513,8 @@ String DeviceWebServer::generateSaveSuccessPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1564,7 +1570,8 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1609,7 +1616,8 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
       transition: opacity 0.2s;
     }
     .btn-primary {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
     }
     .btn-secondary {
@@ -1661,7 +1669,8 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       display: flex;
       justify-content: center;
@@ -1688,7 +1697,8 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
     input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 3px rgba(102,126,234,0.1); }
     button {
       width: 100%; padding: 12px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white; border: none; border-radius: 6px;
       font-weight: 600; cursor: pointer; margin-top: 20px; font-size: 16px;
     }
@@ -2059,7 +2069,8 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       padding: 20px;
     }
@@ -2132,7 +2143,8 @@ String DeviceWebServer::generateMQTTConfigPage(void) {
     .cert-clear { font-size: 12px; color: #888; cursor: pointer; text-decoration: underline; float: right; margin-top: -24px; }
     button {
       padding: 10px 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       color: white;
       border: none;
       border-radius: 6px;
@@ -2506,6 +2518,12 @@ void DeviceWebServer::handleCC1312Status(void) {
     snprintf(coordId, sizeof(coordId), "%016llX",
              (unsigned long long)cc1312Manager->coordinatorAddr());
     doc["coordinator_id"] = coordId;
+    CC1312FwVersion coordVer = cc1312Manager->coordinatorVersion();
+    if (coordVer.known) {
+        char verStr[12];
+        snprintf(verStr, sizeof(verStr), "%u.%u.%u", coordVer.major, coordVer.minor, coordVer.patch);
+        doc["coordinator_fw"] = verStr;
+    }
     JsonArray enrolled = doc["enrolled"].to<JsonArray>();
     char addrBuf[17];
     unsigned long nowMs = millis();
@@ -2516,6 +2534,13 @@ void DeviceWebServer::handleCC1312Status(void) {
         n["addr"] = addrBuf;
         unsigned long ls = cc1312Manager->nodeLastSeen(i);
         n["last_seen_ago_ms"] = (ls == 0) ? -1 : (long)(nowMs - ls);
+        CC1312FwVersion nv = cc1312Manager->nodeVersion(i);
+        if (nv.known) {
+            char nverStr[12];
+            snprintf(nverStr, sizeof(nverStr), "%u.%u.%u", nv.major, nv.minor, nv.patch);
+            n["fw_version"] = nverStr;
+            n["sensor_type"] = cc1312Manager->nodeSensorType(i);
+        }
     }
     JsonArray seen = doc["seen"].to<JsonArray>();
     for (size_t i = 0; i < cc1312Manager->seenCount(); i++) {
@@ -2560,7 +2585,8 @@ String DeviceWebServer::generateCC1312Page(void) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #2B1843;
+      background: linear-gradient(132deg, rgba(43, 24, 67, 1) 0%, rgba(35, 53, 91, 1) 50%, rgba(23, 95, 126, 1) 100%);
       min-height: 100vh;
       padding: 20px;
     }
@@ -2683,6 +2709,7 @@ String DeviceWebServer::generateCC1312Page(void) {
     <div class="status-row">
       <span>Coordinator: <span id="coord-status" class="badge badge-grey">&#x2026;</span></span>
       <span id="coord-id" style="font-family:monospace;font-size:13px;color:#555"></span>
+      <span id="coord-fw" style="font-size:12px;color:#888"></span>
       <button id="disc-btn" class="btn btn-green" onclick="toggleDiscovery()">&#x2026;</button>
     </div>
     <div id="msg"></div>
@@ -2691,8 +2718,8 @@ String DeviceWebServer::generateCC1312Page(void) {
   <div class="card">
     <h2>Enrolled Nodes</h2>
     <table id="enrolled-table">
-      <thead><tr><th>Address</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody id="enrolled-body"><tr><td colspan="3" class="empty">Loading&#x2026;</td></tr></tbody>
+      <thead><tr><th>Address</th><th>Status</th><th>Firmware</th><th>Sensor</th><th>Action</th></tr></thead>
+      <tbody id="enrolled-body"><tr><td colspan="5" class="empty">Loading&#x2026;</td></tr></tbody>
     </table>
   </div>
 
@@ -2732,6 +2759,8 @@ String DeviceWebServer::generateCC1312Page(void) {
       const zeroId = '0000000000000000';
       document.getElementById('coord-id').textContent =
         d.coordinator_id && d.coordinator_id !== zeroId ? d.coordinator_id : '';
+      document.getElementById('coord-fw').textContent =
+        d.coordinator_fw ? 'fw ' + d.coordinator_fw : '';
 
       const btn = document.getElementById('disc-btn');
       if (discoveryMode) {
@@ -2745,8 +2774,9 @@ String DeviceWebServer::generateCC1312Page(void) {
       // Enrolled nodes
       const eb = document.getElementById('enrolled-body');
       if (d.enrolled.length === 0) {
-        eb.innerHTML = '<tr><td colspan="3" class="empty">No enrolled nodes</td></tr>';
+        eb.innerHTML = '<tr><td colspan="5" class="empty">No enrolled nodes</td></tr>';
       } else {
+        const sensorNames = {1:'PIR',2:'LD2450',3:'ToF',4:'Door',5:'Temperature',255:'Raw'};
         eb.innerHTML = d.enrolled.map(n => {
           const ago = n.last_seen_ago_ms;
           let badge;
@@ -2754,9 +2784,13 @@ String DeviceWebServer::generateCC1312Page(void) {
           else if (ago < 60000)  badge = '<span class="badge badge-green">Active</span>';
           else if (ago < 300000) badge = '<span class="badge badge-blue">Idle</span>';
           else                   badge = '<span class="badge badge-red">Offline</span>';
+          const fw = n.fw_version || '<span style="color:#aaa">&#x2014;</span>';
+          const sensor = n.fw_version ? (sensorNames[n.sensor_type] || 'Unknown') : '<span style="color:#aaa">&#x2014;</span>';
           return `<tr>
             <td>${n.addr}</td>
             <td>${badge}</td>
+            <td style="font-family:monospace;font-size:13px">${fw}</td>
+            <td>${sensor}</td>
             <td><button class="btn btn-red" onclick="removeNode('${n.addr}')">Remove</button></td>
           </tr>`;
         }).join('');
