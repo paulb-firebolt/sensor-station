@@ -485,7 +485,7 @@ void loop() {
         ld2450.update();
 #endif
 
-// Update CC1312R RF coordinator (reads UART, parses frames, publishes)
+// Update CC1312R RF coordinator (reads SPI, parses frames, publishes)
 #if ENABLE_CC1312
         cc1312.update();
 #endif

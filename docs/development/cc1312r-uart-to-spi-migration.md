@@ -404,8 +404,9 @@ AA 0A 05 ...                                        // NODE_LIST_REQUEST
   is one valid frame per real DRDY event, rather than repeated re-reading of the same
   valid heartbeat or node-list request.
 - Downlink framing (`_sendDownlink()`) is implemented and transmitted correctly by the
-  ESP32-P4. Whether the CC1312R receives them reliably is a timing issue under active
-  resolution — see the **Downlink timing gap** entry below.
+  ESP32-P4. The working bench configuration now sends them reliably with batched
+  node-list sync and the immediate post-`RF_runCmd()` SPI service call on the
+  coordinator.
 
 ### What Finally Unblocked The Migration
 
@@ -589,15 +590,15 @@ high-level migration plan:
 - Repeated node-list requests (MSG_TYPE `0x05`)
   - One root cause: protocol mismatch between 8-byte coordinator parsing and older 4-byte
     host-side list-sync frames. Resolved by updating the coordinator to accept both.
-  - Second root cause (current, under active resolution): the CC1312R is not in SPI RX
-    mode when the ESP32-P4 sends the `CMD_LIST_END` downlink. This leaves
+  - Second root cause: the CC1312R was not in SPI RX mode when the ESP32-P4 sent the
+    `CMD_LIST_END` downlink. This left
     `acceptedNodeCount = 0`, so the coordinator retries every 10 seconds.
   - **Root cause of the timing gap:** After the CC1312R TX callback fires and deasserts
     DRDY, the coordinator main loop spends up to 50 ms in `RF_runCmd()` before reaching
     `serviceSpiTransport()`, which is the call that starts the SPI DMA RX transfer.
     Downlinks sent by the ESP32-P4 during this window fall into the SSI hardware FIFO
     with no active DMA consumer and are discarded.
-  - Mitigations applied (see ESP32 and Coordinator changes above):
+  - Fixes applied (see ESP32 and Coordinator changes above):
     - ESP32-P4: 80 ms deferred send via `_pendingListSyncAt`
     - CC1312R: add `serviceSpiTransport()` call immediately after `RF_runCmd()` returns
 
@@ -624,26 +625,21 @@ high-level migration plan:
 
 ### Remaining Follow-up
 
-1. **CC1312R: apply `serviceSpiTransport()` after `RF_runCmd()`** (coordinator team)
-   - Add one call to `serviceSpiTransport()` immediately after the inner RF_runCmd
-     while-loop exits in `rfEchoRx.c` (see Coordinator Changes item 8 for exact location).
-   - This is the fix that allows downlinks to land reliably without depending on the
-     80 ms delay on the ESP32 side.
-
-2. **Verify node-list sync end-to-end** (both teams)
-   - After the CC1312R fix is flashed, confirm in the serial log that `CMD_LIST_END` is
-     received by the coordinator and `acceptedNodeCount` becomes non-zero.
-   - Expected outcome: the 10-second retry rate drops to the 300-second keepalive rate.
-
-3. **Verify MSG_TYPE `0x01` sensor node readings arrive**
+1. **Verify MSG_TYPE `0x01` sensor node readings arrive**
    - No sensor node data has been received yet. Once `acceptedNodeCount > 0` and
      `whitelistReady = 1`, the coordinator will accept and relay RF packets from enrolled
      nodes.
    - Confirm readings appear on the `cc1312/nodes` MQTT topic.
 
-4. **Simplify to 8-byte-only downlink addresses** (future, low priority)
+2. **Simplify to 8-byte-only downlink addresses** (future, low priority)
    - Once every host-side sender is confirmed to use 8-byte addresses, the 4-byte
      compatibility path in the coordinator parser can be removed.
+
+3. **Tidy temporary bring-up diagnostics** (future, optional)
+   - Remove or downgrade bench-only diagnostics once the SPI path has been stable for a
+     while.
+   - Candidates include the `0xFF` idle-fill aid and temporary request-reason tracking
+     variables used during node-list debugging.
 
 ---
 
@@ -674,8 +670,8 @@ Questions from the planning phase. Resolved items are noted inline.
    `begin()`, `update()`, and `_sendDownlink()` rewritten for SPI; variable-length read
    protocol and 80 ms deferred downlink send implemented.
 6. ✅ **Update `platformio.ini`** — SPI pin defines in place; UART pins removed.
-7. 🔄 **Bench test — end-to-end** — uplink frames working; downlink reliability in
-   progress (see Remaining Follow-up items 1–2 above).
+7. ✅ **Bench test — end-to-end** — uplink and downlink SPI framing now work on the
+   bench; remaining follow-up is focused on application-level verification and cleanup.
 8. ⬜ **Update `cc1312r-rf-coordinator.md`** — replace wiring table to reflect SPI as the
    active interface once end-to-end node data is confirmed.
 
