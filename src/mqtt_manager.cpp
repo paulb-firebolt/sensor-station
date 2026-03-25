@@ -1,4 +1,5 @@
 #include "mqtt_manager.h"
+#include "log.h"
 #include "mbedtls/x509_crt.h"
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
 #include <Ethernet.h>
@@ -7,7 +8,7 @@
 // Log subject, issuer and SANs from a PEM certificate using mbedTLS
 static void logCertInfo(const char* label, const char* pem) {
     if (!pem || pem[0] == '\0') {
-        Serial.printf("[MQTT] %s: (empty)\n", label);
+        LOG_D("[MQTT] %s: (empty)\n", label);
         return;
     }
     mbedtls_x509_crt crt;
@@ -15,32 +16,32 @@ static void logCertInfo(const char* label, const char* pem) {
     int ret =
         mbedtls_x509_crt_parse(&crt, reinterpret_cast<const unsigned char*>(pem), strlen(pem) + 1);
     if (ret != 0) {
-        Serial.printf("[MQTT] %s: parse error -0x%04X\n", label, -ret);
+        LOG_E("[MQTT] %s: parse error -0x%04X\n", label, -ret);
         mbedtls_x509_crt_free(&crt);
         return;
     }
     char buf[256];
     mbedtls_x509_dn_gets(buf, sizeof(buf), &crt.subject);
-    Serial.printf("[MQTT] %s subject: %s\n", label, buf);
+    LOG_D("[MQTT] %s subject: %s\n", label, buf);
     mbedtls_x509_dn_gets(buf, sizeof(buf), &crt.issuer);
-    Serial.printf("[MQTT] %s issuer:  %s\n", label, buf);
+    LOG_D("[MQTT] %s issuer:  %s\n", label, buf);
 
     // Walk the SAN sequence
     const mbedtls_x509_sequence* san = &crt.subject_alt_names;
     bool first = true;
     while (san != nullptr && san->buf.len > 0) {
         if (first) {
-            Serial.printf("[MQTT] %s SANs:\n", label);
+            LOG_D("[MQTT] %s SANs:\n", label);
             first = false;
         }
         int tag = san->buf.tag & 0x1F;  // strip class/constructed bits
         if (tag == 2) {                 // dNSName
-            Serial.printf("[MQTT]   DNS: %.*s\n", (int)san->buf.len, san->buf.p);
+            LOG_D("[MQTT]   DNS: %.*s\n", (int)san->buf.len, san->buf.p);
         } else if (tag == 7 && san->buf.len == 4) {  // iPAddress (IPv4)
-            Serial.printf("[MQTT]   IP:  %d.%d.%d.%d\n", san->buf.p[0], san->buf.p[1],
+            LOG_D("[MQTT]   IP:  %d.%d.%d.%d\n", san->buf.p[0], san->buf.p[1],
                           san->buf.p[2], san->buf.p[3]);
         } else {
-            Serial.printf("[MQTT]   SAN tag=%d len=%zu\n", tag, san->buf.len);
+            LOG_D("[MQTT]   SAN tag=%d len=%zu\n", tag, san->buf.len);
         }
         san = san->next;
     }
@@ -61,7 +62,7 @@ MQTTManager::MQTTManager()
       everAttemptedConnect(false) {}
 
 void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
-    Serial.println("[MQTT] Initializing MQTT manager");
+    LOG_I("[MQTT] Initializing MQTT manager\n");
 
     certManager = &certMgr;
     wifiManager = &wifiMgr;
@@ -74,36 +75,32 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     setupTLS();
 
     if (!enabled) {
-        Serial.println("[MQTT] MQTT is disabled in configuration");
+        LOG_I("[MQTT] MQTT is disabled in configuration\n");
         return;
     }
 
     if (broker.length() == 0) {
 #if USE_RMII_ETHERNET
-        Serial.println("[MQTT] No broker in NVS — attempting mDNS discovery...");
+        LOG_I("[MQTT] No broker in NVS — attempting mDNS discovery...\n");
         if (!discoverMQTTBroker(broker, port)) {
-            Serial.println("[MQTT] No broker found via mDNS — MQTT unavailable");
+            LOG_W("[MQTT] No broker found via mDNS — MQTT unavailable\n");
             return;
         }
 #else
-        Serial.println("[MQTT] No broker configured");
+        LOG_I("[MQTT] No broker configured\n");
         return;
 #endif
     }
 
-    Serial.print("[MQTT] Configured broker: ");
-    Serial.print(broker);
-    Serial.print(":");
-    Serial.println(port);
-    Serial.print("[MQTT] Topic prefix: ");
-    Serial.println(topic_prefix);
+    LOG_I("[MQTT] Configured broker: %s:%u\n", broker.c_str(), port);
+    LOG_I("[MQTT] Topic prefix: %s\n", topic_prefix.c_str());
 
     // Setup MQTT client
     mqttClient.setServer(broker.c_str(), port);
     mqttClient.setBufferSize(
         8192);  // LD2450 batch (up to 20 frames × 3 targets) can reach ~4500 bytes
 
-    Serial.println("[MQTT] Initialization complete (MQTTS over WiFi + RMII Ethernet)");
+    LOG_I("[MQTT] Initialization complete (MQTTS over WiFi + RMII Ethernet)\n");
 }
 
 void MQTTManager::update(void) {
@@ -114,7 +111,7 @@ void MQTTManager::update(void) {
     // Check if any network is available
     if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
         if (connected) {
-            Serial.println("[MQTT] Network disconnected, MQTT unavailable");
+            LOG_W("[MQTT] Network disconnected, MQTT unavailable\n");
             connected = false;
         }
         return;
@@ -131,7 +128,7 @@ void MQTTManager::update(void) {
         unsigned long now = millis();
         if (now - lastReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
             lastReconnectAttempt = now;
-            Serial.println("[MQTT] Attempting to reconnect...");
+            LOG_W("[MQTT] Attempting to reconnect...\n");
             reconnect();
         }
     }
@@ -153,18 +150,15 @@ bool MQTTManager::reconnect(void) {
 
     // Check network is available
     if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
-        Serial.println("[MQTT] Cannot connect: no network available");
+        LOG_W("[MQTT] Cannot connect: no network available\n");
         return false;
     }
 
-    Serial.print("[MQTT] Connecting to ");
-    Serial.print(broker);
-    Serial.print(":");
-    Serial.println(port);
+    LOG_I("[MQTT] Connecting to %s:%u\n", broker.c_str(), port);
 
     // Connect to MQTT broker
     if (connectToBroker()) {
-        Serial.println("[MQTT] Connected successfully!");
+        LOG_I("[MQTT] Connected successfully!\n");
         connected = true;
         lastConnectedTime = millis();
         reconnectAttempts = 0;
@@ -173,19 +167,15 @@ bool MQTTManager::reconnect(void) {
         String deviceId = getClientId();
         String commandTopic = topic_prefix + "/" + deviceId + "/command";
         if (mqttClient.subscribe(commandTopic.c_str())) {
-            Serial.print("[MQTT] Subscribed to: ");
-            Serial.println(commandTopic);
+            LOG_I("[MQTT] Subscribed to: %s\n", commandTopic.c_str());
         } else {
-            Serial.println("[MQTT] WARNING: Failed to subscribe to command topic");
+            LOG_W("[MQTT] WARNING: Failed to subscribe to command topic\n");
         }
 
         return true;
     } else {
         reconnectAttempts++;
-        Serial.print("[MQTT] Connection failed, attempt #");
-        Serial.print(reconnectAttempts);
-        Serial.print(", state: ");
-        Serial.println(mqttClient.state());
+        LOG_W("[MQTT] Connection failed, attempt #%d, state: %d\n", reconnectAttempts, mqttClient.state());
         connected = false;
 
 #if USE_RMII_ETHERNET
@@ -195,15 +185,12 @@ bool MQTTManager::reconnect(void) {
             uint16_t discoveredPort = port;
             if (discoverMQTTBroker(discoveredHost, discoveredPort)) {
                 if (discoveredHost != broker || discoveredPort != port) {
-                    Serial.print("[MQTT] mDNS found broker at new address: ");
-                    Serial.print(discoveredHost);
-                    Serial.print(":");
-                    Serial.println(discoveredPort);
+                    LOG_I("[MQTT] mDNS found broker at new address: %s:%u\n", discoveredHost.c_str(), discoveredPort);
                     broker = discoveredHost;
                     port = discoveredPort;
                     mqttClient.setServer(broker.c_str(), port);
                 } else {
-                    Serial.println("[MQTT] mDNS confirms same broker address");
+                    LOG_I("[MQTT] mDNS confirms same broker address\n");
                 }
             }
         }
@@ -215,7 +202,7 @@ bool MQTTManager::reconnect(void) {
 
 void MQTTManager::disconnect(void) {
     if (mqttClient.connected()) {
-        Serial.println("[MQTT] Disconnecting...");
+        LOG_I("[MQTT] Disconnecting...\n");
         mqttClient.disconnect();
     }
     connected = false;
@@ -225,7 +212,7 @@ void MQTTManager::loadConfig(void) {
     // Try to open NVS namespace (read-only)
     if (!prefs.begin(MQTT_NVS_NAMESPACE, true)) {
         // Namespace doesn't exist yet (first boot) - use defaults
-        Serial.println("[MQTT] No configuration found in NVS, using defaults");
+        LOG_I("[MQTT] No configuration found in NVS, using defaults\n");
         enabled = false;
         broker = "";
         port = MQTT_DEFAULT_PORT;
@@ -245,25 +232,19 @@ void MQTTManager::loadConfig(void) {
 
     prefs.end();
 
-    Serial.println("[MQTT] Configuration loaded from NVS");
-    Serial.print("[MQTT]   Enabled: ");
-    Serial.println(enabled ? "Yes" : "No");
+    LOG_I("[MQTT] Configuration loaded from NVS\n");
+    LOG_I("[MQTT]   Enabled: %s\n", enabled ? "Yes" : "No");
     if (enabled) {
-        Serial.print("[MQTT]   Broker: ");
-        Serial.print(broker);
-        Serial.print(":");
-        Serial.println(port);
-        Serial.print("[MQTT]   Username: ");
-        Serial.println(username.length() > 0 ? username : "(none)");
-        Serial.print("[MQTT]   Topic: ");
-        Serial.println(topic_prefix);
+        LOG_I("[MQTT]   Broker: %s:%u\n", broker.c_str(), port);
+        LOG_I("[MQTT]   Username: %s\n", username.length() > 0 ? username.c_str() : "(none)");
+        LOG_I("[MQTT]   Topic: %s\n", topic_prefix.c_str());
     }
 }
 
 bool MQTTManager::saveConfig(bool en, const String& brk, uint16_t prt, const String& user,
                              const String& pass, const String& topic) {
     if (!prefs.begin(MQTT_NVS_NAMESPACE, false)) {  // Read-write
-        Serial.println("[MQTT] ERROR: Failed to open NVS for writing config");
+        LOG_E("[MQTT] ERROR: Failed to open NVS for writing config\n");
         return false;
     }
 
@@ -276,7 +257,7 @@ bool MQTTManager::saveConfig(bool en, const String& brk, uint16_t prt, const Str
 
     prefs.end();
 
-    Serial.println("[MQTT] Configuration saved to NVS");
+    LOG_I("[MQTT] Configuration saved to NVS\n");
 
     // Reload configuration
     loadConfig();
@@ -325,15 +306,10 @@ bool MQTTManager::publish(const String& subtopic, const String& payload) {
     bool result = mqttClient.publish(fullTopic.c_str(), payload.c_str());
 
     if (result) {
-        Serial.print("[MQTT] Published to ");
-        Serial.print(fullTopic);
-        Serial.print(": ");
-        Serial.println(payload);
+        LOG_D("[MQTT] Published to %s: %s\n", fullTopic.c_str(), payload.c_str());
         lastPublishTime = millis();
     } else {
-        Serial.print("[MQTT] Failed to publish to ");
-        Serial.print(fullTopic);
-        Serial.printf(" (%u bytes)\n", payload.length());
+        LOG_W("[MQTT] Failed to publish to %s (%u bytes)\n", fullTopic.c_str(), payload.length());
     }
 
     return result;
@@ -367,19 +343,18 @@ unsigned long MQTTManager::getLastPublish(void) {
 bool MQTTManager::connectToBroker(void) {
     String clientId = getClientId();
 
-    Serial.print("[MQTT] Client ID: ");
-    Serial.println(clientId);
+    LOG_D("[MQTT] Client ID: %s\n", clientId.c_str());
 
     // TLS mutual auth (client cert) is always active via secureClient.
     // Username/password is optional on top — Mosquitto uses the cert CN as identity
     // when use_identity_as_username is set, so credentials are rarely needed.
     bool result;
     if (username.length() > 0) {
-        Serial.println("[MQTT] Connecting (mTLS + username)");
+        LOG_I("[MQTT] Connecting (mTLS + username)\n");
         const char* pass = password.length() > 0 ? password.c_str() : nullptr;
         result = mqttClient.connect(clientId.c_str(), username.c_str(), pass);
     } else {
-        Serial.println("[MQTT] Connecting (mTLS, certificate identity)");
+        LOG_I("[MQTT] Connecting (mTLS, certificate identity)\n");
         result = mqttClient.connect(clientId.c_str());
     }
 
@@ -389,29 +364,28 @@ bool MQTTManager::connectToBroker(void) {
 // Setup TLS (NetworkClientSecure with mbedTLS — works over WiFi and RMII Ethernet)
 void MQTTManager::setupTLS(void) {
     if (certManager == nullptr) {
-        Serial.println("[MQTT] ERROR: Certificate manager not initialized");
+        LOG_E("[MQTT] ERROR: Certificate manager not initialized\n");
         return;
     }
 
-    Serial.println("[MQTT] Setting up TLS certificates...");
+    LOG_D("[MQTT] Setting up TLS certificates...\n");
 
     // Get certificates from certificate manager (NVS or compiled-in)
     const char* ca = certManager->getCACert();
     const char* cert = certManager->getClientCert();
     const char* key = certManager->getClientKey();
 
-    Serial.print("[MQTT] Certificate source: ");
-    Serial.println(certManager->getCertificateSource());
+    LOG_D("[MQTT] Certificate source: %s\n", certManager->getCertificateSource().c_str());
     logCertInfo("CA cert", ca);
     logCertInfo("Client cert", cert);
-    Serial.printf("[MQTT] Client key:  %zu bytes\n", key ? strlen(key) : 0);
+    LOG_D("[MQTT] Client key:  %zu bytes\n", key ? strlen(key) : 0);
 
     secureClient.setCACert(ca);
     secureClient.setCertificate(cert);
     secureClient.setPrivateKey(key);
     secureClient.setTimeout(5);  // 5s connect timeout — keeps web server responsive on failure
 
-    Serial.println("[MQTT] TLS certificates configured");
+    LOG_D("[MQTT] TLS certificates configured\n");
 }
 
 void MQTTManager::refreshCerts(void) {

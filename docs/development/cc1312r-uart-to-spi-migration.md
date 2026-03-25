@@ -617,29 +617,30 @@ high-level migration plan:
 - Read variable-length frames only (START + LEN + LEN+1 bytes in one CS window).
 - Treat one 5-second diagnostic interval with no DRDY activity as normal between
   30-second heartbeats.
-- Preserve 4-byte downlink-address compatibility until every host-side sender is confirmed
-  to use the 8-byte form.
 - When adding a new downlink path, do not send immediately after DRDY deasserts.
   Wait at least 80 ms — or poll `DRDY` for a subsequent re-assertion — to ensure the
   CC1312R has started its SPI RX DMA transfer before sending.
 
 ### Remaining Follow-up
 
-1. **Verify MSG_TYPE `0x01` sensor node readings arrive**
-   - No sensor node data has been received yet. Once `acceptedNodeCount > 0` and
-     `whitelistReady = 1`, the coordinator will accept and relay RF packets from enrolled
-     nodes.
-   - Confirm readings appear on the `cc1312/nodes` MQTT topic.
+All major items resolved. The following are complete as of 2026-03-25:
 
-2. **Simplify to 8-byte-only downlink addresses** (future, low priority)
-   - Once every host-side sender is confirmed to use 8-byte addresses, the 4-byte
-     compatibility path in the coordinator parser can be removed.
+1. ✅ **Sensor node readings confirmed end-to-end** — PIR dwell/trigger events received
+   and published to `cc1312/nodes`. Example confirmed frame:
+   `AA 11 02 00 12 4B 00 2D 6D 5A 04 DE 11 07 00 B0 00 00 00 D6`
+   (`00124B002D6D5A04` reading/pir, dwell 7 s, 176 events, rssi −34 dBm)
 
-3. **Tidy temporary bring-up diagnostics** (future, optional)
-   - Remove or downgrade bench-only diagnostics once the SPI path has been stable for a
-     while.
-   - Candidates include the `0xFF` idle-fill aid and temporary request-reason tracking
-     variables used during node-list debugging.
+2. ✅ **4-byte address compatibility removed** from `processCommandFrame()` in
+   `rfEchoRx.c`. All downlink frames now require the 8-byte address format.
+   `UART_LEGACY_MIN_LEN` define removed. `addrFieldLen` variable removed.
+
+3. ✅ **Bring-up diagnostics tidied** — `lastNodeListRequestReason` /
+   `lastNodeListRequestRat` tracking variables removed from `rfEchoRx.c`.
+   `sendNodeListRequest()` no longer takes a `reason` parameter.
+
+4. ✅ **`cc1312r-rf-coordinator.md` updated** — wiring table, topology diagram, driver
+   description, and build configuration all updated to reflect SPI as the active
+   interface. UART references removed.
 
 ---
 

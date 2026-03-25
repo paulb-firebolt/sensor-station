@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "mqtt_manager.h"
+#include "log.h"
 
 // ============================================================================
 // Pin Configuration
@@ -92,7 +93,7 @@ public:
 
     void begin() {
         _serial.begin(LD2450_BAUD, SERIAL_8N1, LD2450_RX_PIN, LD2450_TX_PIN);
-        Serial.printf("[LD2450] Initialized on UART1 RX=%d TX=%d @ %u\n",
+        LOG_I("[LD2450] Initialized on UART1 RX=%d TX=%d @ %u\n",
                       LD2450_RX_PIN, LD2450_TX_PIN, LD2450_BAUD);
         _enableMultiTargetTracking();
     }
@@ -120,13 +121,13 @@ public:
                 uint32_t newBytes  = _bytesSeen   - _lastByteCount;
                 uint32_t newFrames = _framesSeen  - _lastFrameCount;
                 if (newBytes == 0) {
-                    Serial.println("[LD2450] No data received — check wiring (TX→G19, RX→G20) and 5V power");
+                    LOG_W("[LD2450] No data received — check wiring (TX→G19, RX→G20) and 5V power\n");
                 } else if (newFrames == 0) {
-                    Serial.printf("[LD2450] %lu bytes but 0 frames — possible sync issue\n", newBytes);
+                    LOG_W("[LD2450] %lu bytes but 0 frames — possible sync issue\n", newBytes);
                 } else {
                     int activeCount = 0;
                     for (int i = 0; i < 3; i++) if (_lastTargets[i].active) activeCount++;
-                    Serial.printf("[LD2450] %lu bytes, %lu frames, targets=%d, batch=%zu\n",
+                    LOG_D("[LD2450] %lu bytes, %lu frames, targets=%d, batch=%zu\n",
                                   newBytes, newFrames, activeCount, _batchCount);
                 }
                 _lastByteCount  = _bytesSeen;
@@ -278,7 +279,7 @@ private:
         _sendCommand(LD2450_CMD_MULTI_TARGET, nullptr, 0);
         delay(50);
         _sendCommand(LD2450_CMD_DISABLE_CONFIG, nullptr, 0);
-        Serial.println("[LD2450] Multi-target tracking enabled");
+        LOG_I("[LD2450] Multi-target tracking enabled\n");
     }
 
     void _publishBatch(unsigned long now) {
@@ -305,7 +306,7 @@ private:
         serializeJson(doc, payload);
         _mqtt->publish(LD2450_TOPIC, payload);
 
-        Serial.printf("[LD2450] Batch published: %zu frames (%u bytes)\n",
+        LOG_I("[LD2450] Batch published: %zu frames (%u bytes)\n",
                       _batchCount, payload.length());
 
         _batchCount       = 0;

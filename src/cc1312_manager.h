@@ -55,6 +55,7 @@
 #include <Preferences.h>
 #include <SPI.h>
 #include "mqtt_manager.h"
+#include "log.h"
 
 // ============================================================================
 // Pin Configuration
@@ -210,9 +211,9 @@ public:
         pinMode(CC1312_CS_PIN, OUTPUT);
         digitalWrite(CC1312_CS_PIN, HIGH);
         pinMode(CC1312_DRDY_PIN, INPUT_PULLUP);
-        Serial.printf("[CC1312] Initialized on SPI MOSI=%d MISO=%d CLK=%d CS=%d DRDY=%d @ %uHz\n",
-                      CC1312_MOSI_PIN, CC1312_MISO_PIN, CC1312_SCLK_PIN, CC1312_CS_PIN,
-                      CC1312_DRDY_PIN, CC1312_SPI_FREQ);
+        LOG_I("[CC1312] Initialized on SPI MOSI=%d MISO=%d CLK=%d CS=%d DRDY=%d @ %uHz\n",
+              CC1312_MOSI_PIN, CC1312_MISO_PIN, CC1312_SCLK_PIN, CC1312_CS_PIN,
+              CC1312_DRDY_PIN, CC1312_SPI_FREQ);
         memset(_nodeLastSeen, 0, sizeof(_nodeLastSeen));
         memset(_nodeVersion, 0, sizeof(_nodeVersion));
         memset(_nodeSensorType, CC1312_SC_RAW, sizeof(_nodeSensorType));
@@ -224,7 +225,7 @@ public:
             uint64_t addr = strtoull(doc["addr"].as<const char*>(), nullptr, 16);
             _enrollNode(addr);
             _sendDownlink(CC1312_CMD_ACCEPT_NODE, addr);
-            Serial.printf("[CC1312] Enrolled %016llX\n", (unsigned long long)addr);
+            LOG_I("[CC1312] Enrolled %016llX\n", (unsigned long long)addr);
             _syncNodeList();
             _publishConfig();
         } else if (action == "remove_node") {
@@ -232,18 +233,18 @@ public:
             _removeNode(addr);
             _sendDownlink(CC1312_CMD_REMOVE_NODE, addr);
             _syncNodeList();
-            Serial.printf("[CC1312] Removed %016llX\n", (unsigned long long)addr);
+            LOG_I("[CC1312] Removed %016llX\n", (unsigned long long)addr);
             _publishConfig();
         } else if (action == "discovery_on") {
             _discoveryMode = true;
             _discoveryStarted = millis();
             _sendDownlink(CC1312_CMD_DISCOVERY_ON, 0);
-            Serial.println("[CC1312] Discovery mode ON (auto-off in 5 min)");
+            LOG_I("[CC1312] Discovery mode ON (auto-off in 5 min)\n");
         } else if (action == "discovery_off") {
             _discoveryMode = false;
             _discoveryStarted = 0;
             _sendDownlink(CC1312_CMD_DISCOVERY_OFF, 0);
-            Serial.println("[CC1312] Discovery mode OFF");
+            LOG_I("[CC1312] Discovery mode OFF\n");
         } else if (action == "sync_node_list") {
             _syncNodeList();
         } else if (action == "get_node_list") {
@@ -254,14 +255,14 @@ public:
             const char* addrStr = doc["addr"] | "FFFFFFFFFFFFFFFF";
             uint64_t addr = strtoull(addrStr, nullptr, 16);
             _sendDownlink(CC1312_CMD_GET_STATUS, addr);
-            Serial.printf("[CC1312] CMD_GET_STATUS → %016llX\n", (unsigned long long)addr);
+            LOG_I("[CC1312] CMD_GET_STATUS → %016llX\n", (unsigned long long)addr);
         }
     }
 
     void ping() {
         _lastPingSent = millis();
         _sendDownlink(CC1312_CMD_PING, 0);
-        Serial.println("[CC1312] Ping sent");
+        LOG_I("[CC1312] Ping sent\n");
     }
 
     void update() {
@@ -301,7 +302,7 @@ public:
                 _spi.endTransaction();
                 _drdyErrors++;
                 _lastErrorByte = start;
-                Serial.printf("[CC1312] SPI bad frame: start=0x%02X len=0x%02X\n", start, len);
+                LOG_W("[CC1312] SPI bad frame: start=0x%02X len=0x%02X\n", start, len);
             }
         }
 
@@ -320,13 +321,13 @@ public:
                 _drdyErrors   = 0;
 
                 if (triggers > 500) {
-                    Serial.printf("[CC1312] DRDY stuck low? %u triggers in 5s\n", triggers);
+                    LOG_W("[CC1312] DRDY stuck low? %u triggers in 5s\n", triggers);
                 } else if (triggers > 0) {
-                    Serial.printf("[CC1312] DRDY triggers=%u errors=%u (last bad=0x%02X) bytes=%u pending=%zu\n",
+                    LOG_D("[CC1312] DRDY triggers=%u errors=%u (last bad=0x%02X) bytes=%u pending=%zu\n",
                                   triggers, errors, _lastErrorByte, newBytes, _pendingCount);
                 } else if ((now - _lastByteAt) > 35000) {
                     // Only warn once the silence window exceeds 35 s
-                    Serial.println("[CC1312] No data in 35s — check DRDY (G12), CS (G11), SPI wiring and 3V3");
+                    LOG_W("[CC1312] No data in 35s — check DRDY (G12), CS (G11), SPI wiring and 3V3\n");
                 }
 
                 _lastByteCount = _bytesSeen;
@@ -343,7 +344,7 @@ public:
         // in RX mode and are silently discarded.
         if (_pendingListSyncAt != 0 && (now - _pendingListSyncAt) >= 80) {
             _pendingListSyncAt = 0;
-            Serial.printf("[CC1312] Sending node list to coordinator (%zu entries)\n", _enrolledCount);
+            LOG_I("[CC1312] Sending node list to coordinator (%zu entries)\n", _enrolledCount);
             _syncNodeList();
         }
 
@@ -352,7 +353,7 @@ public:
             _discoveryMode = false;
             _discoveryStarted = 0;
             _sendDownlink(CC1312_CMD_DISCOVERY_OFF, 0);
-            Serial.println("[CC1312] Discovery mode timed out — OFF");
+            LOG_I("[CC1312] Discovery mode timed out — OFF\n");
         }
 
         if (_mqtt->isConnected() && _pendingCount > 0 &&
@@ -366,7 +367,7 @@ public:
         if (_enrolledCount > 0 && (now - _lastStatusPoll >= statusDue)) {
             _lastStatusPoll = now;
             _sendDownlink(CC1312_CMD_GET_STATUS, 0xFFFFFFFFFFFFFFFFULL);
-            Serial.println("[CC1312] Polling enrolled nodes for STATUS");
+            LOG_I("[CC1312] Polling enrolled nodes for STATUS\n");
         }
     }
 
@@ -499,7 +500,7 @@ private:
         if (_rxPos < fullLen)
             return;
 
-        // Log raw frame bytes
+        // Log raw frame bytes (debug only)
         {
             char hex[fullLen * 3 + 1];
             size_t pos = 0;
@@ -507,7 +508,7 @@ private:
                 pos += snprintf(hex + pos, sizeof(hex) - pos, "%02X ", _rxBuf[i]);
             }
             if (pos > 0) hex[pos - 1] = '\0';  // trim trailing space
-            Serial.printf("[CC1312] RAW(%zu): %s\n", fullLen, hex);
+            LOG_D("[CC1312] RAW(%zu): %s\n", fullLen, hex);
         }
 
         // Validate CRC over [MSG_TYPE..end of payload] = _frameLen bytes
@@ -515,7 +516,7 @@ private:
         uint8_t actual = _rxBuf[fullLen - 1];
 
         if (expected != actual) {
-            Serial.printf("[CC1312] CRC mismatch (got 0x%02X expected 0x%02X) — dropped\n", actual,
+            LOG_W("[CC1312] CRC mismatch (got 0x%02X expected 0x%02X) — dropped\n", actual,
                           expected);
             _inFrame = false;
             _rxPos = 0;
@@ -538,7 +539,7 @@ private:
     void _dispatchFrame(uint8_t msgType, const uint8_t* payload, uint8_t len) {
         // All frames: node_addr(8 BE) + rssi(1) + ...
         if (len < 9) {
-            Serial.printf("[CC1312] Frame too short: type=0x%02X len=%u\n", msgType, len);
+            LOG_W("[CC1312] Frame too short: type=0x%02X len=%u\n", msgType, len);
             return;
         }
 
@@ -555,14 +556,14 @@ private:
         bool isDataFrame = (msgType == CC1312_MSG_STATUS || msgType == CC1312_MSG_READING ||
                             msgType == CC1312_MSG_EVENT);
         if (isDataFrame && !_discoveryMode && !_isEnrolled(addr)) {
-            Serial.printf("[CC1312] Dropped frame from unenrolled node %016llX\n",
+            LOG_W("[CC1312] Dropped frame from unenrolled node %016llX\n",
                           (unsigned long long)addr);
             return;
         }
 
         if (msgType == CC1312_MSG_STATUS) {
             if (bodyLen < 8) {
-                Serial.printf("[CC1312] STATUS too short from %016llX\n", (unsigned long long)addr);
+                LOG_W("[CC1312] STATUS too short from %016llX\n", (unsigned long long)addr);
                 return;
             }
             _upsert(addr, msgType, 0, rssi, body, bodyLen);
@@ -578,17 +579,17 @@ private:
                         break;
                     }
                 }
-                Serial.printf("[CC1312] %016llX status addr_low=0x%08lX tx=%lu fw=%u.%u.%u sensor=%s (rssi=%d)\n",
+                LOG_I("[CC1312] %016llX status addr_low=0x%08lX tx=%lu fw=%u.%u.%u sensor=%s (rssi=%d)\n",
                               (unsigned long long)addr, (unsigned long)addrLow32, (unsigned long)txCount,
                               body[8], body[9], body[10], _cc1312SensorName(body[11]), rssi);
             } else {
-                Serial.printf("[CC1312] %016llX status addr_low=0x%08lX tx=%lu (rssi=%d)\n",
+                LOG_I("[CC1312] %016llX status addr_low=0x%08lX tx=%lu (rssi=%d)\n",
                               (unsigned long long)addr, (unsigned long)addrLow32, (unsigned long)txCount, rssi);
             }
 
         } else if (msgType == CC1312_MSG_READING || msgType == CC1312_MSG_EVENT) {
             if (bodyLen < 1) {
-                Serial.printf("[CC1312] Empty body from %016llX\n", (unsigned long long)addr);
+                LOG_W("[CC1312] Empty body from %016llX\n", (unsigned long long)addr);
                 return;
             }
             uint8_t sc;
@@ -606,11 +607,11 @@ private:
                 sdataLen = bodyLen - 1;
             }
             _upsert(addr, msgType, sc, rssi, sdata, sdataLen);
-            Serial.printf("[CC1312] %016llX %s/%s len=%u (rssi=%d)\n", (unsigned long long)addr,
+            LOG_I("[CC1312] %016llX %s/%s len=%u (rssi=%d)\n", (unsigned long long)addr,
                           _cc1312MsgName(msgType), _cc1312SensorName(sc), sdataLen, rssi);
 
         } else if (msgType == CC1312_MSG_NODE_SEEN) {
-            Serial.printf("[CC1312] Node seen: %016llX (rssi=%d)\n", (unsigned long long)addr,
+            LOG_I("[CC1312] Node seen: %016llX (rssi=%d)\n", (unsigned long long)addr,
                           rssi);
             _upsertSeen(addr, rssi);
             _publishSeen(addr, rssi);
@@ -618,7 +619,7 @@ private:
         } else if (msgType == CC1312_MSG_PONG) {
             unsigned long rtt = _lastPingSent ? millis() - _lastPingSent : 0;
             _lastPingSent = 0;
-            Serial.printf("[CC1312] PONG from %016llX (rssi=%d, rtt=%lums)\n",
+            LOG_I("[CC1312] PONG from %016llX (rssi=%d, rtt=%lums)\n",
                           (unsigned long long)addr, rssi, rtt);
 
         } else if (msgType == CC1312_MSG_HEARTBEAT) {
@@ -627,11 +628,11 @@ private:
                 _coordinatorAddr = addr;
             if (bodyLen >= 3) {
                 _coordinatorVersion = {body[0], body[1], body[2], true};
-                Serial.printf("[CC1312] Coordinator heartbeat (id=%016llX) fw=%u.%u.%u\n",
+                LOG_I("[CC1312] Coordinator heartbeat (id=%016llX) fw=%u.%u.%u\n",
                               (unsigned long long)_coordinatorAddr,
                               body[0], body[1], body[2]);
             } else {
-                Serial.printf("[CC1312] Coordinator heartbeat (id=%016llX)\n",
+                LOG_I("[CC1312] Coordinator heartbeat (id=%016llX)\n",
                               (unsigned long long)_coordinatorAddr);
             }
 
@@ -641,12 +642,12 @@ private:
                 // RX DMA transfer after the TX callback fires and serviceSpiTransport()
                 // is next called from the main loop (up to 50 ms away).
                 _pendingListSyncAt = millis() | 1u;  // |1 avoids using 0 as sentinel
-                Serial.printf("[CC1312] Node list requested — response deferred 80 ms (%zu entries)\n",
+                LOG_I("[CC1312] Node list requested — response deferred 80 ms (%zu entries)\n",
                               _enrolledCount);
             }
 
         } else {
-            Serial.printf("[CC1312] Unknown msg type=0x%02X from %016llX\n", msgType,
+            LOG_W("[CC1312] Unknown msg type=0x%02X from %016llX\n", msgType,
                           (unsigned long long)addr);
         }
     }
@@ -874,7 +875,7 @@ private:
             _enrolled[i] = prefs.getULong64(key, 0);
         }
         prefs.end();
-        Serial.printf("[CC1312] Loaded %zu enrolled nodes from NVS\n", _enrolledCount);
+        LOG_I("[CC1312] Loaded %zu enrolled nodes from NVS\n", _enrolledCount);
     }
 
     void _saveEnrolled() {
@@ -944,7 +945,7 @@ private:
         digitalWrite(CC1312_CS_PIN, HIGH);
         _spi.endTransaction();
 
-        Serial.printf("[CC1312] Synced %zu nodes to coordinator\n", _enrolledCount);
+        LOG_I("[CC1312] Synced %zu nodes to coordinator\n", _enrolledCount);
     }
 
     void _publishConfig() {
@@ -982,7 +983,7 @@ private:
         serializeJson(doc, payload);
         _mqtt->publish(CC1312_TOPIC, payload);
 
-        Serial.printf("[CC1312] Published %zu messages (%u bytes)\n", _pendingCount,
+        LOG_I("[MQTT] Published %zu messages (%u bytes)\n", _pendingCount,
                       payload.length());
 
         _pendingCount = 0;

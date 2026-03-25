@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include "log.h"
 #include <mbedtls/base64.h>
 
 DeviceWebServer::DeviceWebServer(WiFiManager& wifiMgr)
@@ -30,7 +31,7 @@ void DeviceWebServer::setFindMeCallback(void (*callback)(void)) {
 void DeviceWebServer::setMQTTManagers(CertificateManager* certMgr, MQTTManager* mqttMgr) {
     certManager = certMgr;
     mqttManager = mqttMgr;
-    Serial.println("[Web] MQTT managers set");
+    LOG_I("[Web] MQTT managers set\n");
 }
 
 void DeviceWebServer::setOTAManager(OTAManager* otaMgr) {
@@ -40,7 +41,7 @@ void DeviceWebServer::setOTAManager(OTAManager* otaMgr) {
 #if ENABLE_CC1312
 void DeviceWebServer::setCC1312Manager(CC1312Manager* mgr) {
     cc1312Manager = mgr;
-    Serial.println("[Web] CC1312 manager set");
+    LOG_I("[Web] CC1312 manager set\n");
 }
 #endif
 
@@ -86,17 +87,17 @@ void DeviceWebServer::begin(void) {
         webServer.collectHeaders(headers, 3);
 
         webServer.begin();
-        Serial.println("[Web] WiFi server started on port 80");
+        LOG_I("[Web] WiFi server started on port 80\n");
 
         // Start DNS server for captive portal if in AP mode
         if (wifiManager.isAPActive()) {
             dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
             dnsServer.start(DNS_SERVER_PORT, "*", wifiManager.getAPIP());
             dnsActive = true;
-            Serial.println("[DNS] Captive portal DNS started");
+            LOG_I("[DNS] Captive portal DNS started\n");
         }
     } else {
-        Serial.println("[Web] Ethernet-only mode - WiFi web server disabled");
+        LOG_I("[Web] Ethernet-only mode - WiFi web server disabled\n");
     }
 
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
@@ -106,8 +107,7 @@ void DeviceWebServer::begin(void) {
         ethServer = new EthernetServer(ETHERNET_WEB_SERVER_PORT);
         ethServer->begin();
         ethServerActive = true;
-        Serial.print("[Web] Ethernet server started on port ");
-        Serial.println(ETHERNET_WEB_SERVER_PORT);
+        LOG_I("[Web] Ethernet server started on port %d\n", ETHERNET_WEB_SERVER_PORT);
     }
 #endif
 }
@@ -119,7 +119,7 @@ void DeviceWebServer::stop(void) {
         dnsServer.stop();
         dnsActive = false;
     }
-    Serial.println("[Web] Server stopped");
+    LOG_I("[Web] Server stopped\n");
 }
 
 // Handle client requests
@@ -135,12 +135,11 @@ void DeviceWebServer::handleClient(void) {
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // Start Ethernet server if connected but not yet started
     if (ethernetConnected && !ethServerActive) {
-        Serial.println("[Web] Ethernet connected - starting Ethernet server");
+        LOG_I("[Web] Ethernet connected - starting Ethernet server\n");
         ethServer = new EthernetServer(ETHERNET_WEB_SERVER_PORT);
         ethServer->begin();
         ethServerActive = true;
-        Serial.print("[Web] Ethernet server started on port ");
-        Serial.println(ETHERNET_WEB_SERVER_PORT);
+        LOG_I("[Web] Ethernet server started on port %d\n", ETHERNET_WEB_SERVER_PORT);
     }
 
     // Handle Ethernet server
@@ -156,7 +155,7 @@ void DeviceWebServer::handleEthernetClient(void) {
     EthernetClient client = ethServer->available();
 
     if (client) {
-        Serial.println("[Eth] Client connected");
+        LOG_I("[Eth] Client connected\n");
 
         String request = "";
         unsigned long timeout = millis() + 5000;
@@ -187,8 +186,7 @@ void DeviceWebServer::handleEthernetClient(void) {
                         request.substring(clPos + 15, clEnd);  // "Content-Length:" is 15 chars
                     clValue.trim();                            // Remove any whitespace
                     contentLength = clValue.toInt();
-                    Serial.print("[Eth] Parsed Content-Length: ");
-                    Serial.println(contentLength);
+                    LOG_D("[Eth] Parsed Content-Length: %d\n", contentLength);
                 }
             }
         }
@@ -198,12 +196,9 @@ void DeviceWebServer::handleEthernetClient(void) {
             int headersEndPos = request.indexOf("\r\n\r\n") + 4;
             int targetLength = headersEndPos + contentLength;
 
-            Serial.print("[Eth] Content-Length: ");
-            Serial.println(contentLength);
-            Serial.print("[Eth] Current length: ");
-            Serial.println(request.length());
-            Serial.print("[Eth] Target length: ");
-            Serial.println(targetLength);
+            LOG_D("[Eth] Content-Length: %d\n", contentLength);
+            LOG_D("[Eth] Current length: %u\n", request.length());
+            LOG_D("[Eth] Target length: %d\n", targetLength);
 
             timeout = millis() + 3000;  // 3 seconds for body
             while (request.length() < targetLength && millis() < timeout) {
@@ -215,17 +210,13 @@ void DeviceWebServer::handleEthernetClient(void) {
                 }
             }
 
-            Serial.print("[Eth] Final length: ");
-            Serial.println(request.length());
+            LOG_D("[Eth] Final length: %u\n", request.length());
         }
 
-        Serial.print("[Eth] Request length: ");
-        Serial.println(request.length());
+        LOG_D("[Eth] Request length: %u\n", request.length());
 
         // Debug: print full request
-        Serial.println("[Eth] === FULL REQUEST ===");
-        Serial.println(request);
-        Serial.println("[Eth] === END REQUEST ===");
+        LOG_D("[Eth] === FULL REQUEST ===\n%s\n[Eth] === END REQUEST ===\n", request.c_str());
 
         // Handle the request
         if (request.length() > 0) {
@@ -235,7 +226,7 @@ void DeviceWebServer::handleEthernetClient(void) {
         // Give client time to receive data
         delay(10);
         client.stop();
-        Serial.println("[Eth] Client disconnected");
+        LOG_I("[Eth] Client disconnected\n");
     }
 }
 
@@ -270,31 +261,29 @@ void DeviceWebServer::sendEthernetResponse(EthernetClient& client, int code,
 
 // Handle Ethernet HTTP request
 void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String& request) {
-    Serial.print("[Eth] Request: ");
-
     // Parse the request line (first line)
     int firstLineEnd = request.indexOf('\r');
     String requestLine = request.substring(0, firstLineEnd);
-    Serial.println(requestLine);
+    LOG_I("[Eth] Request: %s\n", requestLine.c_str());
 
     // Determine the path
     if (requestLine.startsWith("GET / ") || requestLine.startsWith("GET /index")) {
 #if WIFI_DISABLED
         // On WiFi-disabled builds, show first-run setup until admin password is configured
         if (adminPassword.isEmpty()) {
-            Serial.println("[Eth] Serving device setup page (first run)");
+            LOG_I("[Eth] Serving device setup page (first run)\n");
             sendEthernetResponse(client, 200, "text/html", generateDeviceSetupPage());
         } else {
-            Serial.println("[Eth] Serving status page");
+            LOG_I("[Eth] Serving status page\n");
             sendEthernetResponse(client, 200, "text/html", generateStatusPage());
         }
 #else
         // Show provisioning page if in AP mode, otherwise status page
         if (wifiManager.isAPActive()) {
-            Serial.println("[Eth] Serving Ethernet provisioning page (manual input)");
+            LOG_I("[Eth] Serving Ethernet provisioning page (manual input)\n");
             sendEthernetResponse(client, 200, "text/html", generateEthernetProvisioningPage());
         } else {
-            Serial.println("[Eth] Serving status page");
+            LOG_I("[Eth] Serving status page\n");
             sendEthernetResponse(client, 200, "text/html", generateStatusPage());
         }
 #endif
@@ -357,7 +346,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
                 authPrefs.putString("admin_password", newPass);
                 authPrefs.end();
                 adminPassword = newPass;
-                Serial.println("[Setup] Admin password saved");
+                LOG_I("[Setup] Admin password saved\n");
             }
             // Redirect to status page
             client.println("HTTP/1.1 303 See Other");
@@ -370,16 +359,14 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 #endif
     } else if (requestLine.startsWith("POST /api/save")) {
         // Handle save from Ethernet (manual input)
-        Serial.println("[Eth] Processing save request");
+        LOG_I("[Eth] Processing save request\n");
 
         // Parse form data from POST body
         int bodyStart = request.indexOf("\r\n\r\n") + 4;
         String body = request.substring(bodyStart);
 
-        Serial.print("[Eth] Body: ");
-        Serial.println(body);
-        Serial.print("[Eth] Body length: ");
-        Serial.println(body.length());
+        LOG_D("[Eth] Body: %s\n", body.c_str());
+        LOG_D("[Eth] Body length: %u\n", body.length());
 
         // Parse ssid and password from POST data
         String ssid = "";
@@ -388,10 +375,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         int ssidPos = body.indexOf("ssid=");
         int passPos = body.indexOf("&password=");
 
-        Serial.print("[Eth] ssidPos: ");
-        Serial.print(ssidPos);
-        Serial.print(", passPos: ");
-        Serial.println(passPos);
+        LOG_D("[Eth] ssidPos: %d, passPos: %d\n", ssidPos, passPos);
 
         if (ssidPos >= 0 && passPos >= 0) {
             ssid = body.substring(ssidPos + 5, passPos);
@@ -418,32 +402,24 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
             ssid.trim();
             password.trim();
 
-            Serial.print("[Eth] Parsed SSID: '");
-            Serial.print(ssid);
-            Serial.print("' (len: ");
-            Serial.print(ssid.length());
-            Serial.println(")");
-            Serial.print("[Eth] Parsed Password: '");
-            Serial.print(password);
-            Serial.print("' (len: ");
-            Serial.print(password.length());
-            Serial.println(")");
+            LOG_D("[Eth] Parsed SSID: '%s' (len: %u)\n", ssid.c_str(), ssid.length());
+            LOG_D("[Eth] Parsed Password: '%s' (len: %u)\n", password.c_str(), password.length());
 
             if (ssid.length() > 0 && password.length() > 0) {
-                Serial.println("[Eth] Saving credentials...");
+                LOG_I("[Eth] Saving credentials...\n");
                 wifiManager.saveCredentials(ssid, password);
                 sendEthernetResponse(client, 200, "text/html", generateSaveSuccessPage());
 
-                Serial.println("[Eth] Rebooting in 2 seconds...");
+                LOG_I("[Eth] Rebooting in 2 seconds...\n");
                 Serial.flush();
                 delay(2000);
                 ESP.restart();
             } else {
-                Serial.println("[Eth] ERROR: Empty SSID or password");
+                LOG_E("[Eth] ERROR: Empty SSID or password\n");
                 sendEthernetResponse(client, 400, "text/plain", "Empty SSID or password");
             }
         } else {
-            Serial.println("[Eth] ERROR: Could not find ssid= or &password= in body");
+            LOG_E("[Eth] ERROR: Could not find ssid= or &password= in body\n");
             sendEthernetResponse(client, 400, "text/plain", "Invalid form data");
         }
         return;  // Exit early after handling POST
@@ -468,7 +444,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         sendEthernetResponse(client, 200, "application/json", jsonResponse);
     } else if (requestLine.startsWith("GET /mqtt")) {
         // MQTT configuration page - requires authentication
-        Serial.println("[Eth] Serving MQTT config page");
+        LOG_I("[Eth] Serving MQTT config page\n");
 
         if (!requireEthernetAuth(request)) {
             // Send 401 Unauthorized with WWW-Authenticate header
@@ -488,7 +464,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         }
     } else if (requestLine.startsWith("POST /api/mqtt/save")) {
         // Save MQTT configuration - requires authentication
-        Serial.println("[Eth] Processing MQTT save request");
+        LOG_I("[Eth] Processing MQTT save request\n");
 
         if (!requireEthernetAuth(request)) {
             client.println("HTTP/1.1 401 Unauthorized");
@@ -504,8 +480,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         int bodyStart = request.indexOf("\r\n\r\n") + 4;
         String body = request.substring(bodyStart);
 
-        Serial.print("[Eth] POST body: ");
-        Serial.println(body);
+        LOG_D("[Eth] POST body: %s\n", body.c_str());
 
         // Parse parameters
         bool enabled = body.indexOf("enabled=") >= 0;
@@ -542,14 +517,8 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         password = extractValue("password=");
         topic = extractValue("topic=");
 
-        Serial.print("[Eth] Parsed - Enabled: ");
-        Serial.print(enabled);
-        Serial.print(", Broker: ");
-        Serial.print(broker);
-        Serial.print(", Port: ");
-        Serial.print(port);
-        Serial.print(", Topic: ");
-        Serial.println(topic);
+        LOG_D("[Eth] Parsed - Enabled: %d, Broker: %s, Port: %u, Topic: %s\n",
+              enabled, broker.c_str(), port, topic.c_str());
 
         if (mqttManager &&
             mqttManager->saveConfig(enabled, broker, port, username, password, topic)) {
@@ -756,7 +725,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 #endif
     } else {
         // 404 Not Found
-        Serial.println("[Eth] 404 Not Found");
+        LOG_E("[Eth] 404 Not Found\n");
         sendEthernetResponse(client, 404, "text/plain", "Not Found");
     }
 }
@@ -806,7 +775,7 @@ void DeviceWebServer::handleDeviceSetup(void) {
         authPrefs.putString("admin_password", newPass);
         authPrefs.end();
         adminPassword = newPass;
-        Serial.println("[Setup] Admin password saved");
+        LOG_I("[Setup] Admin password saved\n");
     } else {
         webServer.send(500, "text/html",
                        "<h1>Error: Failed to save password</h1><a href='/'>Back</a>");
@@ -838,7 +807,7 @@ void DeviceWebServer::handleRoot(void) {
 
 // Handle WiFi scan request
 void DeviceWebServer::handleScan(void) {
-    Serial.println("[API] Scanning WiFi networks...");
+    LOG_I("[API] Scanning WiFi networks...\n");
 
     int n = WiFi.scanNetworks();
     JsonDocument doc;
@@ -858,8 +827,7 @@ void DeviceWebServer::handleScan(void) {
 
 // Handle save credentials request
 void DeviceWebServer::handleSave(void) {
-    Serial.println("[WiFi] Save credentials request");
-    Serial.flush();
+    LOG_I("[WiFi] Save credentials request\n");
 
     // Check for Ethernet-only mode
     bool ethernetOnly = webServer.hasArg("ethernet_only");
@@ -867,7 +835,7 @@ void DeviceWebServer::handleSave(void) {
     // In Ethernet-only mode, WiFi credentials are not required
     if (!ethernetOnly) {
         if (!webServer.hasArg("ssid") || !webServer.hasArg("password")) {
-            Serial.println("[WiFi] Missing required fields");
+            LOG_W("[WiFi] Missing required fields\n");
             webServer.send(400, "text/html",
                            "<h1>Error: Missing WiFi credentials</h1><a href='/'>Back</a>");
             return;
@@ -885,13 +853,13 @@ void DeviceWebServer::handleSave(void) {
     // Validate admin password if provided
     if (adminPassword.length() > 0) {
         if (adminPassword != adminPasswordConfirm) {
-            Serial.println("[WiFi] Admin passwords do not match");
+            LOG_W("[WiFi] Admin passwords do not match\n");
             webServer.send(400, "text/html",
                            "<h1>Error: Admin passwords do not match</h1><a href='/'>Back</a>");
             return;
         }
         if (adminPassword.length() < 4) {
-            Serial.println("[WiFi] Admin password too short");
+            LOG_W("[WiFi] Admin password too short\n");
             webServer.send(
                 400, "text/html",
                 "<h1>Error: Admin password must be at least 4 characters</h1><a href='/'>Back</a>");
@@ -899,13 +867,9 @@ void DeviceWebServer::handleSave(void) {
         }
     }
 
-    Serial.print("[WiFi] Ethernet-only mode: ");
-    Serial.println(ethernetOnly ? "Yes" : "No");
-    Serial.print("[WiFi] SSID: ");
-    Serial.println(ssid);
-    Serial.print("[WiFi] Admin password: ");
-    Serial.println(adminPassword.length() > 0 ? "Set" : "Not set");
-    Serial.flush();
+    LOG_I("[WiFi] Ethernet-only mode: %s\n", ethernetOnly ? "Yes" : "No");
+    LOG_I("[WiFi] SSID: %s\n", ssid.c_str());
+    LOG_I("[WiFi] Admin password: %s\n", adminPassword.length() > 0 ? "Set" : "Not set");
 
     // Save WiFi credentials (even if empty in Ethernet-only mode)
     wifiManager.saveCredentials(ssid, password);
@@ -915,9 +879,9 @@ void DeviceWebServer::handleSave(void) {
     if (netPrefs.begin("network_config", false)) {
         netPrefs.putBool("ethernet_only", ethernetOnly);
         netPrefs.end();
-        Serial.println("[WiFi] Ethernet-only preference saved");
+        LOG_I("[WiFi] Ethernet-only preference saved\n");
     } else {
-        Serial.println("[WiFi] ERROR: Failed to save Ethernet-only preference");
+        LOG_E("[WiFi] ERROR: Failed to save Ethernet-only preference\n");
     }
 
     // Save admin password
@@ -925,19 +889,19 @@ void DeviceWebServer::handleSave(void) {
     if (authPrefs.begin("auth", false)) {
         if (adminPassword.length() > 0) {
             authPrefs.putString("admin_password", adminPassword);
-            Serial.println("[WiFi] Admin password saved");
+            LOG_I("[WiFi] Admin password saved\n");
         } else {
             authPrefs.remove("admin_password");
-            Serial.println("[WiFi] Admin password cleared");
+            LOG_I("[WiFi] Admin password cleared\n");
         }
         authPrefs.end();
     } else {
-        Serial.println("[WiFi] ERROR: Failed to save admin password");
+        LOG_E("[WiFi] ERROR: Failed to save admin password\n");
     }
 
     // Send success page BEFORE reboot
     webServer.send(200, "text/html", generateSaveSuccessPage());
-    Serial.println("[WiFi] Response sent, rebooting in 2 seconds...");
+    LOG_I("[WiFi] Response sent, rebooting in 2 seconds...\n");
     Serial.flush();
 
     // Reboot after delay
@@ -1743,12 +1707,12 @@ void DeviceWebServer::loadAdminPassword(void) {
         authPrefs.end();
 
         if (adminPassword.length() > 0) {
-            Serial.println("[Web] Admin password loaded from NVS");
+            LOG_I("[Web] Admin password loaded from NVS\n");
         } else {
-            Serial.println("[Web] No admin password set - /mqtt routes will be unprotected");
+            LOG_I("[Web] No admin password set - /mqtt routes will be unprotected\n");
         }
     } else {
-        Serial.println("[Web] ERROR: Failed to load admin password from NVS");
+        LOG_E("[Web] ERROR: Failed to load admin password from NVS\n");
         adminPassword = "";
     }
 }
@@ -1762,7 +1726,7 @@ bool DeviceWebServer::requireAuth(void) {
 
     // Rate limiting: max 5 attempts per minute
     if (failedAttempts >= 5 && millis() - lastFailedAttempt < 60000) {
-        Serial.println("[Web] Rate limit exceeded - too many failed attempts");
+        LOG_W("[Web] Rate limit exceeded - too many failed attempts\n");
         webServer.send(429, "text/plain",
                        "Too many failed authentication attempts. Please wait 1 minute.");
         return false;
@@ -1772,16 +1736,14 @@ bool DeviceWebServer::requireAuth(void) {
     if (!webServer.authenticate("admin", adminPassword.c_str())) {
         failedAttempts++;
         lastFailedAttempt = millis();
-        Serial.print("[Web] Authentication failed (attempt ");
-        Serial.print(failedAttempts);
-        Serial.println(")");
+        LOG_W("[Web] Authentication failed (attempt %d)\n", failedAttempts);
         webServer.requestAuthentication();
         return false;
     }
 
     // Success - reset counter
     failedAttempts = 0;
-    Serial.println("[Web] Authentication successful");
+    LOG_D("[Web] Authentication successful\n");
     return true;
 }
 
@@ -1795,7 +1757,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
 
     // Rate limiting: max 5 attempts per minute
     if (failedAttempts >= 5 && millis() - lastFailedAttempt < 60000) {
-        Serial.println("[Eth] Rate limit exceeded - too many failed attempts");
+        LOG_W("[Eth] Rate limit exceeded - too many failed attempts\n");
         return false;
     }
 
@@ -1804,7 +1766,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     if (authPos < 0) {
         failedAttempts++;
         lastFailedAttempt = millis();
-        Serial.println("[Eth] No Authorization header");
+        LOG_W("[Eth] No Authorization header\n");
         return false;
     }
 
@@ -1828,7 +1790,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     // Allocate buffer and encode
     unsigned char* expectedBase64Buf = (unsigned char*)malloc(expectedLen + 1);
     if (expectedBase64Buf == NULL) {
-        Serial.println("[Eth] Failed to allocate memory for base64");
+        LOG_E("[Eth] Failed to allocate memory for base64\n");
         return false;
     }
 
@@ -1839,7 +1801,7 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
 
     if (ret != 0) {
         free(expectedBase64Buf);
-        Serial.println("[Eth] Base64 encoding failed");
+        LOG_E("[Eth] Base64 encoding failed\n");
         return false;
     }
 
@@ -1850,15 +1812,13 @@ bool DeviceWebServer::requireEthernetAuth(const String& request) {
     if (base64Creds != expectedBase64) {
         failedAttempts++;
         lastFailedAttempt = millis();
-        Serial.print("[Eth] Authentication failed (attempt ");
-        Serial.print(failedAttempts);
-        Serial.println(")");
+        LOG_W("[Eth] Authentication failed (attempt %d)\n", failedAttempts);
         return false;
     }
 
     // Success - reset counter
     failedAttempts = 0;
-    Serial.println("[Eth] Authentication successful");
+    LOG_I("[Eth] Authentication successful\n");
     return true;
 }
 #endif  // ENABLE_ETHERNET
@@ -1944,16 +1904,16 @@ void DeviceWebServer::handleMQTTUploadCert(void) {
 }
 
 void DeviceWebServer::handleMQTTUploadAllCerts(void) {
-    Serial.println("[Web] Upload-all handler entered");
+    LOG_I("[Web] Upload-all handler entered\n");
 
     if (!requireAuth()) {
-        Serial.println("[Web] Upload-all: auth failed");
+        LOG_W("[Web] Upload-all: auth failed\n");
         return;
     }
-    Serial.println("[Web] Upload-all: auth OK");
+    LOG_I("[Web] Upload-all: auth OK\n");
 
     if (certManager == nullptr) {
-        Serial.println("[Web] Upload-all: certManager null");
+        LOG_E("[Web] Upload-all: certManager null\n");
         webServer.send(503, "text/plain", "Certificate manager not initialized");
         return;
     }
@@ -1962,13 +1922,13 @@ void DeviceWebServer::handleMQTTUploadAllCerts(void) {
     String clientCert = webServer.arg("client_cert");
     String clientKey = webServer.arg("client_key");
 
-    Serial.printf("[Web] Upload-all received: CA=%d client=%d key=%d bytes\n", caCert.length(),
-                  clientCert.length(), clientKey.length());
+    LOG_I("[Web] Upload-all received: CA=%u client=%u key=%u bytes\n", caCert.length(),
+          clientCert.length(), clientKey.length());
 
     if (caCert.length() == 0 && clientCert.length() == 0 && clientKey.length() == 0) {
-        Serial.println("[Web] Upload-all: all fields empty - body not parsed?");
-        Serial.printf("[Web] Content-Type: %s\n", webServer.header("Content-Type").c_str());
-        Serial.printf("[Web] Content-Length: %s\n", webServer.header("Content-Length").c_str());
+        LOG_W("[Web] Upload-all: all fields empty - body not parsed?\n");
+        LOG_D("[Web] Content-Type: %s\n", webServer.header("Content-Type").c_str());
+        LOG_D("[Web] Content-Length: %s\n", webServer.header("Content-Length").c_str());
         webServer.send(400, "text/plain", "No certificate data provided");
         return;
     }
