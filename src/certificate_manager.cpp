@@ -1,5 +1,6 @@
 #include "certificate_manager.h"
 #include "certs.h"
+#include "log.h"
 
 CertificateManager::CertificateManager()
     : nvs_ca_cert(nullptr),
@@ -10,11 +11,11 @@ CertificateManager::CertificateManager()
       using_nvs_key(false) {}
 
 void CertificateManager::begin(void) {
-    Serial.println("[CertMgr] Initializing certificate manager");
+    LOG_I("[CertMgr] Initializing certificate manager\n");
 
     // Open NVS in read-write mode
     if (!prefs.begin(CERT_NVS_NAMESPACE, false)) {
-        Serial.println("[CertMgr] ERROR: Failed to open NVS namespace");
+        LOG_E("[CertMgr] ERROR: Failed to open NVS namespace\n");
         return;
     }
 
@@ -27,23 +28,23 @@ void CertificateManager::begin(void) {
 
     // Report what was loaded
     if (using_nvs_ca && using_nvs_client && using_nvs_key) {
-        Serial.println("[CertMgr] All certificates loaded from NVS");
+        LOG_I("[CertMgr] All certificates loaded from NVS\n");
     } else if (!using_nvs_ca && !using_nvs_client && !using_nvs_key) {
-        Serial.println("[CertMgr] No certificates in NVS, will use compiled-in defaults");
+        LOG_I("[CertMgr] No certificates in NVS, will use compiled-in defaults\n");
     } else {
-        Serial.println("[CertMgr] WARNING: Partial certificates in NVS, using mixed sources");
+        LOG_W("[CertMgr] WARNING: Partial certificates in NVS, using mixed sources\n");
         if (using_nvs_ca)
-            Serial.println("[CertMgr]   CA: NVS");
+            LOG_I("[CertMgr]   CA: NVS\n");
         else
-            Serial.println("[CertMgr]   CA: Compiled-in");
+            LOG_I("[CertMgr]   CA: Compiled-in\n");
         if (using_nvs_client)
-            Serial.println("[CertMgr]   Client Cert: NVS");
+            LOG_I("[CertMgr]   Client Cert: NVS\n");
         else
-            Serial.println("[CertMgr]   Client Cert: Compiled-in");
+            LOG_I("[CertMgr]   Client Cert: Compiled-in\n");
         if (using_nvs_key)
-            Serial.println("[CertMgr]   Client Key: NVS");
+            LOG_I("[CertMgr]   Client Key: NVS\n");
         else
-            Serial.println("[CertMgr]   Client Key: Compiled-in");
+            LOG_I("[CertMgr]   Client Key: Compiled-in\n");
     }
 }
 
@@ -70,12 +71,12 @@ const char* CertificateManager::getClientKey(void) {
 
 bool CertificateManager::saveCACert(const String& cert) {
     if (cert.length() == 0) {
-        Serial.println("[CertMgr] ERROR: Cannot save empty CA certificate");
+        LOG_E("[CertMgr] ERROR: Cannot save empty CA certificate\n");
         return false;
     }
 
     if (!prefs.begin(CERT_NVS_NAMESPACE, false)) {
-        Serial.println("[CertMgr] ERROR: Failed to open NVS for writing");
+        LOG_E("[CertMgr] ERROR: Failed to open NVS for writing\n");
         return false;
     }
 
@@ -89,14 +90,14 @@ bool CertificateManager::saveCACert(const String& cert) {
     prefs.end();
 
     if (success) {
-        Serial.println("[CertMgr] CA certificate saved to NVS");
+        LOG_I("[CertMgr] CA certificate saved to NVS\n");
         if (nvs_ca_cert != nullptr) {
             free(nvs_ca_cert);
         }
         nvs_ca_cert = strdup(cert.c_str());
         using_nvs_ca = (nvs_ca_cert != nullptr);
     } else {
-        Serial.println("[CertMgr] ERROR: Failed to save CA certificate");
+        LOG_E("[CertMgr] ERROR: Failed to save CA certificate\n");
     }
 
     return success;
@@ -104,12 +105,12 @@ bool CertificateManager::saveCACert(const String& cert) {
 
 bool CertificateManager::saveClientCert(const String& cert) {
     if (cert.length() == 0) {
-        Serial.println("[CertMgr] ERROR: Cannot save empty client certificate");
+        LOG_E("[CertMgr] ERROR: Cannot save empty client certificate\n");
         return false;
     }
 
     if (!prefs.begin(CERT_NVS_NAMESPACE, false)) {
-        Serial.println("[CertMgr] ERROR: Failed to open NVS for writing");
+        LOG_E("[CertMgr] ERROR: Failed to open NVS for writing\n");
         return false;
     }
 
@@ -123,14 +124,14 @@ bool CertificateManager::saveClientCert(const String& cert) {
     prefs.end();
 
     if (success) {
-        Serial.println("[CertMgr] Client certificate saved to NVS");
+        LOG_I("[CertMgr] Client certificate saved to NVS\n");
         if (nvs_client_cert != nullptr) {
             free(nvs_client_cert);
         }
         nvs_client_cert = strdup(cert.c_str());
         using_nvs_client = (nvs_client_cert != nullptr);
     } else {
-        Serial.println("[CertMgr] ERROR: Failed to save client certificate");
+        LOG_E("[CertMgr] ERROR: Failed to save client certificate\n");
     }
 
     return success;
@@ -138,12 +139,12 @@ bool CertificateManager::saveClientCert(const String& cert) {
 
 bool CertificateManager::saveClientKey(const String& key) {
     if (key.length() == 0) {
-        Serial.println("[CertMgr] ERROR: Cannot save empty client key");
+        LOG_E("[CertMgr] ERROR: Cannot save empty client key\n");
         return false;
     }
 
     if (!prefs.begin(CERT_NVS_NAMESPACE, false)) {
-        Serial.println("[CertMgr] ERROR: Failed to open NVS for writing");
+        LOG_E("[CertMgr] ERROR: Failed to open NVS for writing\n");
         return false;
     }
 
@@ -157,24 +158,24 @@ bool CertificateManager::saveClientKey(const String& key) {
     prefs.end();
 
     if (success) {
-        Serial.println("[CertMgr] Client key saved to NVS");
+        LOG_I("[CertMgr] Client key saved to NVS\n");
         if (nvs_client_key != nullptr) {
             free(nvs_client_key);
         }
         nvs_client_key = strdup(key.c_str());
         using_nvs_key = (nvs_client_key != nullptr);
     } else {
-        Serial.println("[CertMgr] ERROR: Failed to save client key");
+        LOG_E("[CertMgr] ERROR: Failed to save client key\n");
     }
 
     return success;
 }
 
 void CertificateManager::clearCertificates(void) {
-    Serial.println("[CertMgr] Clearing all certificates from NVS");
+    LOG_I("[CertMgr] Clearing all certificates from NVS\n");
 
     if (!prefs.begin(CERT_NVS_NAMESPACE, false)) {
-        Serial.println("[CertMgr] ERROR: Failed to open NVS for clearing");
+        LOG_E("[CertMgr] ERROR: Failed to open NVS for clearing\n");
         return;
     }
 
@@ -190,7 +191,7 @@ void CertificateManager::clearCertificates(void) {
     using_nvs_client = false;
     using_nvs_key = false;
 
-    Serial.println("[CertMgr] All certificates cleared, will use compiled-in defaults");
+    LOG_I("[CertMgr] All certificates cleared, will use compiled-in defaults\n");
 }
 
 bool CertificateManager::hasCertificatesInNVS(void) {
@@ -258,8 +259,7 @@ bool CertificateManager::loadCertFromNVS(const char* key, char** buffer) {
 
     *buffer = strdup(value.c_str());
     if (*buffer == nullptr) {
-        Serial.print("[CertMgr] ERROR: Failed to allocate memory for ");
-        Serial.println(key);
+        LOG_E("[CertMgr] ERROR: Failed to allocate memory for %s\n", key);
         return false;
     }
 

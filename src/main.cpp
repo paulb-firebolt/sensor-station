@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.13"
+#define FIRMWARE_VERSION "0.0.15"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -15,6 +15,7 @@
 #include "ld2450_sensor.h"
 #include "cc1312_manager.h"
 #include "performance_metrics.h"
+#include "log.h"
 
 // GPIO pin for factory reset button.
 // Override via build_flags if needed (e.g. -DFACTORY_RESET_PIN=35).
@@ -61,7 +62,7 @@ LD2450Sensor ld2450(Serial1, mqttManager);
 #endif
 
 #if ENABLE_CC1312
-CC1312Manager cc1312(Serial2, mqttManager);
+CC1312Manager cc1312(mqttManager);
 #endif
 
 #if defined(ARDUINO_M5TAB5)
@@ -140,7 +141,7 @@ static const unsigned long FIND_ME_DURATION = 15000;
 void triggerFindMe(void) {
     findMeActive = true;
     findMeStart = millis();
-    Serial.println("[FindMe] Rainbow started (15s)");
+    LOG_I("[FindMe] Rainbow started (15s)\n");
 }
 #endif
 
@@ -161,14 +162,14 @@ void checkFactoryReset(void) {
         // Button just pressed
         resetButtonPressed = true;
         resetButtonPressStart = millis();
-        Serial.println("\n[Reset] Button pressed - hold for 5 seconds to factory reset");
+        LOG_I("\n[Reset] Button pressed - hold for 5 seconds to factory reset\n");
     } else if (!buttonPressed && resetButtonPressed) {
         // Button released
         resetButtonPressed = false;
         unsigned long pressDuration = millis() - resetButtonPressStart;
 
         if (pressDuration < FACTORY_RESET_HOLD_TIME) {
-            Serial.println("[Reset] Button released (short press)");
+            LOG_I("[Reset] Button released (short press)\n");
         }
     } else if (buttonPressed && resetButtonPressed && !factoryResetTriggered) {
         // Button being held
@@ -177,44 +178,44 @@ void checkFactoryReset(void) {
         if (pressDuration >= FACTORY_RESET_HOLD_TIME) {
             // Factory reset triggered
             factoryResetTriggered = true;
-            Serial.println("\n========================================");
-            Serial.println("FACTORY RESET TRIGGERED!");
-            Serial.println("========================================");
-            Serial.println("Performing complete factory reset...");
-            Serial.println("");
+            LOG_W("\n========================================\n");
+            LOG_W("FACTORY RESET TRIGGERED!\n");
+            LOG_W("========================================\n");
+            LOG_W("Performing complete factory reset...\n");
+            LOG_W("\n");
 
             // Clear all NVS namespaces
-            Serial.println("[Reset] Clearing WiFi credentials...");
+            LOG_I("[Reset] Clearing WiFi credentials...\n");
             wifiManager.clearCredentials();
 
-            Serial.println("[Reset] Clearing network configuration...");
+            LOG_I("[Reset] Clearing network configuration...\n");
             Preferences netPrefs;
             if (netPrefs.begin("network_config", false)) {
                 netPrefs.clear();
                 netPrefs.end();
             }
 
-            Serial.println("[Reset] Clearing admin password...");
+            LOG_I("[Reset] Clearing admin password...\n");
             Preferences authPrefs;
             if (authPrefs.begin("auth", false)) {
                 authPrefs.clear();
                 authPrefs.end();
             }
 
-            Serial.println("[Reset] Clearing MQTT configuration...");
+            LOG_I("[Reset] Clearing MQTT configuration...\n");
             Preferences mqttPrefs;
             if (mqttPrefs.begin("mqtt_config", false)) {
                 mqttPrefs.clear();
                 mqttPrefs.end();
             }
 
-            Serial.println("[Reset] Clearing certificates...");
+            LOG_I("[Reset] Clearing certificates...\n");
             certManager.clearCertificates();
 
-            Serial.println("");
-            Serial.println("All settings cleared successfully!");
-            Serial.println("Rebooting into provisioning mode...");
-            Serial.println("========================================\n");
+            LOG_I("\n");
+            LOG_I("All settings cleared successfully!\n");
+            LOG_I("Rebooting into provisioning mode...\n");
+            LOG_I("========================================\n\n");
 
             delay(1000);
             ESP.restart();
@@ -227,18 +228,15 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
     payload[length] = '\0';
     String message = String((char*)payload);
 
-    Serial.print("[MQTT] Message received on topic: ");
-    Serial.println(topic);
-    Serial.print("[MQTT] Payload: ");
-    Serial.println(message);
+    LOG_D("[MQTT] Message received on topic: %s\n", topic);
+    LOG_D("[MQTT] Payload: %s\n", message.c_str());
 
     // Parse JSON
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, message);
 
     if (error) {
-        Serial.print("[MQTT] JSON parse error: ");
-        Serial.println(error.c_str());
+        LOG_E("[MQTT] JSON parse error: %s\n", error.c_str());
         return;
     }
 
@@ -247,21 +245,21 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
         String action = doc["action"].as<String>();
 
         if (action == "ota") {
-            Serial.println("[MQTT] OTA command detected!");
+            LOG_I("[MQTT] OTA command detected!\n");
             otaManager.handleOTACommand(doc);
         } else if (action == "rollback") {
-            Serial.println("[MQTT] Rollback command detected!");
+            LOG_I("[MQTT] Rollback command detected!\n");
             otaManager.rollbackToPrevious();
         } else if (action == "status") {
-            Serial.println("[MQTT] Status command detected!");
+            LOG_I("[MQTT] Status command detected!\n");
             String status = otaManager.getOTAStatus();
             mqttManager.publish("ota_status", status);
         } else if (action == "findme") {
-            Serial.println("[MQTT] Find-me command detected!");
+            LOG_I("[MQTT] Find-me command detected!\n");
 #if defined(ARDUINO_M5TAB5)
             triggerFindMe();
 #else
-            Serial.println("[FindMe] No LED on this board");
+            LOG_I("[FindMe] No LED on this board\n");
 #endif
         }
 #if ENABLE_CC1312
@@ -286,25 +284,24 @@ void setup() {
         ;  // Wait for serial port to connect (max 3 seconds)
     }
 
-    Serial.println("\n\n========================================");
-    Serial.println("ESP32 Sensor Station");
-    Serial.println("Ethernet + WiFi with Web Provisioning");
-    Serial.println("========================================\n");
+    LOG_I("\n\n========================================\n");
+    LOG_I("ESP32 Sensor Station\n");
+    LOG_I("Ethernet + WiFi with Web Provisioning\n");
+    LOG_I("========================================\n\n");
 
     // Initialize NVS flash for persistent storage
-    Serial.println("Initializing NVS flash...");
+    LOG_I("Initializing NVS flash...\n");
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // NVS partition was truncated or needs reformatting
-        Serial.println("NVS: Erasing and reinitializing...");
+        LOG_W("NVS: Erasing and reinitializing...\n");
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     if (err == ESP_OK) {
-        Serial.println("NVS: Initialized successfully\n");
+        LOG_I("NVS: Initialized successfully\n\n");
     } else {
-        Serial.print("NVS: Initialization failed with error: ");
-        Serial.println(err);
+        LOG_E("NVS: Initialization failed with error: %d\n", err);
     }
 
     // Initialize WiFi Manager (must be after NVS init)
@@ -312,15 +309,14 @@ void setup() {
 
     // Setup factory reset button
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
-    Serial.print("Factory reset button: GPIO ");
-    Serial.println(FACTORY_RESET_PIN);
-    Serial.println("Hold for 5 seconds to clear WiFi credentials\n");
+    LOG_I("Factory reset button: GPIO %d\n", FACTORY_RESET_PIN);
+    LOG_I("Hold for 5 seconds to clear WiFi credentials\n\n");
 
     // Initialize network (Ethernet + WiFi)
     if (!initNetwork(wifiManager)) {
-        Serial.println("\n!!! CRITICAL ERROR !!!");
-        Serial.println("Network initialization completely failed");
-        Serial.println("Retrying in 10 seconds...");
+        LOG_E("\n!!! CRITICAL ERROR !!!\n");
+        LOG_E("Network initialization completely failed\n");
+        LOG_E("Retrying in 10 seconds...\n");
         delay(10000);
         ESP.restart();
     }
@@ -335,17 +331,17 @@ void setup() {
     }
 
 #if WIFI_DISABLED
-    Serial.println("\n[Info] WiFi disabled by build flag - skipping AP/provisioning");
+    LOG_I("\n[Info] WiFi disabled by build flag - skipping AP/provisioning\n");
 #else
     if (!ethernetOnly && !wifiManager.hasCredentials()) {
-        Serial.println("\n=== Starting Provisioning Mode ===");
+        LOG_I("\n=== Starting Provisioning Mode ===\n");
         if (wifiManager.startAP()) {
-            Serial.println("Provisioning AP started successfully");
+            LOG_I("Provisioning AP started successfully\n");
         } else {
-            Serial.println("ERROR: Failed to start AP mode!");
+            LOG_E("ERROR: Failed to start AP mode!\n");
         }
     } else if (ethernetOnly) {
-        Serial.println("\n[Info] Ethernet-only mode - WiFi AP disabled");
+        LOG_I("\n[Info] Ethernet-only mode - WiFi AP disabled\n");
     }
 #endif
 
@@ -392,52 +388,38 @@ void setup() {
     perfMetrics.begin();
 
     // Print status summary
-    Serial.println("\n========================================");
-    Serial.println("*** Device Ready ***");
-    Serial.println("========================================");
+    LOG_I("\n========================================\n");
+    LOG_I("*** Device Ready ***\n");
+    LOG_I("========================================\n");
 
-    Serial.print("Hostname: ");
-    Serial.print(getHostname());
-    Serial.println(".local");
+    LOG_I("Hostname: %s.local\n", getHostname().c_str());
 
     if (isEthernetConnected()) {
-        Serial.println("\nEthernet:");
-        Serial.print("  IP: ");
-        Serial.println(getIPAddress());
-        Serial.print("  Access: http://");
-        Serial.println(getIPAddress());
-        Serial.print("  mDNS: http://");
-        Serial.print(getHostname());
-        Serial.println(".local");
+        LOG_I("\nEthernet:\n");
+        LOG_I("  IP: %s\n", getIPAddress().toString().c_str());
+        LOG_I("  Access: http://%s\n", getIPAddress().toString().c_str());
+        LOG_I("  mDNS: http://%s.local\n", getHostname().c_str());
     }
 
     if (isWiFiConnected()) {
-        Serial.println("\nWiFi:");
-        Serial.print("  SSID: ");
-        Serial.println(wifiManager.getConnectedSSID());
-        Serial.print("  IP: ");
-        Serial.println(getWiFiIPAddress());
-        Serial.print("  Access: http://");
-        Serial.println(getWiFiIPAddress());
-        Serial.print("  mDNS: http://");
-        Serial.print(getHostname());
-        Serial.println(".local");
+        LOG_I("\nWiFi:\n");
+        LOG_I("  SSID: %s\n", wifiManager.getConnectedSSID().c_str());
+        LOG_I("  IP: %s\n", getWiFiIPAddress().toString().c_str());
+        LOG_I("  Access: http://%s\n", getWiFiIPAddress().toString().c_str());
+        LOG_I("  mDNS: http://%s.local\n", getHostname().c_str());
     }
 
     if (wifiManager.isAPActive()) {
-        Serial.println("\nProvisioning AP:");
-        Serial.print("  SSID: ");
-        Serial.println(WIFI_AP_SSID);
-        Serial.print("  Password: ");
-        Serial.println(WIFI_AP_PASSWORD);
-        Serial.print("  IP: ");
-        Serial.println(wifiManager.getAPIP());
-        Serial.println("\n  Connect to the AP and navigate to:");
-        Serial.println("  http://192.168.4.1");
-        Serial.println("  to configure WiFi settings");
+        LOG_I("\nProvisioning AP:\n");
+        LOG_I("  SSID: %s\n", WIFI_AP_SSID);
+        LOG_I("  Password: %s\n", WIFI_AP_PASSWORD);
+        LOG_I("  IP: %s\n", wifiManager.getAPIP().toString().c_str());
+        LOG_I("\n  Connect to the AP and navigate to:\n");
+        LOG_I("  http://192.168.4.1\n");
+        LOG_I("  to configure WiFi settings\n");
     }
 
-    Serial.println("\n========================================\n");
+    LOG_I("\n========================================\n\n");
 
     // Initialize OTA manager
     otaManager.begin();
@@ -445,10 +427,8 @@ void setup() {
     // Sync firmware version — update NVS whenever the compiled-in version differs
     // (covers first boot and direct flash via PlatformIO, not just OTA updates)
     if (otaManager.getCurrentVersion() != FIRMWARE_VERSION) {
-        Serial.print("[Setup] Firmware version updated: ");
-        Serial.print(otaManager.getCurrentVersion());
-        Serial.print(" -> ");
-        Serial.println(FIRMWARE_VERSION);
+        LOG_I("[Setup] Firmware version updated: %s -> %s\n",
+              otaManager.getCurrentVersion().c_str(), FIRMWARE_VERSION);
         otaManager.saveVersionInfo(FIRMWARE_VERSION);
     }
 }
@@ -485,7 +465,7 @@ void loop() {
         ld2450.update();
 #endif
 
-// Update CC1312R RF coordinator (reads UART, parses frames, publishes)
+// Update CC1312R RF coordinator (reads SPI, parses frames, publishes)
 #if ENABLE_CC1312
         cc1312.update();
 #endif
@@ -563,16 +543,16 @@ void loop() {
 
                 // Publish to status topic
                 mqttManager.publish("status", payload);
-                Serial.printf("[App] Status published (%u bytes)\n", payload.length());
+                LOG_I("[MQTT] Status published (%u bytes)\n", payload.length());
 
                 // Log warnings locally
                 if (heap_usage_percent > 80) {
-                    Serial.printf("[WARN] Heap usage high: %d%% (%u bytes free)\n",
-                                  heap_usage_percent, metrics.free_heap_bytes);
+                    LOG_W("[WARN] Heap usage high: %d%% (%u bytes free)\n",
+                          heap_usage_percent, metrics.free_heap_bytes);
                 }
                 if (metrics.max_loop_time_ms > lastReportedLoopPeak) {
                     lastReportedLoopPeak = metrics.max_loop_time_ms;
-                    Serial.printf("[WARN] New loop peak: %u ms\n", metrics.max_loop_time_ms);
+                    LOG_W("[WARN] New loop peak: %u ms\n", metrics.max_loop_time_ms);
                 }
             }
         }
@@ -590,7 +570,7 @@ void loop() {
             if (findMeActive) {
                 if (now - findMeStart >= FIND_ME_DURATION) {
                     findMeActive = false;
-                    Serial.println("[FindMe] Rainbow ended");
+                    LOG_I("[FindMe] Rainbow ended\n");
                 } else {
                     // Full cycle every ~4 seconds: hue advances 256 steps in 4000 ms
                     uint8_t hue = (uint8_t)((now - findMeStart) * 256 / 4000);

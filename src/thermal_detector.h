@@ -20,6 +20,7 @@
 #include <ArduinoJson.h>
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
+#include "log.h"
 
 // ============================================================================
 // SPI Configuration
@@ -183,28 +184,21 @@ ThermalDetector::ThermalDetector(WiFiManager& wifi, MQTTManager& mqtt)
 }
 
 void ThermalDetector::begin() {
-    Serial.println("[Thermal] Initializing Thermal Detector");
+    LOG_I("[Thermal] Initializing Thermal Detector\n");
 
     // Configure SPI
     SPI.begin(PIN_SCLK, PIN_MISO, PIN_MOSI, PIN_CS);
     pinMode(PIN_CS, OUTPUT);
     digitalWrite(PIN_CS, HIGH);
 
-    Serial.println("[Thermal] SPI initialized");
-    Serial.print("[Thermal]   MOSI=");
-    Serial.print(PIN_MOSI);
-    Serial.print(" MISO=");
-    Serial.print(PIN_MISO);
-    Serial.print(" SCLK=");
-    Serial.print(PIN_SCLK);
-    Serial.print(" CS=");
-    Serial.println(PIN_CS);
+    LOG_I("[Thermal] SPI initialized\n");
+    LOG_I("[Thermal]   MOSI=%d MISO=%d SCLK=%d CS=%d\n", PIN_MOSI, PIN_MISO, PIN_SCLK, PIN_CS);
 
     // Initialize background model
     memset(background, 128, THERMAL_PIXELS);
     memset(trackers, 0, sizeof(trackers));
 
-    Serial.println("[Thermal] Detector ready");
+    LOG_I("[Thermal] Detector ready\n");
 }
 
 void ThermalDetector::readFrameFromSlave() {
@@ -529,7 +523,7 @@ void ThermalDetector::publishToMQTT() {
 
         mqttManager->publish("thermal/footfall", payload);
 
-        Serial.printf("[MQTT Footfall] People: %d, Peak: %d\n",
+        LOG_I("[MQTT Footfall] People: %d, Peak: %d\n",
             uniqueTrackersSeen, peakCount);
 
         // Reset window
@@ -561,20 +555,12 @@ void ThermalDetector::update() {
     static uint32_t lastLog = 0;
     if (millis() - lastLog >= 5000) {
         lastLog = millis();
-        Serial.print("[Thermal] Frame ");
-        Serial.print(frameCounter);
-        Serial.print(" | People: ");
-        Serial.print(currentPeopleCount);
-        Serial.print(" | Blobs: ");
-        Serial.print(blob_count);
-        Serial.print(" | Trackers: ");
-        Serial.print(tracker_count);
-        Serial.print(" | Detections: ");
-        Serial.println(detection_count);
+        LOG_D("[Thermal] Frame %d | People: %d | Blobs: %d | Trackers: %d | Detections: %d\n",
+              frameCounter, currentPeopleCount, blob_count, tracker_count, detection_count);
 
         // Show all trackers
         for (int t = 0; t < tracker_count; t++) {
-            Serial.printf("  [Tracker %d] ID=%d, Confirmed=%d, Missing=%d, Active=%d\n",
+            LOG_D("  [Tracker %d] ID=%d, Confirmed=%d, Missing=%d, Active=%d\n",
                 t, trackers[t].id, trackers[t].confirmed_frames,
                 trackers[t].missing_frames, trackers[t].active);
         }

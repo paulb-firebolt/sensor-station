@@ -1,5 +1,6 @@
 // performance_metrics.cpp
 #include "performance_metrics.h"
+#include "log.h"
 
 PerformanceMetrics perfMetrics;
 
@@ -15,7 +16,7 @@ PerformanceMetrics::PerformanceMetrics() {
 
 void PerformanceMetrics::begin() {
     update();
-    Serial.println("[Perf] Performance metrics initialized");
+    LOG_I("[Perf] Performance metrics initialized\n");
 }
 
 void PerformanceMetrics::update() {
@@ -68,7 +69,7 @@ void PerformanceMetrics::taskEnd(const char* task_name) {
     if (strcmp(task_name, "thermal") == 0) {
         current.thermal_frame_time_ms = elapsed_ms;
         if (elapsed_ms > 10) {
-            Serial.printf("[Perf] Thermal frame took %lu ms (target <10ms)\n", elapsed_ms);
+            LOG_W("[Perf] Thermal frame took %lu ms (target <10ms)\n", elapsed_ms);
         }
     } else if (strcmp(task_name, "mqtt") == 0) {
         current.mqtt_publish_time_ms = elapsed_ms;

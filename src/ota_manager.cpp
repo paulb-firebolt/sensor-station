@@ -2,35 +2,36 @@
 #include "ota_manager.h"
 #include "network.h"
 #include <mbedtls/md.h>
+#include "log.h"
 
 OTAManager::OTAManager()
     : currentVersion("0.0.0"), previousVersion("0.0.0"), bootCount(0), updateInProgress(false) {}
 
 void OTAManager::begin(void) {
-    Serial.println("[OTA] Initializing OTA manager");
+    LOG_I("[OTA] Initializing OTA manager\n");
 
     // Load version information from NVS
     loadVersionInfo();
 
     // Check if we're in a boot loop and need automatic rollback
     if (bootCount >= OTA_MAX_BOOT_COUNT) {
-        Serial.println("\n========================================");
-        Serial.println("[OTA] ⚠️  CRASH LOOP DETECTED!");
-        Serial.println("[OTA] Boot count exceeded maximum");
-        Serial.println("[OTA] Current version: " + currentVersion);
-        Serial.println("[OTA] Previous version: " + previousVersion);
-        Serial.println("[OTA] Initiating automatic rollback...");
-        Serial.println("========================================\n");
+        LOG_W("\n========================================\n");
+        LOG_W("[OTA] ⚠️  CRASH LOOP DETECTED!\n");
+        LOG_W("[OTA] Boot count exceeded maximum\n");
+        LOG_I("[OTA] Current version: %s\n", currentVersion.c_str());
+        LOG_I("[OTA] Previous version: %s\n", previousVersion.c_str());
+        LOG_I("[OTA] Initiating automatic rollback...\n");
+        LOG_W("========================================\n");
 
         // Attempt automatic rollback
         if (rollbackToPrevious()) {
-            Serial.println("[OTA] ✓ Rollback successful - rebooting into previous version");
+            LOG_I("[OTA] ✓ Rollback successful - rebooting into previous version\n");
             delay(2000);
             ESP.restart();
         } else {
-            Serial.println("[OTA] ✗ Rollback failed - no previous version available");
-            Serial.println("[OTA] Device will continue with current version");
-            Serial.println("[OTA] Manual recovery required: re-flash via USB");
+            LOG_E("[OTA] ✗ Rollback failed - no previous version available\n");
+            LOG_E("[OTA] Device will continue with current version\n");
+            LOG_E("[OTA] Manual recovery required: re-flash via USB\n");
             // Reset boot count so we don't keep trying to rollback
             resetBootCount();
         }
@@ -40,18 +41,15 @@ void OTAManager::begin(void) {
         incrementBootCount();
     }
 
-    Serial.print("[OTA] Current version: ");
-    Serial.println(currentVersion);
-    Serial.print("[OTA] Previous version: ");
-    Serial.println(previousVersion);
-    Serial.print("[OTA] Boot count: ");
-    Serial.println(bootCount);
-    Serial.println("[OTA] Note: Boot count will reset to 0 after 30 seconds of stable operation");
+    LOG_I("[OTA] Current version: %s\n", currentVersion.c_str());
+    LOG_I("[OTA] Previous version: %s\n", previousVersion.c_str());
+    LOG_I("[OTA] Boot count: %d\n", bootCount);
+    LOG_I("[OTA] Note: Boot count will reset to 0 after 30 seconds of stable operation\n");
 }
 
 void OTAManager::loadVersionInfo(void) {
     if (!prefs.begin(OTA_NVS_NAMESPACE, true)) {  // Read-only
-        Serial.println("[OTA] ERROR: Failed to open NVS namespace");
+        LOG_E("[OTA] ERROR: Failed to open NVS namespace\n");
         currentVersion = "0.0.0";
         previousVersion = "0.0.0";
         bootCount = 0;
@@ -67,7 +65,7 @@ void OTAManager::loadVersionInfo(void) {
 
 void OTAManager::saveVersionInfo(const String& newVersion) {
     if (!prefs.begin(OTA_NVS_NAMESPACE, false)) {  // Read-write
-        Serial.println("[OTA] ERROR: Failed to open NVS for writing");
+        LOG_E("[OTA] ERROR: Failed to open NVS for writing\n");
         return;
     }
 
@@ -82,13 +80,12 @@ void OTAManager::saveVersionInfo(const String& newVersion) {
     currentVersion = newVersion;
     bootCount = 0;
 
-    Serial.print("[OTA] Version saved: ");
-    Serial.println(newVersion);
+    LOG_I("[OTA] Version saved: %s\n", newVersion.c_str());
 }
 
 void OTAManager::incrementBootCount(void) {
     if (!prefs.begin(OTA_NVS_NAMESPACE, false)) {  // Read-write
-        Serial.println("[OTA] ERROR: Failed to increment boot count");
+        LOG_E("[OTA] ERROR: Failed to increment boot count\n");
         return;
     }
 
@@ -107,7 +104,7 @@ void OTAManager::resetBootCount(void) {
     bootCount = 0;
     prefs.end();
 
-    Serial.println("[OTA] Boot count reset");
+    LOG_I("[OTA] Boot count reset\n");
 }
 
 // Returns true if version string a is strictly greater than b.
@@ -134,13 +131,13 @@ bool OTAManager::handleOTACommand(const JsonDocument& command) {
         url = command["url"].as<String>();
     } else {
 #if USE_RMII_ETHERNET
-        Serial.println("[OTA] No URL in command — attempting mDNS OTA server discovery...");
+        LOG_I("[OTA] No URL in command — attempting mDNS OTA server discovery...\n");
         if (!discoverOTAServer(url)) {
-            Serial.println("[OTA] ERROR: No URL in command and no OTA server found via mDNS");
+            LOG_E("[OTA] ERROR: No URL in command and no OTA server found via mDNS\n");
             return false;
         }
 #else
-        Serial.println("[OTA] ERROR: No URL in OTA command");
+        LOG_E("[OTA] ERROR: No URL in OTA command\n");
         return false;
 #endif
     }
@@ -148,19 +145,16 @@ bool OTAManager::handleOTACommand(const JsonDocument& command) {
     String version = command["version"].is<String>() ? command["version"].as<String>() : "unknown";
     String sha256 = command["sha256"].is<String>() ? command["sha256"].as<String>() : "";
 
-    Serial.print("[OTA] Command received - Version: ");
-    Serial.print(version);
-    Serial.print(", URL: ");
-    Serial.println(url);
+    LOG_I("[OTA] Command received - Version: %s, URL: %s\n", version.c_str(), url.c_str());
 
     // Check if version is newer (numeric semver comparison — not string)
     bool force = command["force"].is<bool>() && command["force"].as<bool>();
     if (!force && version != "unknown" && !isNewerVersion(version, currentVersion)) {
-        Serial.println("[OTA] Version is not newer than current (use \"force\":true to override)");
+        LOG_W("[OTA] Version is not newer than current (use \"force\":true to override)\n");
         return false;
     }
     if (force) {
-        Serial.println("[OTA] Force flag set — bypassing version check");
+        LOG_I("[OTA] Force flag set — bypassing version check\n");
     }
 
     return updateFromURL(url, version, sha256);
@@ -168,62 +162,58 @@ bool OTAManager::handleOTACommand(const JsonDocument& command) {
 
 bool OTAManager::updateFromURL(const String& url, const String& version, const String& sha256) {
     if (updateInProgress) {
-        Serial.println("[OTA] Update already in progress");
+        LOG_W("[OTA] Update already in progress\n");
         return false;
     }
 
     updateInProgress = true;
-    Serial.println("[OTA] Starting firmware update...");
-    Serial.print("[OTA] URL: ");
-    Serial.println(url);
-    Serial.print("[OTA] Target version: ");
-    Serial.println(version);
+    LOG_I("[OTA] Starting firmware update...\n");
+    LOG_I("[OTA] URL: %s\n", url.c_str());
+    LOG_I("[OTA] Target version: %s\n", version.c_str());
 
     // Save new version BEFORE update (so it persists after reboot)
-    Serial.println("[OTA] Pre-saving new version to NVS...");
+    LOG_I("[OTA] Pre-saving new version to NVS...\n");
     saveVersionInfo(version);
 
     // Detect HTTP vs HTTPS and create appropriate client
     t_httpUpdate_return ret;
 
     if (url.startsWith("https://")) {
-        Serial.println("[OTA] Using HTTPS client");
+        LOG_I("[OTA] Using HTTPS client\n");
         NetworkClientSecure client;
         // client.setInsecure();  // uncomment for self-signed certs (dev only)
         ret = httpUpdate.update(client, url, currentVersion);
     } else if (url.startsWith("http://")) {
-        Serial.println("[OTA] Using HTTP client");
+        LOG_I("[OTA] Using HTTP client\n");
         NetworkClient client;
         ret = httpUpdate.update(client, url, currentVersion);
     } else {
-        Serial.println("[OTA] ERROR: Invalid URL scheme (must be http:// or https://)");
+        LOG_E("[OTA] ERROR: Invalid URL scheme (must be http:// or https://)\n");
         updateInProgress = false;
         return false;
     }
 
     switch (ret) {
         case HTTP_UPDATE_OK:
-            Serial.println("[OTA] Update successful! Rebooting...");
+            LOG_I("[OTA] Update successful! Rebooting...\n");
             // Version already saved above, just reset boot count
             resetBootCount();
             // ESP32 will reboot automatically
             return true;
 
         case HTTP_UPDATE_NO_UPDATES:
-            Serial.println("[OTA] No update available (same version)");
+            LOG_I("[OTA] No update available (same version)\n");
             updateInProgress = false;
             return false;
 
         case HTTP_UPDATE_FAILED:
-            Serial.print("[OTA] Update failed, error: ");
-            Serial.println(httpUpdate.getLastError());
-            Serial.print("[OTA] Error detail: ");
-            Serial.println(httpUpdate.getLastErrorString().c_str());
+            LOG_E("[OTA] Update failed, error: %d\n", httpUpdate.getLastError());
+            LOG_E("[OTA] Error detail: %s\n", httpUpdate.getLastErrorString().c_str());
             updateInProgress = false;
             return false;
 
         default:
-            Serial.println("[OTA] Update returned unknown status");
+            LOG_W("[OTA] Update returned unknown status\n");
             updateInProgress = false;
             return false;
     }
@@ -231,25 +221,21 @@ bool OTAManager::updateFromURL(const String& url, const String& version, const S
 
 bool OTAManager::rollbackToPrevious(void) {
     if (previousVersion == "0.0.0" || previousVersion == currentVersion) {
-        Serial.println("[OTA] No previous version to rollback to");
+        LOG_W("[OTA] No previous version to rollback to\n");
         return false;
     }
 
-    Serial.println("[OTA] ROLLBACK: Switching to previous firmware partition");
-    Serial.print("[OTA] From: ");
-    Serial.print(currentVersion);
-    Serial.print(" → To: ");
-    Serial.println(previousVersion);
+    LOG_I("[OTA] ROLLBACK: Switching to previous firmware partition\n");
+    LOG_I("[OTA] From: %s → To: %s\n", currentVersion.c_str(), previousVersion.c_str());
 
     // Get current running partition
     const esp_partition_t* running_partition = esp_ota_get_running_partition();
     if (running_partition == NULL) {
-        Serial.println("[OTA] ERROR: Could not identify running partition");
+        LOG_E("[OTA] ERROR: Could not identify running partition\n");
         return false;
     }
 
-    Serial.print("[OTA] Currently running: ");
-    Serial.println(running_partition->label);
+    LOG_I("[OTA] Currently running: %s\n", running_partition->label);
 
     // Find the other OTA partition
     const esp_partition_t* other_partition = NULL;
@@ -258,28 +244,27 @@ bool OTAManager::rollbackToPrevious(void) {
         // Currently on OTA_0, switch to OTA_1
         other_partition =
             esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
-        Serial.println("[OTA] Switching from OTA_0 to OTA_1");
+        LOG_I("[OTA] Switching from OTA_0 to OTA_1\n");
     } else if (running_partition->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) {
         // Currently on OTA_1, switch to OTA_0
         other_partition =
             esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
-        Serial.println("[OTA] Switching from OTA_1 to OTA_0");
+        LOG_I("[OTA] Switching from OTA_1 to OTA_0\n");
     }
 
     if (other_partition == NULL) {
-        Serial.println("[OTA] ERROR: Could not find alternate OTA partition");
+        LOG_E("[OTA] ERROR: Could not find alternate OTA partition\n");
         return false;
     }
 
-    Serial.print("[OTA] Target partition: ");
-    Serial.println(other_partition->label);
+    LOG_I("[OTA] Target partition: %s\n", other_partition->label);
 
     // Verify the target partition contains a valid firmware image (magic byte 0xE9)
     uint8_t magic = 0;
     esp_partition_read(other_partition, 0, &magic, 1);
     if (magic != 0xE9) {
-        Serial.println("[OTA] ERROR: Target partition has no valid firmware — rollback aborted");
-        Serial.println("[OTA] Rollback only works after at least one successful OTA update");
+        LOG_E("[OTA] ERROR: Target partition has no valid firmware — rollback aborted\n");
+        LOG_E("[OTA] Rollback only works after at least one successful OTA update\n");
         return false;
     }
 
@@ -287,14 +272,13 @@ bool OTAManager::rollbackToPrevious(void) {
     esp_err_t err = esp_ota_set_boot_partition(other_partition);
 
     if (err != ESP_OK) {
-        Serial.print("[OTA] ERROR: esp_ota_set_boot_partition failed with code: ");
-        Serial.println(err);
+        LOG_E("[OTA] ERROR: esp_ota_set_boot_partition failed with code: %d\n", err);
         return false;
     }
 
     // Swap versions in NVS
     if (!prefs.begin(OTA_NVS_NAMESPACE, false)) {
-        Serial.println("[OTA] ERROR: Could not open NVS for version swap");
+        LOG_E("[OTA] ERROR: Could not open NVS for version swap\n");
         return false;
     }
 
@@ -309,7 +293,7 @@ bool OTAManager::rollbackToPrevious(void) {
 
     prefs.end();
 
-    Serial.println("[OTA] ✓ Rollback complete - partition switched and versions swapped");
+    LOG_I("[OTA] ✓ Rollback complete - partition switched and versions swapped\n");
     return true;
 }
 
@@ -345,7 +329,7 @@ void OTAManager::checkBootStability(void) {
     // Only check once per boot - if boot counter is > 0 and we haven't
     // already reset, check if we're past stability time
     if (bootCount > 0 && currentUptime >= OTA_STABILITY_TIME) {
-        Serial.println("[OTA] Device stable for 30+ seconds - resetting boot counter");
+        LOG_I("[OTA] Device stable for 30+ seconds - resetting boot counter\n");
         resetBootCount();
         // After reset, bootCount will be 0, so this won't trigger again this boot
     }
@@ -358,6 +342,6 @@ bool OTAManager::validateSHA256(const String& expectedHash) {
     // 1. Read the OTA partition
     // 2. Calculate SHA256 using mbedtls
     // 3. Compare with expected hash
-    Serial.println("[OTA] SHA256 validation not yet implemented");
+    LOG_D("[OTA] SHA256 validation not yet implemented\n");
     return true;  // Accept for now
 }
