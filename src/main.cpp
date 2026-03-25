@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.13"
+#define FIRMWARE_VERSION "0.0.14"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -61,7 +61,7 @@ LD2450Sensor ld2450(Serial1, mqttManager);
 #endif
 
 #if ENABLE_CC1312
-CC1312Manager cc1312(Serial2, mqttManager);
+CC1312Manager cc1312(mqttManager);
 #endif
 
 #if defined(ARDUINO_M5TAB5)
