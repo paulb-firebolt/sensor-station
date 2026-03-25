@@ -1,4 +1,15 @@
 /**
+ * @file cc1312_manager.h
+ * @brief Header-only SPI driver for the CC1312R sub-1GHz RF coordinator.
+ *
+ * Implements `CC1312Manager`, a self-contained class that drives the SPI
+ * link between an ESP32-P4 host and a TI CC1312R acting as a sub-1GHz
+ * RF coordinator. All logic (frame parsing, NVS persistence, MQTT
+ * publishing, downlink dispatch) lives in this single header so that no
+ * separate translation unit is required.
+ */
+
+/**
  * cc1312_manager.h
  *
  * SPI driver for a CC1312R acting as a sub-1GHz RF coordinator.
@@ -180,13 +191,30 @@ static const char* _cc1312SensorName(uint8_t sc) {
 // CC1312 Manager Class
 // ============================================================================
 
+/**
+ * @brief Firmware version triple for a coordinator or enrolled node.
+ *
+ * Populated when a HEARTBEAT (coordinator) or NODE_STATUS frame (node)
+ * carrying version bytes is received. The `known` field must be checked
+ * before treating the version numbers as valid.
+ */
 struct CC1312FwVersion {
-    uint8_t major;
-    uint8_t minor;
-    uint8_t patch;
-    bool known;  // false until a frame carrying version bytes is received
+    uint8_t major; ///< Major version number.
+    uint8_t minor; ///< Minor version number.
+    uint8_t patch; ///< Patch version number.
+    bool known;    ///< False until a frame carrying version bytes is received.
 };
 
+/**
+ * @brief SPI driver and protocol manager for the CC1312R sub-1GHz RF coordinator.
+ *
+ * Owns the SPI bus instance used to communicate with the CC1312R. The coordinator
+ * asserts DRDY low when a frame is ready; `update()` detects the falling edge,
+ * reads the frame, parses it, and — when MQTT is connected — publishes node data
+ * every `CC1312_REPORT_INTERVAL_MS` milliseconds. Enrolled node addresses are
+ * persisted in NVS across reboots. MQTT commands are dispatched via
+ * `handleCommand()`.
+ */
 class CC1312Manager {
 public:
     explicit CC1312Manager(MQTTManager& mqtt)
@@ -213,6 +241,14 @@ public:
           _discoveryMode(false),
           _discoveryStarted(0) {}
 
+    /**
+     * @brief Initialise the SPI bus, configure CS and DRDY pins, and load the
+     *        enrolled node list from NVS.
+     *
+     * Must be called once from `setup()` before the first call to `update()`.
+     * CS is driven HIGH (deasserted) and DRDY is configured as INPUT_PULLUP.
+     * The enrolled node list is restored from the `cc1312_nodes` NVS namespace.
+     */
     void begin() {
         _spi.begin(CC1312_SCLK_PIN, CC1312_MISO_PIN, CC1312_MOSI_PIN, -1);
         pinMode(CC1312_CS_PIN, OUTPUT);
@@ -227,6 +263,26 @@ public:
         _loadEnrolled();
     }
 
+    /**
+     * @brief Dispatch an MQTT command to the coordinator or the enrolled node list.
+     *
+     * Supported @p action values:
+     * - `accept_node`    — enrol a node by address, send CMD_ACCEPT_NODE, sync list to NVS.
+     * - `remove_node`    — remove a node by address, send CMD_REMOVE_NODE, sync list to NVS.
+     * - `discovery_on`   — enable discovery mode (auto-off after 5 minutes).
+     * - `discovery_off`  — disable discovery mode immediately.
+     * - `sync_node_list` — push the current enrolled list to the coordinator over SPI.
+     * - `get_node_list`  — publish the enrolled list to `cc1312/config`.
+     * - `ping`           — send CMD_PING; RTT is logged when the PONG frame arrives.
+     * - `get_status`     — request a NODE_STATUS frame from one node (or broadcast).
+     * - `get_config`     — request a config value (domain + param) from a node.
+     * - `set_config`     — apply a config value (domain + param + 32-bit value) to a node.
+     * - `reset_config`   — reset a config param or whole domain on a node.
+     *
+     * @param action  Command name string (see list above).
+     * @param doc     Parsed JSON payload containing command-specific fields such as
+     *                `addr`, `domain`, `param`, and `value`.
+     */
     void handleCommand(const String& action, JsonDocument& doc) {
         if (action == "accept_node") {
             uint64_t addr = strtoull(doc["addr"].as<const char*>(), nullptr, 16);
@@ -296,12 +352,34 @@ public:
         }
     }
 
+    /**
+     * @brief Send a CMD_PING frame to the coordinator.
+     *
+     * Records the send timestamp so that round-trip time can be calculated and
+     * logged when the corresponding PONG frame is received in `update()`.
+     */
     void ping() {
         _lastPingSent = millis();
         _sendDownlink(CC1312_CMD_PING, 0);
         LOG_I("[CC1312] Ping sent\n");
     }
 
+    /**
+     * @brief Service the CC1312R link — call once per `loop()` iteration.
+     *
+     * On each call this method:
+     * - Re-arms the DRDY edge detector when the pin returns HIGH.
+     * - On a detected DRDY falling edge: asserts CS, reads the 2-byte SPI header,
+     *   and if valid reads the remaining payload + CRC bytes, then feeds them
+     *   through the frame parser.
+     * - Logs a periodic diagnostic (every 5 s) covering trigger counts, error
+     *   counts, and a silence warning after 35 s with no activity.
+     * - Executes deferred node-list downlinks (80 ms after a list-request frame).
+     * - Auto-disables discovery mode after 5 minutes.
+     * - Publishes pending node data to MQTT every `CC1312_REPORT_INTERVAL_MS`.
+     * - Periodically polls enrolled nodes for STATUS (version + sensor type):
+     *   first poll at 30 s, then every 5 minutes.
+     */
     void update() {
         // Re-arm on a HIGH observation so we only trigger on falling edges.
         // This prevents re-reading the same frame while DRDY is still asserted.
@@ -408,29 +486,109 @@ public:
         }
     }
 
+    /**
+     * @brief Return true if a SPI frame was received within the last 5 seconds.
+     *
+     * Used to distinguish "connected and active" from "wired but silent"
+     * (e.g. CC1312R still booting or no RF nodes transmitting).
+     */
     bool isActive() const {
         return _lastByteAt > 0 && (millis() - _lastByteAt) < CC1312_ACTIVE_WINDOW_MS;
     }
 
-    // Returns true if a heartbeat was received within the last 90 seconds (3 missed intervals)
+    /**
+     * @brief Return true if a HEARTBEAT frame was received within the last 90 seconds.
+     *
+     * The coordinator emits a heartbeat every 30 seconds; three missed intervals
+     * (90 s) are allowed before this method returns false.
+     */
     bool isCoordinatorAlive() const {
         return _lastHeartbeat > 0 && (millis() - _lastHeartbeat) < 90000;
     }
 
+    /**
+     * @brief Return the 64-bit IEEE address of the coordinator.
+     *
+     * Returns 0 until the first HEARTBEAT frame is received and the address
+     * field has been populated.
+     */
     uint64_t coordinatorAddr() const { return _coordinatorAddr; }
 
+    /**
+     * @brief Return the cumulative count of SPI bytes received since boot.
+     */
     uint32_t getBytesSeen() const { return _bytesSeen; }
 
     // Node list accessors (for web UI)
+
+    /** @brief Return the number of currently enrolled nodes. */
     size_t enrolledCount() const { return _enrolledCount; }
+
+    /**
+     * @brief Return the 64-bit IEEE address of enrolled node at index @p i.
+     * @param i Zero-based index; must be < enrolledCount().
+     */
     uint64_t enrolledAddr(size_t i) const { return _enrolled[i]; }
+
+    /**
+     * @brief Return the `millis()` timestamp of the last frame received from enrolled node @p i.
+     *
+     * Returns 0 if no frame has been seen from that node since boot.
+     * @param i Zero-based index; must be < enrolledCount().
+     */
     unsigned long nodeLastSeen(size_t i) const { return _nodeLastSeen[i]; }
+
+    /**
+     * @brief Return the firmware version struct for enrolled node at index @p i.
+     *
+     * The `known` field is false until a NODE_STATUS frame carrying version bytes
+     * has been received from that node.
+     * @param i Zero-based index; must be < enrolledCount().
+     */
     CC1312FwVersion nodeVersion(size_t i) const { return _nodeVersion[i]; }
+
+    /**
+     * @brief Return the sensor class ID for enrolled node at index @p i.
+     *
+     * Defaults to `CC1312_SC_RAW` (0xFF) until a NODE_STATUS frame is received.
+     * @param i Zero-based index; must be < enrolledCount().
+     */
     uint8_t nodeSensorType(size_t i) const { return _nodeSensorType[i]; }
+
+    /**
+     * @brief Return the firmware version struct for the coordinator.
+     *
+     * The `known` field is false until the first HEARTBEAT frame carrying
+     * version bytes has been received.
+     */
     CC1312FwVersion coordinatorVersion() const { return _coordinatorVersion; }
+
+    /**
+     * @brief Return the number of nodes seen during the current discovery session.
+     *
+     * The seen list is a RAM-only cache cleared on reboot. Entries accumulate
+     * while discovery mode is active.
+     */
     size_t seenCount() const { return _seenCount; }
+
+    /**
+     * @brief Return the 64-bit IEEE address of seen-list entry at index @p i.
+     * @param i Zero-based index; must be < seenCount().
+     */
     uint64_t seenAddr(size_t i) const { return _seen[i].addr; }
+
+    /**
+     * @brief Return the most recently recorded RSSI (dBm) for seen-list entry at index @p i.
+     * @param i Zero-based index; must be < seenCount().
+     */
     int8_t seenRssi(size_t i) const { return _seen[i].rssi; }
+
+    /**
+     * @brief Return true while discovery mode is active.
+     *
+     * Discovery mode is enabled via `handleCommand("discovery_on", ...)` and
+     * auto-disables after 5 minutes or on an explicit `discovery_off` command.
+     */
     bool isDiscoveryMode() const { return _discoveryMode; }
 
 private:
