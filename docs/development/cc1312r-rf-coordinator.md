@@ -175,6 +175,7 @@ frames travel ESP32-P4 → CC1312R. Both directions use the same frame structure
 | 0x05     | NODE_LIST_REQUEST | coordinator addr   | none — CC1312R asking for its node list |
 | 0x06     | HEARTBEAT         | coordinator addr   | fw_major(1) fw_minor(1) fw_patch(1)     |
 | 0x07     | PONG              | coordinator addr   | optional echoed payload                 |
+| 0x24     | CONFIG_RESPONSE   | source node        | result(1) domain(1) param(1) flags(1) value_LE(4) |
 
 NODE_LIST_REQUEST is sent on boot and every 10 s while the accepted list is empty,
 then every 300 s as a keepalive once populated.
@@ -196,11 +197,43 @@ RSSI is always `0x00` in downlink frames.
 | 0x15     | CMD_DISCOVERY_OFF   | 0 (ignored)    | none    |
 | 0x16     | CMD_PING            | echoed in pong | optional payload |
 | 0x20     | CMD_GET_STATUS      | target node    | none    |
+| 0x22     | CMD_GET_CONFIG      | target node    | domain(1) param_id(1) |
+| 0x23     | CMD_SET_CONFIG      | target node    | domain(1) param_id(1) value_LE(4) |
+| 0x25     | CMD_RESET_CONFIG    | target node    | domain(1) param_id_or_FF(1) |
 
 In response to NODE_LIST_REQUEST, the ESP32-P4 sends all CMD_NODE_LIST_ENTRY frames
 followed by CMD_NODE_LIST_END **in a single CS assertion** (batch send). This is
 required because the CC1312R arms exactly one SPI DMA RX transfer per
 `serviceSpiTransport()` call.
+
+`CMD_GET_CONFIG`, `CMD_SET_CONFIG`, and `CMD_RESET_CONFIG` are currently
+unicast-only commands. The coordinator ignores them if `NODE_ADDR` is the
+broadcast address `FFFFFFFFFFFFFFFF`.
+
+Like `CMD_GET_STATUS`, config commands are deferred until the coordinator next
+hears telemetry from the target node. The coordinator then transmits the RF
+request inside that node's short post-telemetry RX window.
+
+### CONFIG_RESPONSE Payload
+
+| Bytes | Field    | Type   | Description |
+| ----- | -------- | ------ | ----------- |
+| 0     | result   | uint8  | `0x00` success, otherwise error code |
+| 1     | domain   | uint8  | Config domain ID |
+| 2     | param_id | uint8  | Parameter ID, or `0xFF` for whole-domain reset |
+| 3     | flags    | uint8  | Bitfield: `0x01` supported, `0x02` current value equals default, `0x04` restart required, `0x08` persisted to non-volatile storage |
+| 4–7   | value    | uint32 | Applied/current value, little-endian |
+
+This uplink is both the normal response to `GET_CONFIG` and the ACK for
+`SET_CONFIG` / `RESET_CONFIG`.
+
+Current result codes are:
+
+- `0x00` = success
+- `0x01` = unsupported domain
+- `0x02` = unsupported param
+- `0x03` = out of range
+- `0x04` = invalid length
 
 ### NODE_STATUS Payload
 

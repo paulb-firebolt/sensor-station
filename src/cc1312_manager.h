@@ -106,6 +106,12 @@ constexpr uint8_t CC1312_CMD_DISCOVERY_ON = 0x14;
 constexpr uint8_t CC1312_CMD_DISCOVERY_OFF = 0x15;
 constexpr uint8_t CC1312_CMD_PING = 0x16;
 constexpr uint8_t CC1312_CMD_GET_STATUS = 0x20;  // request status from a node (or broadcast)
+constexpr uint8_t CC1312_CMD_GET_CONFIG = 0x22;  // unicast: request one config value from a node
+constexpr uint8_t CC1312_CMD_SET_CONFIG = 0x23;  // unicast: apply one config value to a node
+constexpr uint8_t CC1312_CMD_RESET_CONFIG = 0x25; // unicast: reset one param or whole domain
+
+// Uplink config response (CC1312R → ESP32-P4)
+constexpr uint8_t CC1312_MSG_CONFIG_RESPONSE = 0x24;
 
 // Sensor class codes
 constexpr uint8_t CC1312_SC_PIR = 0x01;
@@ -124,6 +130,7 @@ constexpr unsigned long CC1312_STATUS_POLL_INITIAL_MS  = 30000;   // first poll 
 constexpr const char* CC1312_TOPIC = "cc1312/nodes";
 constexpr const char* CC1312_SEEN_TOPIC = "cc1312/seen";
 constexpr const char* CC1312_CONFIG_TOPIC = "cc1312/config";
+constexpr const char* CC1312_CONFIG_RESP_TOPIC = "cc1312/config_response";
 
 // NVS
 constexpr const char* CC1312_NVS_NS = "cc1312_nodes";
@@ -256,6 +263,36 @@ public:
             uint64_t addr = strtoull(addrStr, nullptr, 16);
             _sendDownlink(CC1312_CMD_GET_STATUS, addr);
             LOG_I("[CC1312] CMD_GET_STATUS → %016llX\n", (unsigned long long)addr);
+        } else if (action == "get_config") {
+            const char* addrStr = doc["addr"] | "FFFFFFFFFFFFFFFF";
+            uint64_t addr = strtoull(addrStr, nullptr, 16);
+            uint8_t domain = doc["domain"] | 0;
+            uint8_t param  = doc["param"]  | 0;
+            uint8_t body[2] = {domain, param};
+            _sendDownlinkWithBody(CC1312_CMD_GET_CONFIG, addr, body, sizeof(body));
+            LOG_I("[CC1312] CMD_GET_CONFIG → %016llX dom=%u param=%u\n",
+                  (unsigned long long)addr, domain, param);
+        } else if (action == "set_config") {
+            const char* addrStr = doc["addr"] | "FFFFFFFFFFFFFFFF";
+            uint64_t addr   = strtoull(addrStr, nullptr, 16);
+            uint8_t domain  = doc["domain"] | 0;
+            uint8_t param   = doc["param"]  | 0;
+            uint32_t value  = doc["value"]  | 0UL;
+            uint8_t body[6] = {domain, param,
+                               (uint8_t)(value),        (uint8_t)(value >> 8),
+                               (uint8_t)(value >> 16),  (uint8_t)(value >> 24)};
+            _sendDownlinkWithBody(CC1312_CMD_SET_CONFIG, addr, body, sizeof(body));
+            LOG_I("[CC1312] CMD_SET_CONFIG → %016llX dom=%u param=%u val=%lu\n",
+                  (unsigned long long)addr, domain, param, (unsigned long)value);
+        } else if (action == "reset_config") {
+            const char* addrStr = doc["addr"] | "FFFFFFFFFFFFFFFF";
+            uint64_t addr  = strtoull(addrStr, nullptr, 16);
+            uint8_t domain = doc["domain"] | 0;
+            uint8_t param  = doc["param"]  | 0xFF;
+            uint8_t body[2] = {domain, param};
+            _sendDownlinkWithBody(CC1312_CMD_RESET_CONFIG, addr, body, sizeof(body));
+            LOG_I("[CC1312] CMD_RESET_CONFIG → %016llX dom=%u param=%u\n",
+                  (unsigned long long)addr, domain, param);
         }
     }
 
@@ -554,7 +591,7 @@ private:
 
         // Drop data frames from unenrolled nodes unless in discovery mode
         bool isDataFrame = (msgType == CC1312_MSG_STATUS || msgType == CC1312_MSG_READING ||
-                            msgType == CC1312_MSG_EVENT);
+                            msgType == CC1312_MSG_EVENT || msgType == CC1312_MSG_CONFIG_RESPONSE);
         if (isDataFrame && !_discoveryMode && !_isEnrolled(addr)) {
             LOG_W("[CC1312] Dropped frame from unenrolled node %016llX\n",
                           (unsigned long long)addr);
@@ -635,6 +672,34 @@ private:
                 LOG_I("[CC1312] Coordinator heartbeat (id=%016llX)\n",
                               (unsigned long long)_coordinatorAddr);
             }
+
+        } else if (msgType == CC1312_MSG_CONFIG_RESPONSE) {
+            // CONFIG_RESPONSE payload: result(1) domain(1) param_id(1) flags(1) value_LE32(4)
+            if (bodyLen < 8) {
+                LOG_W("[CC1312] CONFIG_RESPONSE too short from %016llX (len=%u)\n",
+                      (unsigned long long)addr, bodyLen);
+                return;
+            }
+            uint8_t  result = body[0];
+            uint8_t  domain = body[1];
+            uint8_t  param  = body[2];
+            uint8_t  flags  = body[3];
+            uint32_t value  = (uint32_t)body[4] | ((uint32_t)body[5] << 8) |
+                              ((uint32_t)body[6] << 16) | ((uint32_t)body[7] << 24);
+            LOG_I("[CC1312] CONFIG_RESPONSE from %016llX dom=%u param=%u result=%u val=%lu flags=0x%02X (rssi=%d)\n",
+                  (unsigned long long)addr, domain, param, result, (unsigned long)value, flags, rssi);
+            JsonDocument resp;
+            char addrStr[17];
+            snprintf(addrStr, sizeof(addrStr), "%016llX", (unsigned long long)addr);
+            resp["node"]   = addrStr;
+            resp["result"] = result;
+            resp["domain"] = domain;
+            resp["param"]  = param;
+            resp["flags"]  = flags;
+            resp["value"]  = value;
+            String respPayload;
+            serializeJson(resp, respPayload);
+            _mqtt->publish(CC1312_CONFIG_RESP_TOPIC, respPayload);
 
         } else if (msgType == CC1312_MSG_LIST_REQUEST) {
             if (_pendingListSyncAt == 0) {
@@ -799,6 +864,38 @@ private:
         _spi.beginTransaction(SPISettings(CC1312_SPI_FREQ, MSBFIRST, SPI_MODE1));
         digitalWrite(CC1312_CS_PIN, LOW);
         for (uint8_t i = 0; i < len; i++) {
+            _spi.transfer(buf[i]);
+        }
+        digitalWrite(CC1312_CS_PIN, HIGH);
+        _spi.endTransaction();
+    }
+
+    // Send a downlink frame with an additional body (e.g. config commands).
+    // body bytes are appended after the RSSI byte; LEN is adjusted accordingly.
+    void _sendDownlinkWithBody(uint8_t msgType, uint64_t addr,
+                               const uint8_t* body, uint8_t bodyLen) {
+        // max: 13 (base frame) + 6 (largest body: SET_CONFIG)
+        uint8_t buf[20];
+        uint8_t pos = 0;
+        uint8_t frameLen = 10 + bodyLen;  // type(1)+addr(8)+rssi(1)+body
+        buf[pos++] = 0xAA;
+        buf[pos++] = frameLen;
+        buf[pos++] = msgType;
+        buf[pos++] = (addr >> 56) & 0xFF;
+        buf[pos++] = (addr >> 48) & 0xFF;
+        buf[pos++] = (addr >> 40) & 0xFF;
+        buf[pos++] = (addr >> 32) & 0xFF;
+        buf[pos++] = (addr >> 24) & 0xFF;
+        buf[pos++] = (addr >> 16) & 0xFF;
+        buf[pos++] = (addr >> 8)  & 0xFF;
+        buf[pos++] = addr         & 0xFF;
+        buf[pos++] = 0x00;  // rssi = 0 for downlink
+        memcpy(&buf[pos], body, bodyLen);
+        pos += bodyLen;
+        buf[pos++] = _crc8(&buf[2], frameLen);
+        _spi.beginTransaction(SPISettings(CC1312_SPI_FREQ, MSBFIRST, SPI_MODE1));
+        digitalWrite(CC1312_CS_PIN, LOW);
+        for (uint8_t i = 0; i < pos; i++) {
             _spi.transfer(buf[i]);
         }
         digitalWrite(CC1312_CS_PIN, HIGH);
