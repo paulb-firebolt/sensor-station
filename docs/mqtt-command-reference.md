@@ -85,7 +85,7 @@ only). No effect on S3 builds (no LED). No additional fields.
 | `action` | yes      | `"accept_node"` |
 | `addr`   | yes      | 16-character hex node address (case-insensitive). |
 
-Saves the node to NVS and sends `CMD_ACCEPT_NODE` to the coordinator over UART.
+Saves the node to NVS and sends `CMD_ACCEPT_NODE` to the coordinator over SPI.
 
 ---
 
@@ -132,7 +132,7 @@ Immediately ends discovery mode. No additional fields.
 {"action":"sync_node_list"}
 ```
 
-Sends the full enrolled node list from NVS to the coordinator over UART. Useful
+Sends the full enrolled node list from NVS to the coordinator over SPI. Useful
 after a coordinator reboot. No additional fields.
 
 ---
@@ -178,7 +178,7 @@ coordinator waits for the next telemetry from that node, then sends RF
 `GET_STATUS` in the node's post-telemetry RX window. For
 `FFFFFFFFFFFFFFFF`, the coordinator queues one deferred unicast status request
 per enrolled node. Each node responds with a `NODE_STATUS` frame forwarded back
-over UART on its next uplink slot.
+over SPI on its next uplink slot.
 
 > **Timing note:** The coordinator now defers `GET_STATUS` until it next hears
 > telemetry from the target node, then transmits the RF poll inside that node's
@@ -188,6 +188,71 @@ over UART on its next uplink slot.
 > expands the request into deferred per-node unicast polls across the enrolled
 > whitelist, so responses arrive one node at a time as each node next
 > telemetries.
+
+---
+
+### `get_config` — request one config value from a node
+
+```json
+{"action":"get_config","addr":"00124B002D6D5A04","domain":1,"param":2}
+```
+
+| Field    | Required | Description |
+|----------|----------|-------------|
+| `action` | yes      | `"get_config"` |
+| `addr`   | yes      | Target node address. Must be a specific node; broadcast is not supported. |
+| `domain` | yes      | Config domain ID. Example: `1` = PIR. |
+| `param`  | yes      | Parameter ID within that domain. |
+
+Sends `CMD_GET_CONFIG` to the coordinator over SPI. The coordinator waits for
+the next telemetry from that node, then transmits RF `GET_CONFIG` in the node's
+post-telemetry RX window. The node replies with a forwarded `CONFIG_RESPONSE`
+containing the current value.
+
+---
+
+### `set_config` — apply one config value to a node
+
+```json
+{"action":"set_config","addr":"00124B002D6D5A04","domain":1,"param":2,"value":5000}
+```
+
+| Field    | Required | Description |
+|----------|----------|-------------|
+| `action` | yes      | `"set_config"` |
+| `addr`   | yes      | Target node address. Must be a specific node; broadcast is not supported. |
+| `domain` | yes      | Config domain ID. |
+| `param`  | yes      | Parameter ID within that domain. |
+| `value`  | yes      | Unsigned integer value sent as little-endian `uint32` on the RF side. |
+
+Sends `CMD_SET_CONFIG` to the coordinator over SPI. The coordinator defers the
+RF request until the node's next post-telemetry RX window. The node responds
+with a forwarded `CONFIG_RESPONSE` containing the applied value, which may
+differ from the requested value if the node clamps or resets it.
+
+---
+
+### `reset_config` — reset one param or whole domain on a node
+
+```json
+{"action":"reset_config","addr":"00124B002D6D5A04","domain":1,"param":2}
+```
+
+```json
+{"action":"reset_config","addr":"00124B002D6D5A04","domain":1,"param":255}
+```
+
+| Field    | Required | Description |
+|----------|----------|-------------|
+| `action` | yes      | `"reset_config"` |
+| `addr`   | yes      | Target node address. Must be a specific node; broadcast is not supported. |
+| `domain` | yes      | Config domain ID. |
+| `param`  | yes      | Parameter ID to reset, or `255` for all params in that domain. |
+
+Sends `CMD_RESET_CONFIG` to the coordinator over SPI. The coordinator defers
+the RF request until the node's next post-telemetry RX window. The node replies
+with a forwarded `CONFIG_RESPONSE` containing the resulting value. For a whole-
+domain reset, the response uses `param = 255`.
 
 ---
 
@@ -201,3 +266,4 @@ over UART on its next uplink slot.
 | `{prefix}/{device_id}/cc1312/nodes` | Publish | RF node telemetry and status, every 10 s |
 | `{prefix}/{device_id}/cc1312/seen` | Publish | Nodes heard during discovery |
 | `{prefix}/{device_id}/cc1312/config` | Publish | Enrolled node list, in response to `get_node_list` |
+| `{prefix}/{device_id}/cc1312/config_response` | Publish | Config read/write result from a node, in response to `get_config`/`set_config`/`reset_config` |

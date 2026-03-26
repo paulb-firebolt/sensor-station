@@ -265,7 +265,8 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 #if ENABLE_CC1312
         else if (action == "accept_node" || action == "remove_node" || action == "discovery_on" ||
                  action == "discovery_off" || action == "sync_node_list" ||
-                 action == "get_node_list" || action == "ping" || action == "get_status") {
+                 action == "get_node_list" || action == "ping" || action == "get_status" ||
+                 action == "get_config" || action == "set_config" || action == "reset_config") {
             cc1312.handleCommand(action, doc);
         }
 #endif

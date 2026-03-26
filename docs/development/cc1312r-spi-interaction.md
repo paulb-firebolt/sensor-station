@@ -304,7 +304,61 @@ sequenceDiagram
 
 ---
 
-## 7 — SPI State Machine Summary (CC1312R side)
+## 7 — Deferred Config Request
+
+The ESP32-P4 sends config commands as **unicast** SPI downlinks to one specific
+node. The coordinator does not transmit them over RF immediately. Instead, it
+waits until it next hears telemetry from that node, then uses the node's short
+post-telemetry RX window to send `GET_CONFIG`, `SET_CONFIG`, or `RESET_CONFIG`.
+
+```mermaid
+sequenceDiagram
+    participant E as ESP32-P4 (cc1312_manager.h)
+    participant W as SPI Bus
+    participant C as CC1312R (rfEchoRx.c)
+    participant N as Sensor Node (RF)
+
+    Note over E: MQTT/web/API requests set_config(addr, domain, param, value)
+    E->>E: _sendDownlink(CMD_SET_CONFIG, nodeAddr, body)
+    E->>W: CS LOW → [AA LEN 0x23 addr×8 00 domain param value_LE32 CRC8] → CS HIGH
+
+    C->>C: processCommandFrame(CMD_SET_CONFIG, unicast)<br/>queueDeferredConfigCommand(nodeAddr, RF_LINK_MSG_SET_CONFIG, body)
+
+    Note over C: Wait for next telemetry from that same node
+    N->>C: RF RX telemetry from nodeAddr
+
+    C->>C: echoCallback() sees telemetry<br/>scheduleDeferredConfigCommand(nodeAddr)<br/>pendingTxFrame.msgType = RF_LINK_MSG_SET_CONFIG
+    C->>N: RF TX SET_CONFIG during post-telemetry RX window
+
+    N->>C: RF RX CONFIG_RESPONSE
+    C->>C: echoCallback() — hasConfigResponse = true<br/>lastConfigSourceAddr = srcAddr<br/>lastConfigPayload = response payload
+
+    C->>C: writeFrame(UART_MSG_CONFIG_RESPONSE, srcAddr, rssi, payload, 8)<br/>→ enqueueSpiFrame() → serviceSpiTransport()
+    C->>W: DRDY → LOW
+
+    E->>E: update(): DRDY LOW detected
+    E->>W: CS LOW / clock / CS HIGH
+    W-->>E: [0xAA][LEN][0x24][addr×8][rssi][result domain param flags value_LE32][CRC8]
+
+    E->>E: _dispatchFrame(CC1312_MSG_CONFIG_RESPONSE)<br/>publish/log applied value and flags
+```
+
+### Downlink bodies
+
+- `CMD_GET_CONFIG` (`0x22`): `domain(1) param_id(1)`
+- `CMD_SET_CONFIG` (`0x23`): `domain(1) param_id(1) value_LE32(4)`
+- `CMD_RESET_CONFIG` (`0x25`): `domain(1) param_id_or_FF(1)`
+
+### Uplink body
+
+- `CONFIG_RESPONSE` (`0x24`): `result(1) domain(1) param_id(1) flags(1) value_LE32(4)`
+
+Broadcast config requests are not supported. The coordinator ignores config
+commands whose `NODE_ADDR` is `FFFFFFFFFFFFFFFF`.
+
+---
+
+## 8 — SPI State Machine Summary (CC1312R side)
 
 `serviceSpiTransport()` is the core dispatcher called twice per main-loop iteration
 (once after `RF_runCmd()`, once after frame writes). Its state transitions are:
@@ -329,6 +383,7 @@ stateDiagram-v2
 
     TX_COMPLETE --> RX_ARMED : serviceSpiTransport()\nno more TX frames\nstartSpiRxTransfer()
 ```
+
 
 ---
 
