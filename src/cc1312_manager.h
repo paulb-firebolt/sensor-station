@@ -747,10 +747,14 @@ private:
         const uint8_t* body = payload + 9;
         uint8_t bodyLen = len - 9;
 
-        // Drop data frames from unenrolled nodes unless in discovery mode
+        // Drop data frames from unenrolled nodes unless in discovery mode.
+        // Exception: SENSOR_READING from the coordinator address with payload[0]==0xFF
+        // is a coordinator-originated debug frame and must pass through regardless.
         bool isDataFrame = (msgType == CC1312_MSG_STATUS || msgType == CC1312_MSG_READING ||
                             msgType == CC1312_MSG_EVENT || msgType == CC1312_MSG_CONFIG_RESPONSE);
-        if (isDataFrame && !_discoveryMode && !_isEnrolled(addr)) {
+        bool isCoordinatorDebug = (msgType == CC1312_MSG_READING && addr == _coordinatorAddr &&
+                                   bodyLen > 0 && body[0] == 0xFF);
+        if (isDataFrame && !_discoveryMode && !_isEnrolled(addr) && !isCoordinatorDebug) {
             LOG_W("[CC1312] Dropped frame from unenrolled node %016llX\n",
                           (unsigned long long)addr);
             return;
@@ -889,7 +893,9 @@ private:
 
         for (size_t i = 0; i < _pendingCount; i++) {
             if (_pending[i].node_addr == addr && _pending[i].msg_type == msgType &&
-                _pending[i].sensor_class == sc) {
+                _pending[i].sensor_class == sc &&
+                (sc != CC1312_SC_PIR || (_pending[i].data_len > 0 && dataLen > 0 &&
+                                         _pending[i].data[0] == data[0]))) {
                 _pending[i].rssi = rssi;
                 _pending[i].timestamp = millis();
                 memcpy(_pending[i].data, data, copyLen);
@@ -954,6 +960,7 @@ private:
                     if (dl >= 7) obj["flags"] = d[6];
                 } else if (dl >= 1 && d[0] == 0x11) {
                     // Dwell: [0x11][dwell_seconds LE:2][event_count LE:4]
+                    obj["msg"] = "event";
                     obj["event"] = "dwell";
                     if (dl >= 3) obj["dwell_seconds"] = (uint16_t)(d[1] | ((uint16_t)d[2] << 8));
                     if (dl >= 7) obj["event_count"] = (uint32_t)(d[3] | ((uint32_t)d[4] << 8) |

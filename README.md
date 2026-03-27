@@ -80,6 +80,8 @@ pio device monitor -b 115200
 
 ## Docs workflow
 
+### Project documentation (MkDocs)
+
 Project documentation is built with `mkdocs-material` and `mkdocs-awesome-nav`, managed through `uv`.
 
 Install the docs environment:
@@ -99,6 +101,21 @@ Build the site:
 ```bash
 uv run mkdocs build --strict
 ```
+
+### API reference (Doxygen)
+
+Source-level API docs are generated from inline Doxygen comments in `src/`.
+Output goes to `doxygen/` (not tracked by git) and is kept separate from the MkDocs site.
+
+Requires `doxygen` to be installed (`sudo pacman -S doxygen` on Arch/Manjaro).
+
+```bash
+make docs        # build API docs → doxygen/html/
+make open-docs   # open in browser
+make clean-docs  # remove generated output
+```
+
+Direct scripts are also available: `./scripts/build-docs.sh` and `./scripts/open-docs.sh`.
 
 ## Key docs in this repo
 
