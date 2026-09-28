@@ -42,6 +42,10 @@ actions:
       display_name: Block pushes to main
       description: Refuse pushes that target the protected main branch
       run: sh .githooks/block-main-push.sh
+      # Trunk runs actions with a scrubbed environment; pass the pre-push ref list through.
+      environment:
+        - name: TRUNK_GIT_STDIN_FILE
+          value: ${env.TRUNK_GIT_STDIN_FILE}
       triggers:
         - git_hooks:
             - pre-push
