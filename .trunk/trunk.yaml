@@ -1,0 +1,55 @@
+# This file controls the behavior of Trunk: https://docs.trunk.io/cli
+# To learn more about the format of this file, see https://docs.trunk.io/reference/trunk-yaml
+version: 0.1
+cli:
+  version: 1.25.0
+# Trunk provides extensibility via plugins. (https://docs.trunk.io/plugins)
+plugins:
+  sources:
+    - id: trunk
+      ref: v1.11.0
+      uri: https://github.com/trunk-io/plugins
+# Many linters and tools depend on runtimes - configure them here. (https://docs.trunk.io/runtimes)
+runtimes:
+  enabled:
+    - node@22.16.0
+    - python@3.10.8
+# This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
+lint:
+  disabled:
+    # clang-tidy include scanning breaks on the ESP32 cross-compiler (riscv32-esp-elf-g++)
+    # — the -M dependency flag produces no stdout output, causing "Unable to find beginning
+    # of dependency list" errors. clang-format is used instead for C/C++ style enforcement.
+    - clang-tidy
+  enabled:
+    - clang-format@16.0.3
+    - markdownlint@0.48.0
+    - checkov@3.2.513
+    - git-diff-check
+    - oxipng@10.1.0
+    - prettier@3.8.1
+    - trufflehog@3.94.1
+actions:
+  definitions:
+    - id: block-main-commits
+      display_name: Block commits to main
+      description: Refuse commits made directly on the protected main branch
+      run: sh .githooks/block-main-commits.sh
+      triggers:
+        - git_hooks:
+            - pre-commit
+    - id: block-main-push
+      display_name: Block pushes to main
+      description: Refuse pushes that target the protected main branch
+      run: sh .githooks/block-main-push.sh
+      triggers:
+        - git_hooks:
+            - pre-push
+  disabled:
+    - trunk-announce
+    - trunk-check-pre-push
+    - trunk-fmt-pre-commit
+  enabled:
+    - block-main-commits
+    - block-main-push
+    - trunk-upgrade-available
