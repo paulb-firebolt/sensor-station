@@ -201,7 +201,8 @@ These came up while writing the [hardware design brief](../hardware-design-brief
 
 ### Cellular upload behaviour
 
-For a future cellular variant (see the brief's Cellular option). Cellular data
+For a future cellular variant (see the brief's Cellular option, and the
+[cellular PoC note](cellular-poc.md) for dev boards and first steps). Cellular data
 is billed by bytes, and each message carries a fixed overhead (TCP/IP, TLS, the
 MQTT header and the topic).
 
