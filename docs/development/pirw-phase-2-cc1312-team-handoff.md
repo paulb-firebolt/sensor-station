@@ -25,7 +25,7 @@ temporary LaunchPad simulation format, not as final PIRW production payloads.
 
 - payload constants: `rfCommon/rfLinkProtocol.h`
 - LaunchPad telemetry generator: `rfNode/rfEchoTx.c`
-- telemetry format notes: `rfPacketTx/docs/pirw-phase-2-launchpad-simulated-telemetry.md`
+- telemetry format notes: `pirw-phase-2-launchpad-simulated-telemetry.md`
 
 ## Required changes for the CC1312 team
 

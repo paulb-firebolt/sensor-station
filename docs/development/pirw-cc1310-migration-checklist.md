@@ -26,11 +26,11 @@ transport work separate from later PIRW hardware adaptation.
 - [x] Confirm legacy behavior source of truth in
   `/home/paulb/rais/retail-aware-pirw2-cc1310-fw`.
 - [x] Confirm `cc1312` transport reference in
-  `/home/paulb/Documents/sensor-station/rfNode`.
+  `/home/paulb/Documents/sensor-station-cc1312-coordinator/rfNode`.
 - [x] Confirm required behavior from
-  `rfPacketTx/docs/pirw-new-node-migration.md`.
+  `pirw-new-node-migration.md`.
 - [x] Confirm required behavior from
-  `rfPacketTx/docs/pirw-phase-1-behavior-capture.md`.
+  `pirw-phase-1-behavior-capture.md`.
 
 ### Phase 2: transport on CC1310 LaunchPad
 

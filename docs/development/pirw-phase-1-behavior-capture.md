@@ -32,7 +32,7 @@ not require old OTA compatibility.
 ## Architectural Alignment
 
 This Phase 1 document captures legacy sensing behavior only. It is aligned with
-the newer migration direction described in `rfPacketTx/docs/pirw-new-node-migration.md`.
+the newer migration direction described in `pirw-new-node-migration.md`.
 
 That means the new implementation is expected to:
 
