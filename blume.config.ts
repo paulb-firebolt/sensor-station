@@ -38,6 +38,7 @@ export default defineConfig({
       {
         label: "Requirements",
         items: [
+          "/hardware-design-brief",
           "/v3-requirements-gap-review",
           "/pir-v3-technical-requirements",
           "/rais-base-station-v3-technical-requirements",
