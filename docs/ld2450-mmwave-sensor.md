@@ -58,8 +58,8 @@ directly to a 3.3 V ESP32 (WT32-ETH01) without a level shifter and operated corr
 | 17   | LED Red          | No — off M-Bus, on-board only |
 | 19   | **LD2450 RX**    | Yes — Hat2-Bus G19            |
 | 20   | **LD2450 TX**    | Yes — Hat2-Bus G20            |
-| 43   | UART0 console TX | Reserved                      |
-| 44   | UART0 console RX | Reserved                      |
+| 37   | UART0 console TX | Reserved — Hat2-Bus G37 (U0TX) |
+| 38   | UART0 console RX | Reserved — Hat2-Bus G38 (U0RX) |
 | 45   | Factory reset    | No — dedicated USR button     |
 
 ## UART Protocol

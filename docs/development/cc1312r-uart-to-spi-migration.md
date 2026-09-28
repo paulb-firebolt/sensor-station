@@ -69,8 +69,8 @@ Existing allocations:
 | 20   | G20      | LD2450 UART1 TX             |
 | 22   | G22      | CC1312R UART2 RX (current)  |
 | 23   | G23      | CC1312R UART2 TX (current)  |
-| 43   | —        | UART0 console TX (reserved) |
-| 44   | —        | UART0 console RX (reserved) |
+| 37   | G37      | UART0 console TX (reserved) |
+| 38   | G38      | UART0 console RX (reserved) |
 | 45   | —        | Factory reset (on-board)    |
 
 Proposed SPI assignment (G22/G23 freed after migration):

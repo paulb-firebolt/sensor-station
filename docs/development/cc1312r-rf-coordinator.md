@@ -115,8 +115,8 @@ master MOSI connects to the slave SSI_RX; the master MISO connects to the slave 
 | 17   | LED Red          | On-board only, not on Hat2-Bus             |
 | 19   | LD2450 UART1 RX  | Hat2-Bus G19                               |
 | 20   | LD2450 UART1 TX  | Hat2-Bus G20                               |
-| 43   | UART0 console TX | Reserved — do not use                      |
-| 44   | UART0 console RX | Reserved — do not use                      |
+| 37   | UART0 console TX | Reserved — Hat2-Bus G37 (U0TX), do not use |
+| 38   | UART0 console RX | Reserved — Hat2-Bus G38 (U0RX), do not use |
 | 45   | Factory reset    | Dedicated USR button, not on Hat2-Bus      |
 
 G22 and G23 are free — they were used during the initial UART PoC and are unallocated
