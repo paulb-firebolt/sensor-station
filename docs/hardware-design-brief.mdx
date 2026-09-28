@@ -147,6 +147,52 @@ Signals production needs that the PoC doesn't wire:
 - **Programming pads** for each MCU on the production line: cJTAG for the
   CC13xx parts, and UART or USB plus the boot strap for the ESP32.
 
+## Expansion header
+
+We'd like the base station to accept extra sensors directly, not only over the
+radio link. The PoC already works this way: the LD2450 radar (UART), the
+thermal counter (SPI) and the CC1312 (SPI) all plug into the M5Stack's
+Hat2-Bus header. Production should keep that ability through a defined
+expansion header.
+
+**Signals on the header:**
+
+- 3.3 V and 5 V power, each current-limited, so a shorted add-on can't reset
+  the base station
+- I2C
+- one UART
+- SPI with two chip-selects, on a **separate SPI bus from the CC1312**, so a
+  faulty add-on can't take down the sensor radio link
+- two or three spare GPIOs, at least one usable as an interrupt
+- a reset line
+- all signals at 3.3 V logic, with ESD protection
+
+**Which interface suits which add-on:**
+
+| Where the add-on sits | Interface |
+| --- | --- |
+| Daughterboard plugged onto the header | SPI or I2C |
+| Small module on a short cable (up to about 30 cm) | I2C (e.g. a Qwiic/STEMMA QT connector) or UART |
+| Self-contained sensor, like the LD2450 | UART |
+| Sensor several metres away | RS-485 (UART plus a transceiver), not raw SPI |
+
+SPI is a board-level bus. It suits a plug-in daughterboard or a short ribbon
+cable (roughly 10–20 cm at a few MHz), but not a long cable. It has no error
+checking, long wires pick up noise, and each device needs its own chip-select.
+
+**Other implications:**
+
+- **Add-on identification.** A small ID EEPROM on each add-on board, on the
+  header's I2C lines, would let the firmware detect what's fitted and load the
+  right driver. Today add-ons are enabled at build time.
+- **Power budget.** The header's power allowance has to fit within the PoE
+  class (see [Power](#power) and [Open questions](#open-questions)).
+- **Certification.** An exposed header affects EMC testing. Either test with a
+  representative add-on fitted, or ship with the header covered and certify
+  accessories separately.
+- **Enclosure.** A cut-out or cover so the header is reachable without opening
+  the case.
+
 ## Power
 
 | Product | Source | Budget or target |
@@ -208,7 +254,10 @@ We still need to supply these before you can quote:
    and cellular variants. Is a cellular SKU in scope for v3?
 6. **Sensor OTA.** Is external flash needed on the sensor to support future
    remote updates?
-7. **Sub-GHz PHY.** The PoC coordinator firmware currently uses TI's SimpleLink
+7. **PoE class with add-ons.** 802.3af Class 1 allows up to 3.84 W at the
+   device. A power-hungry add-on such as a radar may need a higher class. What
+   power allowance should the expansion header have?
+8. **Sub-GHz PHY.** The PoC coordinator firmware currently uses TI's SimpleLink
    Long Range mode, which `FW-2` rules out as the default. This is a firmware
    change, but it affects the RF matching and the link budget you design for.
 
