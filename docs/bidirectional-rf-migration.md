@@ -1,43 +1,56 @@
 ---
 title: Bidirectional RF Migration Plan
 created: 2026-03-20T00:00:00Z
-lastModified: 2026-03-20T00:00:00Z
+lastModified: 2026-09-07T00:00:00Z
 ---
+
+> **Status update (2026-09-07):** the ESP32 ↔ CC1312 host link described below as
+> "UART" has since been migrated to **SPI**. The migration is complete in the
+> companion coordinator firmware (git history:
+> `Merge pull request #1 from paulb-firebolt/uart_to_spi`, `Functional SPI
+> implementation`) and is what `src/cc1312_manager.h` in this repo talks to. The
+> UART framing sections below are kept for historical context on the frame
+> layout (which carried over unchanged) but should be read as **SPI, DRDY-gated**
+> wherever "UART" appears, unless noted otherwise. See
+> [CC1312 Coordinator Firmware](#cc1312-coordinator-firmware-location) at the
+> bottom of this doc for the actual repo.
 
 ## Goal
 
-Move from the current one-way telemetry PoC (`rfPacketRx` coordinator + `rfPacketTx`
-sensor) to a bidirectional RF design using the new `rfCoordinator` and `rfNode`
+Move from the original one-way telemetry PoC (`rfPacketRx` coordinator + `rfPacketTx`
+sensor) to a bidirectional RF design using the `rfCoordinator` and `rfNode`
 projects.
 
-The intent is **not** to redesign the application protocol. The application-level
-concepts already proven in `rfPacketRx` / `rfPacketTx` should be reused. The new
-`rfEchoRx` / `rfEchoTx` projects are used mainly for their RF TX/RX mechanics.
+The intent was **not** to redesign the application protocol. The application-level
+concepts already proven in `rfPacketRx` / `rfPacketTx` were reused. The `rfEchoRx` /
+`rfEchoTx` TI examples were used mainly for their RF TX/RX mechanics.
 
 ## Project Roles
 
-- `rfCoordinator/` starts from `rfEchoRx` and becomes the RF coordinator
-- `rfNode/` starts from `rfEchoTx` and becomes the remote sensor node
+- `rfCoordinator/` started from `rfEchoRx` and became the RF coordinator
+- `rfNode/` started from `rfEchoTx` and became the remote sensor node
 - `rfPacketRx/` and `rfPacketTx/` remain the known-good telemetry baseline
 - `rfCommon/rfLinkProtocol.h` holds the shared RF frame constants and message types
 
 ## PHY Alignment
 
-The new bidirectional projects must stay aligned with the known-good RF settings
-already proven in `rfPacketRx` / `rfPacketTx`.
+The bidirectional projects stay aligned with the known-good RF settings already
+proven in `rfPacketRx` / `rfPacketTx`.
 
 - use the TI SimpleLink Long Range proprietary PHY
 - use the same `defaultPropPhyList[1]` selection
 - keep both sides on `868.000 MHz` / `5 kbps`
 
-Do not test bidirectional behavior until `rfCoordinator` and `rfNode` have both
-been regenerated and rebuilt with matching PHY settings.
+> **Note:** this PHY choice (SimpleLink Long Range, ~5 kbps) is a bring-up
+> choice for RF plumbing robustness, not necessarily the production default —
+> see `v3-requirements-gap-review.md` for why a higher-rate PHY matters for
+> battery life at scale. Confirm intent before treating this as final.
 
-## What To Reuse
+## What Was Reused
 
 ### From `rfPacketRx`
 
-These pieces are application logic that should be ported into `rfCoordinator`:
+These pieces are application logic ported into `rfCoordinator`:
 
 - UART framing helpers and CRC8: `rfPacketRx/rfPacketRx.c:95`, `rfPacketRx/rfPacketRx.c:160`, `rfPacketRx/rfPacketRx.c:187`
 - Big-endian address parsing helper: `rfPacketRx/rfPacketRx.c:98`, `rfPacketRx/rfPacketRx.c:216`
@@ -46,9 +59,14 @@ These pieces are application logic that should be ported into `rfCoordinator`:
 - Node-list request cadence and state handling: `rfPacketRx/rfPacketRx.c:293`, `rfPacketRx/rfPacketRx.c:341`, `rfPacketRx/rfPacketRx.c:580`
 - UART uplink message types already proven with the ESP32: `rfPacketRx/rfPacketRx.c:71`
 
+These were the reference for the **frame layout and application logic** — the
+transport those helpers originally ran over (UART) was later replaced with SPI
+in `rfCoordinator`; the byte-level frame shape (`0xAA`, `LEN`, `MSG_TYPE`,
+`NODE_ADDR`, `RSSI`, payload, `CRC8`) carried over unchanged.
+
 ### From `rfPacketTx`
 
-These pieces are application logic that should be ported into `rfNode`:
+These pieces are application logic ported into `rfNode`:
 
 - Stable node address embedded in the RF payload: `rfPacketTx/rfPacketTx.c:55`, `rfPacketTx/rfPacketTx.c:104`
 - Existing telemetry payload shape for temperature/status bring-up: `rfPacketTx/rfPacketTx.c:99`
@@ -56,7 +74,7 @@ These pieces are application logic that should be ported into `rfNode`:
 
 ### From `rfCoordinator` (`rfEchoRx`)
 
-These pieces are the RF behavior that should be preserved in the new coordinator:
+These pieces are the RF behavior preserved in the new coordinator:
 
 - Continuous RX queue setup: `rfCoordinator/rfEchoRx.c:132`
 - RX-first command chain with automatic follow-up TX: `rfCoordinator/rfEchoRx.c:158`, `rfCoordinator/rfEchoRx.c:165`
@@ -64,7 +82,7 @@ These pieces are the RF behavior that should be preserved in the new coordinator
 
 ### From `rfNode` (`rfEchoTx`)
 
-These pieces are the RF behavior that should be preserved in the new node:
+These pieces are the RF behavior preserved in the new node:
 
 - TX->RX chained operation: `rfNode/rfEchoTx.c:149`, `rfNode/rfEchoTx.c:154`
 - Timed transmit followed by a receive window: `rfNode/rfEchoTx.c:199`, `rfNode/rfEchoTx.c:216`
@@ -79,80 +97,61 @@ Borrow the **RF send/receive state machine** from `rfCoordinator` / `rfNode`.
 That means:
 
 - do not invent a new node-addressing scheme
-- do not invent a new UART framing format
+- do not invent a new host-link framing format
 - do not redesign message typing unless RF-specific command/response types require it
 - do replace the current one-way RF loops with explicit TX/RX state transitions
 
-## Recommended RF Packet Format
+## RF Packet Format
 
-For the first bidirectional milestone, use a simple explicit RF frame body:
+For the RF hop (CC1312 node ↔ CC1312 coordinator, over the air), the frame body is:
 
 ```text
 [src_addr:8][dst_addr:8][msg_type:1][seq:1][payload_len:1][payload:N]
 ```
 
-Suggested initial RF message types:
+RF message types:
 
 - `0x01` — `RF_MSG_TELEMETRY`
 - `0x20` — `RF_MSG_GET_STATUS`
 - `0x21` — `RF_MSG_STATUS_RESPONSE`
 
-Suggested initial addresses:
+Addresses:
 
 - `0x0000000000000001` — coordinator
 - factory IEEE 802.15.4 EUI-64 — sensor nodes
 - `0xFFFFFFFFFFFFFFFF` — broadcast
 
-For the current bring-up code, the remote sensor node address is defined in
-`rfNode/nodeIdentity.h` and is read from the CC1312's hardware IEEE address, so
-each board keeps a stable identity across resets and power cycles without using
-application NVS.
+The remote sensor node address is read from the CC1312's hardware IEEE address
+(`rfCommon/deviceIdentity.h` / `rfNode/nodeIdentity.h`), so each board keeps a
+stable identity across resets and power cycles without using application NVS.
 
-Recommended near-term approach:
-
-- use the CC1312 factory-programmed IEEE 802.15.4 EUI-64 as the node address
-- enroll that immutable hardware ID on the ESP32/coordinator side
-- store any human-friendly alias or deployment metadata against that ID
-- reserve `0xFFFFFFFFFFFFFFFF` for broadcast
-
-This RF frame is internal to the CC1312 link. The UART framing to the ESP32 can stay
-compatible in structure with the current `rfPacketRx` design, but now carries an
-8-byte node address.
-
-The initial shared scaffold for these constants lives in `rfCommon/rfLinkProtocol.h`.
+This RF frame is **internal to the CC1312 link** — it is separate from the host
+link frame (coordinator ↔ ESP32), which is the `0xAA`-framed format below.
 
 For now, the bidirectional RF link relies on the radio's built-in packet CRC only.
-No additional application-level checksum has been added to `RfLinkFrame` yet.
+No additional application-level checksum has been added to `RfLinkFrame`.
 
-The first implementation step after adding the header is:
+## Host Link (Coordinator ↔ ESP32): now SPI, not UART
 
-- `rfNode` encodes telemetry into `RfLinkFrame`
-- `rfCoordinator` decodes received RF payloads into `RfLinkFrame`
-- `rfCoordinator` now polls UART in short RX windows and only transmits
-  `RF_MSG_GET_STATUS` when the ESP32 sends `UART_CMD_GET_STATUS` (`0x20`)
-- `rfNode` now stages `RF_MSG_STATUS_RESPONSE` when it receives addressed or
-  broadcast `RF_MSG_GET_STATUS`
-- `rfCoordinator` now decodes `RF_MSG_STATUS_RESPONSE` fields for UART forwarding
-- `rfCoordinator` now forwards `RF_MSG_TELEMETRY` to the ESP32 using the existing
-  `SENSOR_READING` UART frame shape and the received RF RSSI
-- `rfCoordinator` now opens UART on `DIO3`/`DIO2` and forwards RF status responses
-  to the ESP32 using the existing `NODE_STATUS` UART frame shape and the received
-  RF RSSI
-- `rfCoordinator` now also emits the existing UART `HEARTBEAT` (`0x06`) frame
-  immediately at startup and then about every 30 seconds so the ESP32 can keep
-  `coordinator_alive=true`
-
-## UART Command Examples
-
-The coordinator UART framing stays compatible with the current `rfPacketRx` format:
+The coordinator-to-ESP32 host link originally ran over UART and has since been
+migrated to **SPI**, matching `src/cc1312_manager.h` in this repo. The frame
+*content* is unchanged from the UART design — only the transport changed.
 
 ```text
 [0xAA] [LEN] [MSG_TYPE] [NODE_ADDR × 8 BE] [RSSI] [...payload...] [CRC8]
 ```
 
-For coordinator downlink commands from the ESP32:
+Transport specifics (current, SPI):
 
-- `MSG_TYPE = 0x20` — `UART_CMD_GET_STATUS`
+- CC1312R asserts a `DRDY` GPIO low when a frame is loaded and ready
+- ESP32 detects the falling edge, asserts CS, reads a 2-byte header (`0xAA` + `LEN`),
+  then reads exactly `LEN + 1` more bytes (payload + CRC) before deasserting CS
+- 1 MHz SPI, `SPI_MODE1`, MSB first
+- downlink (ESP32 → coordinator) frames are written in the same CS window model
+
+For host downlink commands from the ESP32:
+
+- `MSG_TYPE = 0x20` — `CMD_GET_STATUS`
 - `NODE_ADDR` = target node address, or `0xFFFFFFFFFFFFFFFF` for broadcast
 - `RSSI = 0x00`
 - no payload
@@ -169,12 +168,12 @@ AA 0A 20 00 12 4B 00 12 34 56 78 00 E8
 AA 0A 20 FF FF FF FF FF FF FF FF 00 CE
 ```
 
-Current coordinator behavior for this broadcast command is to iterate the
-accepted-node whitelist and queue one deferred unicast `GET_STATUS` request per
-node. Each queued request is transmitted when that node next sends telemetry,
-so the poll lands inside the node's post-telemetry RX window.
+Coordinator behavior for this broadcast command: iterate the accepted-node
+whitelist and queue one deferred unicast `GET_STATUS` request per node. Each
+queued request is transmitted when that node next sends telemetry, so the poll
+lands inside the node's post-telemetry RX window.
 
-### Current Phase 2 forwarded `NODE_STATUS` response
+### Phase 2 forwarded `NODE_STATUS` response (example)
 
 For the temporary `CC1310` LaunchPad Phase 2 contract, the forwarded payload is:
 
@@ -189,60 +188,33 @@ Normal telemetry is also temporary in Phase 2 and currently cycles through the
 synthetic PIR-style payloads documented in
 `development/pirw-phase-2-launchpad-simulated-telemetry.md`.
 
-## First Milestone
+## First Milestone (completed)
 
-Do only one command/response path first:
-
-1. ESP32 sends a coordinator UART command requesting status from one node
+1. ESP32 sends a coordinator host-link command requesting status from one node
 2. Coordinator transmits `RF_MSG_GET_STATUS` to that node
 3. Node receives it and sends `RF_MSG_STATUS_RESPONSE`
-4. Coordinator receives the response and forwards it to the ESP32 over UART
+4. Coordinator receives the response and forwards it to the ESP32 over the host link
 
 Separately, normal node telemetry is forwarded from `rfCoordinator` to the ESP32 as
 `SENSOR_READING` (`0x02`) without requiring a command.
 
-Do **not** add sleep/restart/control behavior in the first milestone.
+Coordinator behavior implemented since the first milestone (per `rfCoordinator`
+README): forwards RF telemetry/status/config responses to the host over SPI,
+sends coordinator heartbeats carrying its own firmware version, maintains a
+local enrolled/accepted node list, supports deferred `GET_STATUS` requests, and
+accepts deferred config requests (`GET/SET/RESET_CONFIG`) transmitted during a
+node's next post-telemetry RX window.
 
-## Coordinator Implementation Plan
+## What Was Deliberately Left Out of the First Milestone
 
-Implement `rfCoordinator` in this order:
+These were out of scope for the initial bidirectional round-trip; check the
+coordinator repo directly for current status of each rather than assuming from
+this doc:
 
-1. Port the UART code from `rfPacketRx`
-   - `crc8`
-   - `writeFrame`
-   - `readUint64Be`
-   - `processUartByte`
-   - `processCommandFrame`
-2. Keep the RF queue / callback model from `rfEchoRx`
-3. Replace echo payload copying with RF frame parsing
-4. Add a coordinator RF address constant
-5. Add one UART downlink command from ESP32, e.g. `CMD_GET_STATUS`
-6. On that command, build and transmit an addressed RF request packet
-7. Return immediately to RX mode and wait for a response packet
-8. Forward the decoded RF response to the ESP32 using the existing UART framing model
-
-## Node Implementation Plan
-
-Implement `rfNode` in this order:
-
-1. Port the stable node-address and telemetry payload builder from `rfPacketTx`
-2. Keep the TX->RX chained behavior from `rfEchoTx`
-3. Replace the echo comparison logic with RF frame parsing
-4. Accept only RF packets addressed to this node address (or broadcast if later needed)
-5. When `RF_MSG_GET_STATUS` is received, build `RF_MSG_STATUS_RESPONSE`
-6. Send the response in the existing receive window
-7. Return to the normal telemetry loop
-
-## What Not To Port Yet
-
-Leave these out of the first bidirectional milestone unless they are required to
-complete the initial round-trip:
-
-- whitelist enforcement on the RF command path
 - discovery mode over bidirectional RF
-- multiple command types
 - retries beyond one simple timeout on the coordinator
-- encryption / security manager behavior
+- encryption / security manager behavior (see SEC-3 in
+  `v3-requirements-gap-review.md` — still not implemented as of that review)
 - sleep control or reset commands
 
 ## Files To Treat As Reference, Not Copy-Paste Targets
@@ -254,24 +226,27 @@ These examples are useful because they show the RF command chaining model, but t
 should not replace the already-proven application logic from `rfPacketRx` /
 `rfPacketTx`.
 
-## Suggested Near-Term Directory Ownership
+## Directory Ownership
 
-- `rfPacketRx/` — stable UART/RF telemetry coordinator reference
-- `rfPacketTx/` — stable telemetry node reference
-- `rfCoordinator/` — new bidirectional coordinator implementation
-- `rfNode/` — new bidirectional sensor implementation
+- `rfPacketRx/` — stable RF telemetry coordinator reference (bring-up scaffolding)
+- `rfPacketTx/` — stable telemetry node reference (bring-up scaffolding)
+- `rfCoordinator/` — bidirectional coordinator implementation, SPI host bridge
+- `rfNode/` — bidirectional sensor implementation
 
-## Success Criteria
+## CC1312 Coordinator Firmware Location
 
-The first bidirectional milestone is complete when:
+This workspace lives **outside** this repo, as a separate TI Code Composer
+Studio / SimpleLink project:
 
-- `rfNode` still sends periodic telemetry
-- `rfNode` telemetry is currently sent about every 10 seconds
-- `rfCoordinator` still receives telemetry
-- ESP32 can ask the coordinator for one node status update
-- coordinator sends an addressed RF command
-- node receives it and returns a response
-- coordinator forwards that response over UART to the ESP32
+- Path: `~/Documents/sensor-station-cc1312-coordinator`
+- GitHub: `paulb-firebolt/sensor-station-cc1312-coordinator`
 
-At that point, the project can decide whether to expand command types, add retries,
-or reintroduce whitelist policy on the bidirectional RF path.
+It is **not** related to `~/Documents/sensor-2026/station-cc1312` /
+`station-esp8266`, which is a separate rewrite of the existing RAIS2.1 product
+(ESP8266 + UART host link) — a different hardware generation from this repo's
+ESP32 + SPI pairing.
+
+Per its own AGENT.md/README, `rfCoordinator` in that repo is the authoritative
+current implementation. This doc describes the migration history and frame
+layout; treat the coordinator repo itself as the source of truth for current
+behavior.
