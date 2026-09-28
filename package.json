@@ -1,0 +1,17 @@
+{
+  "name": "sensor-station-docs",
+  "private": true,
+  "type": "module",
+  "description": "Documentation site for the sensor-station firmware (Blume) with Doxygen API reference",
+  "scripts": {
+    "dev": "blume dev",
+    "build": "blume build",
+    "preview": "blume preview",
+    "api": "./scripts/build-docs.sh && rm -rf public/doxygen && mkdir -p public && cp -r doxygen/html public/doxygen",
+    "build:all": "npm run api && npm run build"
+  },
+  "devDependencies": {
+    "blume": "^2.0.3",
+    "zod": "^4.6.5"
+  }
+}
