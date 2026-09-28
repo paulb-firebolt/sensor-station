@@ -7,3 +7,5 @@ ota/
 compile_commands.json
 .cache/
 doxygen/
+.zed/
+.clangd

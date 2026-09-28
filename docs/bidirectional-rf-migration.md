@@ -189,7 +189,7 @@ AA 12 01 00 12 4B 00 12 34 56 78 00 78 56 34 12 34 12 00 00 77
 
 Normal telemetry is also temporary in Phase 2 and currently cycles through the
 synthetic PIR-style payloads documented in
-`rfPacketTx/docs/pirw-phase-2-launchpad-simulated-telemetry.md`.
+`development/pirw-phase-2-launchpad-simulated-telemetry.md`.
 
 ## First Milestone
 
