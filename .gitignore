@@ -9,3 +9,10 @@ compile_commands.json
 doxygen/
 .zed/
 .clangd
+
+# Blume docs site
+node_modules/
+dist/
+.blume/
+public/doxygen/
+.blume-verify/

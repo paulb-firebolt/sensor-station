@@ -1,10 +1,8 @@
 ---
 title: PIRW New Node Firmware Migration
 created: 2026-03-23T00:00:00Z
-updated: 2026-03-23T00:00:00Z
+lastModified: 2026-03-23T00:00:00Z
 ---
-
-# PIRW New Node Firmware Migration <!-- trunk-ignore(markdownlint/MD025) -->
 
 ## Goal
 

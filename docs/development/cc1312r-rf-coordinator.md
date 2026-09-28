@@ -1,10 +1,8 @@
 ---
 title: CC1312R Sub-1GHz RF Coordinator
 created: 2026-03-19T00:00:00Z
-updated: 2026-03-26T00:00:00Z
+lastModified: 2026-03-26T00:00:00Z
 ---
-
-# CC1312R Sub-1GHz RF Coordinator <!-- trunk-ignore(markdownlint/MD025) -->
 
 ## Overview
 
@@ -631,5 +629,5 @@ This keeps CC1310, CC1312, and ESP32 teams aligned on one temporary debug contra
 | Document                                                               | Relationship                                         |
 | ---------------------------------------------------------------------- | ---------------------------------------------------- |
 | [cc1312r-uart-to-spi-migration.md](cc1312r-uart-to-spi-migration.md)  | Full bring-up history, timing analysis, and lessons  |
-| [cc1312r-spi-interaction.md](cc1312r-spi-interaction.md)               | Function-level sequence diagrams for every flow      |
+| [cc1312r-spi-interaction.mdx](cc1312r-spi-interaction.mdx)               | Function-level sequence diagrams for every flow      |
 | [cc1312r-functional-test.md](cc1312r-functional-test.md)               | Test procedure (steps 2–3 need updating for SPI)     |

@@ -1,11 +1,8 @@
 ---
 title: Sensor MQTT People Counter Firmware
 created: 2026-03-16T15:48:00Z
-updated: 2026-03-19T00:00:00Z
+lastModified: 2026-03-19T00:00:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# Sensor MQTT People Counter Firmware
 
 This documentation site explains what this project is trying to do, which hardware paths it currently supports, and where the detailed implementation notes fit.
 
@@ -31,7 +28,7 @@ The emphasis is not just on getting packets onto the wire. The project is trying
 
 The longer-term direction is a **multi-node sensor hub**: a CC1312R sub-1GHz RF
 coordinator on the Hat2-Bus relays readings from remote sensor nodes to the ESP32-P4,
-which publishes them over MQTT. See [CC1312R RF Coordinator](cc1312r-rf-coordinator.md).
+which publishes them over MQTT. See [CC1312R RF Coordinator](development/cc1312r-rf-coordinator.md).
 
 ## Current hardware directions
 
@@ -55,23 +52,20 @@ At the moment, Ethernet is the working networking path on the P4 target. WiFi re
 
 ## How to use these docs
 
-- Start with the root [README](../README.md) for a quick repo-level summary.
-- Use [M5Stack Unit PoE P4 WiFi Setup](m5stack-unit-poe-p4-wifi-setup.md) for the current P4-specific hardware notes.
+- Start with the root [README](https://github.com/paulb-firebolt/sensor-station/blob/main/README.md) for a quick repo-level summary.
+- Use [M5Stack Unit PoE P4 WiFi Setup](m5stack-unit-poe-p4-wifi-setup.mdx) for the current P4-specific hardware notes.
 - Use [WiFi Provisioning Implementation](wifi-provisioning-implementation.md) for the deeper design and implementation writeup.
 - Use the other pages as focused technical references rather than assuming they form a linear manual yet.
 
 ## Docs toolchain
 
-This site is built with:
-
-- `mkdocs`
-- `mkdocs-material`
-- `mkdocs-awesome-nav`
-- `uv`
+This site is built with [Blume](https://useblume.dev) (Node.js 22.12+). The firmware
+API reference is generated separately by Doxygen and served at
+[/doxygen/](/doxygen/index.html).
 
 Local workflow:
 
 ```bash
-uv sync
-uv run mkdocs serve
+npm install
+make site-dev    # Doxygen + Blume dev server
 ```

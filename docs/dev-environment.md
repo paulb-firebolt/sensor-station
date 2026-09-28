@@ -1,11 +1,8 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-updated: 2026-03-17T17:30:00Z
+lastModified: 2026-03-17T17:30:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# Local Development Environment
 
 How to run a local DHCP server and MQTT broker for development and testing
 without needing external infrastructure.

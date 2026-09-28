@@ -1,11 +1,8 @@
 ---
 title: Ethernet TLS — W5500 Limitation and RMII Solution
 created: 2025-12-15T20:56:00Z
-updated: 2026-03-17T17:45:00Z
+lastModified: 2026-03-17T17:45:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# Ethernet TLS — W5500 Limitation and RMII Solution
 
 ## Summary
 

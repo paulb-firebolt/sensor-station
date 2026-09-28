@@ -1,4 +1,4 @@
-.PHONY: docs open-docs clean-docs
+.PHONY: docs open-docs clean-docs site site-dev
 
 ## Build API docs (Doxygen → doxygen/html/)
 docs:
@@ -10,4 +10,12 @@ open-docs:
 
 ## Remove generated API docs
 clean-docs:
-	rm -rf doxygen/
+	rm -rf doxygen/ public/doxygen/
+
+## Build the full docs site (Doxygen + Blume → dist/)
+site:
+	npm run build:all
+
+## Serve the docs site with hot reload (Doxygen served at /doxygen/)
+site-dev:
+	npm run api && npm run dev

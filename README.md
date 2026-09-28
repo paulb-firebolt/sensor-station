@@ -80,32 +80,47 @@ pio device monitor -b 115200
 
 ## Docs workflow
 
-### Project documentation (MkDocs)
+### Project documentation (Blume)
 
-Project documentation is built with `mkdocs-material` and `mkdocs-awesome-nav`, managed through `uv`.
+Project documentation lives in `docs/` and is built with [Blume](https://useblume.dev),
+which needs Node.js 22.12 or newer (`.nvmrc` pins 22).
 
-Install the docs environment:
+Install the docs toolchain:
 
 ```bash
-uv sync
+nvm use
+npm install
 ```
 
 Run the local docs server:
 
 ```bash
-uv run mkdocs serve
+npm run dev      # prose docs only
+make site-dev    # also builds Doxygen and serves it at /doxygen/
 ```
 
-Build the site:
+Build the site into `dist/` (Doxygen API docs included under `/doxygen/`):
 
 ```bash
-uv run mkdocs build --strict
+make site        # same as: npm run build:all
 ```
+
+Check links and config:
+
+```bash
+npx blume validate --strict
+npx blume doctor
+```
+
+Plain prose pages are `.md`. Pages that use callouts (`:::note`, `:::warning`) or
+Mermaid diagrams must be `.mdx`; in MDX, a bare `<` or `{` in prose has to be
+escaped (`&lt;`) or put in backticks.
 
 ### API reference (Doxygen)
 
 Source-level API docs are generated from inline Doxygen comments in `src/`.
-Output goes to `doxygen/` (not tracked by git) and is kept separate from the MkDocs site.
+Output goes to `doxygen/` (not tracked by git). `npm run api` copies it into
+`public/doxygen/` so the Blume site serves it at `/doxygen/`, linked from the sidebar.
 
 Requires `doxygen` to be installed (`sudo pacman -S doxygen` on Arch/Manjaro).
 
@@ -119,12 +134,12 @@ Direct scripts are also available: `./scripts/build-docs.sh` and `./scripts/open
 
 ## Key docs in this repo
 
-- `docs/m5stack-unit-poe-p4-wifi-setup.md`
+- `docs/m5stack-unit-poe-p4-wifi-setup.mdx`
 - `docs/wifi-provisioning-implementation.md`
 - `docs/ethernet-tls-and-security.md`
-- `docs/esp32-s3-ota-firware-updates.md`
+- `docs/esp32-s3-ota-firmware-updates.md`
 - `docs/mqtt-implementation-plan.md`
 
 ## Current documentation status
 
-The repository already contains useful technical notes, but they were written incrementally and do not yet form a clean narrative. The new MkDocs setup is intended to turn those notes into a proper project manual without rewriting all of the source material at once.
+The repository already contains useful technical notes, but they were written incrementally and do not yet form a clean narrative. The Blume docs site is intended to turn those notes into a proper project manual without rewriting all of the source material at once.

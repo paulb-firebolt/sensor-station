@@ -1,10 +1,8 @@
 ---
 title: MQTTS Implementation Plan
 created: 2025-12-15T14:15:00Z
-updated: 2025-12-15T14:15:00Z
+lastModified: 2025-12-15T14:15:00Z
 ---
-
-# MQTTS Implementation Plan
 
 ## Overview
 

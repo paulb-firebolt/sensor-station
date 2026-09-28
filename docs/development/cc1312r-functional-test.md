@@ -1,4 +1,6 @@
-# CC1312R Functional Test Plan
+---
+title: CC1312R Functional Test Plan
+---
 
 ## Context
 

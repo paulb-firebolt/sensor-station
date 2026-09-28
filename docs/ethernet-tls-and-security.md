@@ -1,11 +1,8 @@
 ---
 title: Ethernet TLS and Security — Implementation Notes
 created: 2025-12-15T15:31:00Z
-updated: 2026-03-17T14:00:00Z
+lastModified: 2026-03-17T14:00:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# Ethernet TLS and Security
 
 ## Status (as of 2026-03-17)
 
