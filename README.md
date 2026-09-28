@@ -78,6 +78,19 @@ pio run -e m5tab5-esp32p4 -t upload
 pio device monitor -b 115200
 ```
 
+## Branch protection
+
+`main` is protected by local git hooks: commits made directly on `main`, and pushes that
+target `main`, are refused. Work on a feature branch and open a pull request instead.
+
+The hooks are [Trunk](https://docs.trunk.io) actions (`block-main-commits`,
+`block-main-push` in `.trunk/trunk.yaml`, scripts in `.githooks/`). After cloning, install
+them once:
+
+```bash
+trunk git-hooks sync
+```
+
 ## Docs workflow
 
 ### Project documentation (Blume)
