@@ -45,6 +45,46 @@ about two to three months of continuous running. For the PoC:
 - keep the base station off cellular when you're not testing
 - check the 1NCE portal for top-ups if you want a longer soak test
 
+## Production SIM considerations
+
+The 500 MB 1NCE allowance is only for the PoC. For production, how much data
+each base station sends sets the running cost; the choice of SIM matters less.
+
+**How 1NCE top-ups work:**
+
+- **A top-up is €12 for another 500 MB and 250 SMS,** added to the remaining
+  volume. Buy it in the 1NCE portal at any time, or through the API
+  ([Create Top Up](https://help.1nce.com/api/sim-management/top-up-using-post)),
+  which suits a fleet.
+- **Auto top-up** books one automatically when a SIM drops below 20% remaining
+  data or SMS. 1NCE checks every four hours.
+- **When the data runs out,** the SIM stays registered on the network but data
+  is blocked: no new data sessions, and any open one ends. SMS still works while
+  SMS credit remains. A top-up restores data.
+- **The 18-month rule:** if the 500 MB runs out before the 10 years are up, the
+  SIM stays active for at most 18 months from that point. A top-up has to be
+  bought within that window.
+- **Throughput is capped at 1 Mbit/s.** That's plenty for telemetry but slow
+  for firmware downloads.
+
+**What it costs:** 1NCE works out at **€24 per GB**. Rough, unmeasured
+examples per base station:
+
+| Monthly data | 500 MB lasts | Cost per base station |
+| --- | --- | --- |
+| 150–300 MB (about today's cadence) | 2–3 months | About €4–7 a month |
+| About 20 MB (with change-only reporting and batching) | About 2 years | About €6 a year |
+
+- **Data optimisation is the business case for cellular.** Change-only
+  reporting and batching (see the
+  [MQTT plan's cellular section](mqtt-asyncapi-plan.md#cellular-upload-behaviour))
+  could turn a monthly running cost into almost nothing.
+- **Firmware updates count.** A roughly 1.2 MB host image, plus any CC1312 or
+  C6 update, is a noticeable share of a 500 MB block and slow at 1 Mbit/s.
+- **Compare providers once the real number is known.** Monthly IoT plans from
+  providers that quote through sales may beat €24/GB at fleet volume. The PoC
+  measurement is the figure to ask them for.
+
 ## Wiring the Unit CatM to the Unit PoE-P4
 
 Use the same end-header pins as the LD2450 (see
@@ -98,3 +138,9 @@ the generic one. Neither has been tested yet.
 - [1NCE IoT SIM Card UK](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/iot-sim-card-uk)
 - [1NCE LTE-M SIM Card](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/lte-m-sim)
 - [1NCE LTE-M coverage](https://www.1nce.com/en-us/1nce-connect/coverage/lte-m)
+- [1NCE Data volume](https://www.1nce.com/en-eu/1nce-connect/features/500-mb-data-volume)
+- [1NCE IoT SIM plan and pricing](https://www.1nce.com/en-us/1nce-connect/pricing)
+- [1NCE FAQ: what's included in the IoT Flat Rate](https://1nce.com/en-us/support/faq/what-is-included-in-the-1nce-lifetime-fee-are-there-any-additional-costs-to-be-taken-into)
+- [1NCE Developer Hub: Data Volume](https://help.1nce.com/docs/connectivity-services/connectivity-services-data-services/data-services-data-volume/)
+- [1NCE Developer Hub: Data Services features and limitations](https://help.1nce.com/docs/connectivity-services/connectivity-services-data-services/data-services-features-limitations/)
+- [1NCE API: Create Single Top Up](https://help.1nce.com/api/sim-management/top-up-using-post)
