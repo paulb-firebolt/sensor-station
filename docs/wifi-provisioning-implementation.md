@@ -1,11 +1,8 @@
 ---
 title: WiFi Provisioning Implementation - Complete Guide
 created: 2025-12-15T14:18:00Z
-updated: 2025-12-15T14:18:00Z
+lastModified: 2025-12-15T14:18:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# WiFi Provisioning Implementation - Complete Guide
 
 ## Overview
 

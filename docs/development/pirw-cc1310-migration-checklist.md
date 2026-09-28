@@ -1,10 +1,8 @@
 ---
 title: PIRW CC1310 Migration Checklist
 created: 2026-03-24T00:00:00Z
-updated: 2026-03-24T00:00:00Z
+lastModified: 2026-03-24T00:00:00Z
 ---
-
-# PIRW CC1310 Migration Checklist <!-- trunk-ignore(markdownlint/MD025) -->
 
 This is the short execution checklist for the PIRW CC1310 migration. It is
 organized so progress can be marked phase by phase while keeping the LaunchPad

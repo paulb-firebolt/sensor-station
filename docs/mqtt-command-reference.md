@@ -1,10 +1,8 @@
 ---
 title: MQTT Command Reference
 created: 2026-03-24T00:00:00Z
-updated: 2026-03-24T00:00:00Z
+lastModified: 2026-03-24T00:00:00Z
 ---
-
-# MQTT Command Reference <!-- trunk-ignore(markdownlint/MD025) -->
 
 All commands are sent as JSON to the device command topic:
 

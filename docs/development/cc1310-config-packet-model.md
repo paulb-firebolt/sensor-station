@@ -1,4 +1,6 @@
-# CC1310 Config Packet Model
+---
+title: CC1310 Config Packet Model
+---
 
 This workspace now defines a compact config transport that is reusable across
 sensor types while keeping the actual parameter lists sensor-specific.

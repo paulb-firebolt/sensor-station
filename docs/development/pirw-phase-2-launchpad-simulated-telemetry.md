@@ -1,10 +1,8 @@
 ---
 title: PIRW Phase 2 LaunchPad Simulated Telemetry
 created: 2026-03-24T00:00:00Z
-updated: 2026-03-24T00:00:00Z
+lastModified: 2026-03-24T00:00:00Z
 ---
-
-# PIRW Phase 2 LaunchPad Simulated Telemetry <!-- trunk-ignore(markdownlint/MD025) -->
 
 ## Purpose
 

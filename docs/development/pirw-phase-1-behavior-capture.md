@@ -1,10 +1,8 @@
 ---
 title: PIRW Phase 1 Behavior Capture
 created: 2026-03-23T00:00:00Z
-updated: 2026-03-23T00:00:00Z
+lastModified: 2026-03-23T00:00:00Z
 ---
-
-# PIRW Phase 1 Behavior Capture <!-- trunk-ignore(markdownlint/MD025) -->
 
 ## Purpose
 

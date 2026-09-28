@@ -1,12 +1,8 @@
 ---
 title: ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 created: 2026-09-28T00:00:00Z
-updated: 2026-09-28T00:00:00Z
+lastModified: 2026-09-28T00:00:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-
-# ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 
 Plan for adding an external ESP32-C6 to the M5Stack Unit PoE P4 so the P4 can
 use WiFi alongside PoE Ethernet. The C6 runs Espressif's **esp-hosted** slave
@@ -78,11 +74,12 @@ side headers):
 Pins used on-board and not available: RMII 28–31, 34, 35, 49–52 (`ETH.h` P4
 defaults plus `network.h`), LEDs 15/16/17, and the factory-reset button on 45.
 
-!!! note "Correction"
-    `cc1312r-rf-coordinator.md`, `cc1312r-uart-to-spi-migration.md` and
-    `ld2450-mmwave-sensor.md` used to list **G43/G44 as the UART0 console**. The
-    silkscreen puts UART0 on **G37/G38**, and G43/G44 are on the end header as
-    SDMMC pins. Those tables were corrected on 2026-09-28.
+:::note[Correction]
+`cc1312r-rf-coordinator.md`, `cc1312r-uart-to-spi-migration.md` and
+`ld2450-mmwave-sensor.md` used to list **G43/G44 as the UART0 console**. The
+silkscreen puts UART0 on **G37/G38**, and G43/G44 are on the end header as
+SDMMC pins. Those tables were corrected on 2026-09-28.
+:::
 
 ---
 
@@ -119,12 +116,13 @@ Why this is preferred:
 - All six SDIO lines are on one header, so the wires can be kept short and of
   equal length.
 
-!!! warning "Check the grey pins' I/O voltage first"
+:::warning[Check the grey pins' I/O voltage first]
 On the ESP32-P4 the SD pins (39–48) are on a separately powered I/O domain,
 which can be run at 1.8 V for UHS SD cards. The grey colouring may mean
 exactly that. **Before wiring the C6, measure a grey pin driven HIGH.** If
 it reads about 1.8 V rather than 3.3 V, don't connect it directly to the
 C6's 3.3 V I/O. Use Option B.
+:::
 
 ### Option B (fallback) — Tab5 layout for the C6, CC1312 moves to the yellow pins
 
@@ -288,7 +286,7 @@ isn't confused with the device ID.
 
 ### 7. Documentation
 
-- `docs/m5stack-unit-poe-p4-wifi-setup.md`: rewrite. It currently states that
+- `docs/m5stack-unit-poe-p4-wifi-setup.mdx`: rewrite. It currently states that
   WiFi is impossible on this board.
 - `docs/development/cc1312r-rf-coordinator.md` (pin allocation table) and
   `cc1312r-uart-to-spi-migration.md`: add the C6 pins. (The console-pin error

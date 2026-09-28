@@ -1,16 +1,14 @@
 ---
 title: Thermal Occupancy Counter - Hardware Configuration
 created: 2025-12-16T14:34:00Z
-updated: 2026-03-17T19:09:00Z
+lastModified: 2026-03-17T19:09:00Z
 ---
-
-<!-- trunk-ignore(markdownlint/MD025) -->
-# Thermal Occupancy Counter - Hardware Configuration
 
 ## Overview
 
-!!! info
-    This was an early piece of work done as a PoC to prove we could connect and collect data using SPI, emulating a thermal sensor which we do not have.
+:::info
+This was an early piece of work done as a PoC to prove we could connect and collect data using SPI, emulating a thermal sensor which we do not have.
+:::
 
 The system consists of two ESP32 boards communicating via SPI:
 
@@ -73,7 +71,7 @@ GND ───────────────────────→ GND
 ## Connection Instructions
 
 1. **Power**: Both boards connected to USB power
-2. **SPI Lines**: Use short jumper wires (ideally <10cm)
+2. **SPI Lines**: Use short jumper wires (ideally &lt;10cm)
 3. **Common Ground**: Ensure GND is connected between both boards
 4. **Wire Order**: Color-code wires for clarity:
    - Red: Power
@@ -140,7 +138,7 @@ File: `thermal_detector.h` (ESP32-S3 project)
 | Issue               | Cause                  | Solution                                                    |
 | ------------------- | ---------------------- | ----------------------------------------------------------- |
 | No data received    | SPI wiring loose       | Check all 5 connections (MOSI, MISO, SCLK, CS, GND)         |
-| Inconsistent counts | Wires too long         | Shorten to <10cm or reduce SPI frequency to 1 MHz           |
+| Inconsistent counts | Wires too long         | Shorten to &lt;10cm or reduce SPI frequency to 1 MHz           |
 | Crashes on boot     | GPIO conflict          | Verify pins don't overlap with Ethernet (11-14) or SD (4-7) |
 | All zeros detected  | Frame not transmitting | Verify WT32 is generating frames (check WT32 serial output) |
 
@@ -184,7 +182,7 @@ The detector pipeline is **hardware-agnostic** - it expects 16-bit thermal data 
 
 ## References
 
-- **ESP32-S3 DevKit Pinout**: <https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html>
-- **WT32-ETH01 Pinout**: <https://docs.waveshare.com/wiki/WT32-ETH01>
+- **ESP32-S3 DevKit Pinout**: [https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/hw-reference/esp32s3/user-guide-devkitc-1.html)
+- **WT32-ETH01 Pinout**: [https://docs.waveshare.com/wiki/WT32-ETH01](https://docs.waveshare.com/wiki/WT32-ETH01)
 - **HTPA80×64d Datasheet**: Available from Heimann Sensor
 - **Project Documentation**: See `docs/` folder
