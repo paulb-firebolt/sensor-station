@@ -193,6 +193,54 @@ checking, long wires pick up noise, and each device needs its own chip-select.
 - **Enclosure.** A cut-out or cover so the header is reachable without opening
   the case.
 
+## Cellular option
+
+A cellular variant is realistic, because the current product already has one.
+RAIS2.1 base stations take a retrofit **cellular expansion module built on a
+Nordic nRF9160** (LTE-M/NB-IoT). It connects to the base station over a
+115200 baud serial link, carries a SIM, and runs its own firmware
+(`cell-v1.0.0.0`). Production programming and QC processes already exist for
+it. The v3 requirements also refer to existing Wi-Fi and cellular variants
+(`NET-1`).
+
+**Two ways to build it for v3:**
+
+1. **An add-on on the [expansion header](#expansion-header).** The UART plus
+   power, reset and wake lines carry the modem. The main board and its
+   certification stay the same, and it matches the RAIS2.1 approach.
+2. **A populate-option footprint on the main board** for a pre-certified
+   LTE-M/NB-IoT module, fitted only on the cellular SKU. The nRF9160/nRF9151
+   family is the obvious candidate given the precedent; we'd value your
+   recommendation.
+
+**Hardware points either way:**
+
+- an external LTE antenna connector
+- **coexistence with the 868/915 MHz radio:** LTE bands 20, 8 and 5 sit close
+  to the sub-GHz band, so the design needs isolation and filtering between the
+  two radios
+- a nano-SIM holder, or an eSIM (MFF2)
+- supply capacity for the modem's transmit current peaks
+- a cellular site probably has no PoE, so the USB-C input must carry the full
+  load (see [Power](#power))
+
+**Certification:** a pre-certified module keeps the radio testing manageable,
+but the end product still needs RED/UKCA and FCC. Some markets and networks
+also require carrier or PTCRB/GCF approval. US carrier approval is likely the
+biggest cost and schedule item for a cellular SKU.
+
+**Data cost:** the base station uploads small messages every 10 s. That
+cadence, plus TLS overhead, sets the monthly data bill, so the cellular SKU
+may upload less often.
+
+**Firmware (our side):** the simplest path brings the modem up as a network
+interface over PPP, so the existing MQTT-over-TLS code runs unchanged.
+Arduino-ESP32 3.x includes a `PPP` library with built-in profiles for SIMCom
+(SIM7000/7070/7600) and Quectel BG96 modems. An nRF91 module would need its
+generic profile and PPP-capable modem firmware, which we'd need to confirm.
+The alternative is to keep the nRF9160's own firmware and serial protocol.
+Interface priority would be Ethernet, then Wi-Fi, then cellular (`NET-3`).
+
 ## Power
 
 | Product | Source | Budget or target |
@@ -202,6 +250,10 @@ checking, long wires pick up noise, and each device needs its own chip-select.
 
 A parameterised energy model for the sensor, validated against measured
 current, is a project deliverable (`PWR-4`).
+
+A cellular base station is likely to run from USB-C, because sites that need
+cellular usually have no wired network and so no PoE. Size the USB-C path for
+the modem's transmit peaks as well as the rest of the board.
 
 ## RF, antennas and certification
 
@@ -250,8 +302,9 @@ We still need to supply these before you can quote:
    powered I/O group on the P4. We haven't yet measured whether the M5Stack
    runs it at 1.8 V or 3.3 V.
 4. **Module or chip-down** for the CC1312R, the CC1310 and the Wi-Fi radio.
-5. **Cellular variant.** The base-station requirements mention existing Wi-Fi
-   and cellular variants. Is a cellular SKU in scope for v3?
+5. **Cellular variant.** Add-on on the expansion header, or a populate-option
+   module on the main board? Which module do you recommend? Is a US cellular
+   SKU, with carrier approval, in scope? See [Cellular option](#cellular-option).
 6. **Sensor OTA.** Is external flash needed on the sensor to support future
    remote updates?
 7. **PoE class with add-ons.** 802.3af Class 1 allows up to 3.84 W at the
