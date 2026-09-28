@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke="#0d9488" stroke-linecap="round">
+  <!-- Radio mast with signal arcs: the base station and its sub-1 GHz link -->
+  <circle cx="16" cy="12" r="3" fill="#0d9488" stroke="none"/>
+  <path d="M16 15V28M11 28H21" stroke-width="3"/>
+  <path d="M11.05 7.05A7 7 0 0 0 11.05 16.95M20.95 7.05A7 7 0 0 1 20.95 16.95" stroke-width="2.5"/>
+  <path d="M7.51 3.51A12 12 0 0 0 7.51 20.49M24.49 3.51A12 12 0 0 1 24.49 20.49" stroke-width="2.5"/>
+</svg>
