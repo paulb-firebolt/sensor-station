@@ -19,6 +19,9 @@ export default defineConfig({
 
   lastModified: "git",
 
+  // No analytics adapter is configured, so "Was this page helpful?" answers would be discarded.
+  feedback: false,
+
   navigation: {
     // Doxygen HTML is copied into public/doxygen by `npm run api`.
     featured: [
@@ -36,8 +39,8 @@ export default defineConfig({
         label: "Requirements",
         items: [
           "/v3-requirements-gap-review",
-          "/2026 PIR v3 Technical Requirements",
-          "/2026 RAIS Base Station v3 Technical Requirements",
+          "/pir-v3-technical-requirements",
+          "/rais-base-station-v3-technical-requirements",
         ],
       },
       {
