@@ -22,9 +22,28 @@ testing has been done.
 
 ## SIM
 
-Use an **IoT SIM with LTE-M or NB-IoT enabled.** Many consumer SIMs don't
-support those networks. IoT SIM providers such as 1NCE, Hologram or emnify
-offer them. Check LTE-M coverage where you'll test.
+The SIM must support **LTE-M or NB-IoT**, not just ordinary 4G. The SIM7080G
+in the Unit CatM can only use those networks, and a SIM has to be enabled for
+them specifically. Camera and router data SIMs sold as "4G LTE/5G" usually
+don't say whether they support LTE-M, so they may not work.
+
+**Suggested: [1NCE IoT Lifetime Flat](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/iot-sim-card-uk)**
+
+- €12 one-off plus €1 for the SIM card, for 10 years
+- 500 MB and 250 SMS included for the whole lifetime
+- UK coverage includes LTE-M and NB-IoT (plus 2G, 3G and 4G), switching
+  automatically ([LTE-M SIM](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/lte-m-sim),
+  [LTE-M coverage](https://www.1nce.com/en-us/1nce-connect/coverage/lte-m))
+- works with the Unit CatM and the nRF9151 DK
+- sold as a business product, so ordering probably needs a company account
+
+**Watch the 500 MB allowance.** At today's cadence (`cc1312/nodes` every 10 s),
+a rough, unmeasured estimate is 5–10 MB a day, which would use up 500 MB in
+about two to three months of continuous running. For the PoC:
+
+- measure data use over a few hours, not days, and extrapolate
+- keep the base station off cellular when you're not testing
+- check the 1NCE portal for top-ups if you want a longer soak test
 
 ## Wiring the Unit CatM to the Unit PoE-P4
 
@@ -76,3 +95,6 @@ the generic one. Neither has been tested yet.
 - [Nordic Serial Modem: Cellular PPP modem](https://nrfconnectdocs.nordicsemi.com/addons/addon-serial_modem/latest/app/sm_cellular_modem.html)
 - [Nordic Serial Modem: UART configuration](https://nrfconnectdocs.nordicsemi.com/addons/addon-serial_modem/latest/uart_configuration.html)
 - [Waveshare SIM7080G Cat-M/NB-IoT HAT wiki](https://www.waveshare.com/wiki/SIM7080G_Cat-M/NB-IoT_HAT)
+- [1NCE IoT SIM Card UK](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/iot-sim-card-uk)
+- [1NCE LTE-M SIM Card](https://www.1nce.com/en-eu/1nce-connect/features/sim-cards/lte-m-sim)
+- [1NCE LTE-M coverage](https://www.1nce.com/en-us/1nce-connect/coverage/lte-m)
