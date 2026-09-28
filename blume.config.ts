@@ -57,6 +57,7 @@ export default defineConfig({
               "/development/cc1312r-rf-coordinator",
               "/development/cc1312r-spi-interaction",
               "/development/cc1312r-uart-to-spi-migration",
+              "/development/cellular-poc",
               "/development/esp32-c6-wifi-coprocessor-plan",
               "/development/mqtt-asyncapi-plan",
               "/development/pirw-cc1310-migration-checklist",
