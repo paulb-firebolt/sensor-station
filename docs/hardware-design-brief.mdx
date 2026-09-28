@@ -195,23 +195,27 @@ checking, long wires pick up noise, and each device needs its own chip-select.
 
 ## Cellular option
 
-A cellular variant is realistic, because the current product already has one.
-RAIS2.1 base stations take a retrofit **cellular expansion module built on a
-Nordic nRF9160** (LTE-M/NB-IoT). It connects to the base station over a
-115200 baud serial link, carries a SIM, and runs its own firmware
-(`cell-v1.0.0.0`). Production programming and QC processes already exist for
-it. The v3 requirements also refer to existing Wi-Fi and cellular variants
-(`NET-1`).
+A cellular variant would be attractive for sites where there's no usable
+wired network or Wi-Fi. We haven't shipped one since acquiring the product
+line, and we don't know of any cellular units in the field or in stock.
+
+There is a documented starting point, though. The RAIS2.1 production scripts
+describe a retrofit **cellular expansion module built on a Nordic nRF9160**
+(LTE-M/NB-IoT). It connected to the base station over a 115200 baud serial
+link, carried a SIM, and ran its own firmware (`cell-v1.0.0.0`). Treat it as a
+design reference, not proven hardware. The v3 requirements also refer to
+existing Wi-Fi and cellular variants (`NET-1`), but that wording predates this
+review.
 
 **Two ways to build it for v3:**
 
 1. **An add-on on the [expansion header](#expansion-header).** The UART plus
    power, reset and wake lines carry the modem. The main board and its
-   certification stay the same, and it matches the RAIS2.1 approach.
+   certification stay the same, and it follows the documented RAIS2.1 design.
 2. **A populate-option footprint on the main board** for a pre-certified
    LTE-M/NB-IoT module, fitted only on the cellular SKU. The nRF9160/nRF9151
-   family is the obvious candidate given the precedent; we'd value your
-   recommendation.
+   family would match the RAIS2.1 reference, but we have no hands-on experience
+   with it and would value your recommendation.
 
 **Hardware points either way:**
 
@@ -238,7 +242,8 @@ interface over PPP, so the existing MQTT-over-TLS code runs unchanged.
 Arduino-ESP32 3.x includes a `PPP` library with built-in profiles for SIMCom
 (SIM7000/7070/7600) and Quectel BG96 modems. An nRF91 module would need its
 generic profile and PPP-capable modem firmware, which we'd need to confirm.
-The alternative is to keep the nRF9160's own firmware and serial protocol.
+The alternative is to revive the RAIS2.1 module's firmware and serial
+protocol, if its source can be found.
 Interface priority would be Ethernet, then Wi-Fi, then cellular (`NET-3`).
 
 ## Power
