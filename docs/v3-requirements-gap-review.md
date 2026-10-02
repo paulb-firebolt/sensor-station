@@ -50,6 +50,7 @@ copying the requirement text.
 | CR-13 | Sensor | New requirement | Decision | Node settings must survive a power cycle (config persistence). | Not implemented on either node project (config persistence section below). | applied (sensor v2) |
 | CR-14 | Sensor | RF-2 scope | Question | Is remote sensor firmware update in scope for v3? | Only a design note exists (sensor OTA section below). | commented (sensor v2) |
 | CR-15 | Sensor | FW-2 | Internal | Switch the PoC from SimpleLink Long Range to the ~50 kbps target PHY. No document change. | Conflict 2 below. | noted (sensor v2 footer); PoC work open |
+| CR-16 | Sensor, Base | Sensor RF-2; Base A.6 rollout | Decision | Drop backward compatibility with installed PIRW2/RAIS2.1 hardware. A v3 upgrade replaces every component on site, so the new PHY doesn't need to be deployable to installed base stations by firmware alone. | Agreed with JJ on 2026-10-02. It also removes the conflict between RF-2 and the FW-2 PHY, and the 868 MHz problem with installed 902–928 MHz antennas. | agreed; Confluence edit pending |
 
 ## Applied change sets
 
