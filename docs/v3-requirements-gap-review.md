@@ -44,18 +44,19 @@ copying the requirement text.
 | CR-07 | Base | New requirement | Decision | Add an expansion header for directly attached sensors and add-ons (priority to agree). | [Brief: expansion header](hardware-design-brief.mdx#expansion-header). | applied (base v2) |
 | CR-08 | Base | New requirement, NET-3 | Decision | Base-station availability through an MQTT Last Will, rather than the current external check that the base station is on the site Wi-Fi. | The SSID check can't work for Ethernet or cellular units. [MQTT plan: liveness](development/mqtt-asyncapi-plan.md#liveness-three-separate-links). To check: whether the ThingsBoard device MQTT API honours a Last Will (AWS IoT Core does). | applied (base v2) |
 | CR-09 | Base | PWR-1, A.5 | Question | Does 802.3af Class 1 leave enough headroom for the expansion header and add-ons? | [Brief: open question 7](hardware-design-brief.mdx#open-questions). | commented (base v2) |
-| CR-10 | Sensor | RF-2 rationale | Correction | The concentrator is a CC1312R, not "CC13x0". | The base-station page's own baseline says CC1312R. | proposed |
-| CR-11 | Sensor | A.1, base-station compatibility | Correction | Answer the open question "can the concentrator be field-reflashed?": yes on RAIS2.1, and it's required in v3 by PLT-2. | Base-station page baseline and PLT-2. | proposed |
-| CR-12 | Sensor | FW-1, PWR-6 | Decision | Allow a slow sensor heartbeat (e.g. every 1–6 h, carrying battery voltage and RSSI) as an exception to "transmit only when non-zero". | Under FW-1 a healthy sensor in a quiet spot looks the same as a dead one. [MQTT plan: liveness](development/mqtt-asyncapi-plan.md#liveness-three-separate-links). | proposed |
-| CR-13 | Sensor | New requirement | Decision | Node settings must survive a power cycle (config persistence). | Not implemented on either node project (config persistence section below). | proposed |
-| CR-14 | Sensor | RF-2 scope | Question | Is remote sensor firmware update in scope for v3? | Only a design note exists (sensor OTA section below). | proposed |
-| CR-15 | Sensor | FW-2 | Internal | Switch the PoC from SimpleLink Long Range to the ~50 kbps target PHY. No document change. | Conflict 2 below. | proposed |
+| CR-10 | Sensor | RF-2 rationale | Correction | The concentrator is a CC1312R, not "CC13x0". | The base-station page's own baseline says CC1312R. | applied (sensor v2) |
+| CR-11 | Sensor | A.1, base-station compatibility | Correction | Answer the open question "can the concentrator be field-reflashed?": yes on RAIS2.1, and it's required in v3 by PLT-2. | Base-station page baseline and PLT-2. | applied (sensor v2) |
+| CR-12 | Sensor | FW-1, PWR-6 | Decision | Allow a slow sensor heartbeat (e.g. every 1–6 h, carrying battery voltage and RSSI) as an exception to "transmit only when non-zero". | Under FW-1 a healthy sensor in a quiet spot looks the same as a dead one. [MQTT plan: liveness](development/mqtt-asyncapi-plan.md#liveness-three-separate-links). | applied (sensor v2) |
+| CR-13 | Sensor | New requirement | Decision | Node settings must survive a power cycle (config persistence). | Not implemented on either node project (config persistence section below). | applied (sensor v2) |
+| CR-14 | Sensor | RF-2 scope | Question | Is remote sensor firmware update in scope for v3? | Only a design note exists (sensor OTA section below). | commented (sensor v2) |
+| CR-15 | Sensor | FW-2 | Internal | Switch the PoC from SimpleLink Long Range to the ~50 kbps target PHY. No document change. | Conflict 2 below. | noted (sensor v2 footer); PoC work open |
 
 ## Applied change sets
 
 | Date | Page | Confluence version | Rows | Notes |
 | --- | --- | --- | --- | --- |
 | 2026-10-02 | Base station | 2 | CR-01 to CR-05, CR-07, CR-08 edited; CR-06, CR-09 commented | One inline comment per row plus a footer summary. A reply on CR-08 corrects an overstated claim about ThingsBoard Last Will support. |
+| 2026-10-02 | Sensor | 2 | CR-10 to CR-13 edited; CR-14 commented | One inline comment per row plus a footer summary, which also notes CR-15 (PoC still on SimpleLink Long Range). |
 
 ## Evidence (original gap review, 2026-09-07)
 
