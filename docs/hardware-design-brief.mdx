@@ -2,7 +2,7 @@
 title: Sensor Station v3 — Hardware Design Brief
 description: Starting brief for a hardware design partner covering the v3 base station and battery PIR sensor node.
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-09-28T00:00:00Z
+lastModified: 2026-10-02T00:00:00Z
 ---
 
 We want a design partner to turn our working proof of concept (PoC) into two
@@ -301,7 +301,21 @@ We still need to supply these before you can quote:
 - [ ] Volumes per product and per SKU (868 / 915 MHz; Ethernet, Wi-Fi and cellular variants)
 - [ ] Target unit cost per product
 - [ ] Schedule and prototype milestones
-- [ ] Enclosure responsibility (in-house or yours), including the sensor's mounting bracket and branding
+- [ ] Confirm the enclosure supplier (likely another company within our group) and the hand-off between them and you
+
+## Enclosure
+
+The enclosures for both products may be designed by another company within our
+group rather than by you. If so, we'd need you to work with them on:
+
+- the PCB outline, mounting points, and connector, LED and antenna positions
+- antenna keep-out and clearance requirements, from your RF design
+- antenna tuning and RF verification with their final enclosure fitted
+  (`RF-4`, `ENV-6`)
+- for the sensor: the sealed openings (Fresnel lens, reset, LED light pipe;
+  `ENV-2`) and battery access without breaking the IP65 seal (`ENV-5`)
+- for the base station: RJ45, USB-C, both antenna connectors, status LEDs and
+  the label area (`MEC-1`), plus access to the expansion header
 
 ## Open questions
 
