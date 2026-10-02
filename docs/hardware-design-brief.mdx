@@ -17,6 +17,33 @@ PoC hardware is, what it has proven, and what we still need to decide with you.
 - advice on module versus chip-down choices, with certification cost in mind
 - a view on what's missing from this brief before you can quote
 
+## How we'd like to work
+
+1. **Design and development with you,** including prototype builds. The first
+   run would be about **5 base stations and 10 sensors**, for our own testing
+   and for certification.
+2. **A golden sample and a complete design package** once the design is
+   final. We expect to take that package to a volume manufacturer, probably in
+   China, for larger runs.
+
+That means the design has to transfer cleanly to another factory:
+
+- parts that are easy to buy through volume supply chains, including Chinese
+  distributors, with approved alternates for passives and power parts
+- standard PCB processes and stack-ups that any volume board house can build
+- a full manufacturing package:
+  - native CAD files, Gerbers and assembly drawings
+  - pick-and-place data
+  - a BOM with manufacturer part numbers and alternates
+  - the test specification and test-fixture design
+  - the programming procedure
+- design files and IP owned by us
+- your support during the transfer, such as answering the volume manufacturer's
+  questions and reviewing first articles
+
+We'd like to know whether this model works for you, and how you'd price the
+prototype runs and the transfer support.
+
 The formal product requirements are the
 [PIR Sensor v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185/PIR+Sensor+v3+Technical+Requirements+and+Design+Proposals+for+PIRW+2026+Redesign) and
 [RAIS Base Station v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793/RAIS+Base+Station+v3+Technical+Requirements+for+PIRW+2026+Redesign)
@@ -113,7 +140,7 @@ v3 changes the sensor significantly:
 | Range | ≥ 99 % packet delivery at 50 m non-line-of-sight, 15–20 dB better link budget than PIRW2 (`RF-1`) |
 | Bands | One design for 868 MHz and 915 MHz; antenna measured in both bands in the final enclosure (`RF-4`, `ENV-6`) |
 | Enclosure | IP65 by design, not potting; UV-stable, black and white; −20 °C to +60 °C proposed (`ENV-1`, `ENV-3`) |
-| Sealed openings | Fresnel lens as the IR window; membrane or magnetic reset; sealed LED light pipe (`ENV-2`) |
+| Sealed openings | Fresnel lens as the IR window; LEDs visible through a translucent case or a sealed light pipe; reset by a magnet-operated reed switch rather than a button (`ENV-2`) |
 
 The larger CR123A board allows a bigger ground plane, and so a properly tuned
 antenna. We estimate that's worth 2–3 dB of the range target. The rest is the
@@ -124,6 +151,22 @@ value your view on whether the target is achievable (see
 
 Over 3 years, 1,200 mAh is an average of about 46 µA, so radio traffic, not
 sleep current, dominates the battery budget.
+
+**LEDs and reset without breaking the seal.** PIRW2 has LEDs and a reset
+button. To keep the IP65 rating, v3 would have no openings for them:
+
+- **LEDs:**
+  - shine through a translucent case, or through a sealed light pipe
+  - a translucent case suits the white variant; the black variant probably
+    needs a light pipe or a clear window
+  - indications should be short pulses, to protect the battery budget
+- **Reset:**
+  - a reed switch operated by a magnet held against a marked spot on the case
+  - a reed switch draws no standby current, which suits the 5 µA sleep target
+  - glass reeds can crack in a drop, so it needs a shock-rated part
+  - a nanopower Hall-effect switch is the alternative, but it draws current
+    continuously
+  - a hold time of a few seconds stops a stray magnet causing a reset
 
 ## Interfaces and pin map
 
@@ -371,7 +414,7 @@ We still need to supply these before you can quote:
 - [ ] Volumes per product and per SKU (868 / 915 MHz; Ethernet, Wi-Fi and cellular variants)
 - [ ] Target unit cost per product
 - [ ] Schedule and prototype milestones
-- [ ] Confirm the enclosure supplier (likely another company within our group) and the hand-off between them and you
+- [ ] Introduce our group's enclosure company and agree the hand-off between them and you
 
 ## Requirements still to define
 
@@ -397,11 +440,12 @@ We know a quote needs these, and we'll confirm them with you:
   field-return target
 - [ ] **BOM rules:** no NRND or end-of-life parts, second sources for passives and
   power parts, preferred distributors, and lifecycle checks
-- [ ] **Design files and deliverables:** ownership of schematics, layout and
-  native CAD files; CAD tool preference; Gerbers, assembly files, DFM/DFT
-  report, test specification and certification test plan
-- [ ] **Prototype phases and quantities:** EVT, DVT and PVT counts per SKU, who
-  builds them, and who holds the certification lab budget
+- [ ] **Design files and deliverables:** the transfer package for the volume
+  manufacturer (see [How we'd like to work](#how-wed-like-to-work)), CAD tool
+  preference, DFM/DFT report and certification test plan
+- [ ] **Prototype phases and quantities:** the first run is about 5 base
+  stations and 10 sensors. Still to agree: how many rounds, the split per SKU,
+  and who holds the certification lab budget.
 - [ ] **Measured PoC power,** and the expansion header's power allowance per rail
 - [ ] **Range test definition:** what an "impression" is (a PIR trigger or a
   radio packet, and whether triggers are aggregated), what "50 m
@@ -410,15 +454,17 @@ We know a quote needs these, and we'll confirm them with you:
 
 ## Enclosure
 
-The enclosures for both products may be designed by another company within our
-group rather than by you. If so, we'd need you to work with them on:
+We expect another company within our group to design, and probably
+manufacture, the enclosures for both products. We'd need you to work with them
+on:
 
 - the PCB outline, mounting points, and connector, LED and antenna positions
 - antenna keep-out and clearance requirements, from your RF design
 - antenna tuning and RF verification with their final enclosure fitted
   (`RF-4`, `ENV-6`)
-- for the sensor: the sealed openings (Fresnel lens, reset, LED light pipe;
-  `ENV-2`) and battery access without breaking the IP65 seal (`ENV-5`)
+- for the sensor: the Fresnel lens, the LED window or light pipe and the reed
+  switch's magnet target (`ENV-2`), and battery access without breaking the
+  IP65 seal (`ENV-5`)
 - for the base station: RJ45, USB-C, both antenna connectors, status LEDs and
   the label area (`MEC-1`), plus access to the expansion header
 - RF-transparent materials near the antennas, including an RF-transparent black
@@ -470,7 +516,13 @@ group rather than by you. If so, we'd need you to work with them on:
     the enclosure company work to?
 12. **Firmware split.** We write the product firmware. Who writes board
     bring-up, factory-test and CC1312 bootloader-integration firmware?
-13. **Sensor optics.** PIR element type, lens design and supplier, detection
+13. **Sensor LEDs and reset.** Reed switch or nanopower Hall switch for the
+    sealed reset? Translucent case or light pipe for the LEDs, especially on
+    the black variant?
+14. **Volume transfer.** Have you handed designs over to volume manufacturers
+    in China before? What do you include in a transfer package, and what
+    support do you offer during the first volume build?
+15. **Sensor optics.** PIR element type, lens design and supplier, detection
     pattern and mounting height. Do you cover optics, or should we find a
     specialist?
 
