@@ -17,6 +17,33 @@ PoC hardware is, what it has proven, and what we still need to decide with you.
 - advice on module versus chip-down choices, with certification cost in mind
 - a view on what's missing from this brief before you can quote
 
+## How we'd like to work
+
+1. **Design and development with you,** including prototype builds. The first
+   run would be about **5 base stations and 10 sensors**, for our own testing
+   and for certification.
+2. **A golden sample and a complete design package** once the design is
+   final. We expect to take that package to a volume manufacturer, probably in
+   China, for larger runs.
+
+That means the design has to transfer cleanly to another factory:
+
+- parts that are easy to buy through volume supply chains, including Chinese
+  distributors, with approved alternates for passives and power parts
+- standard PCB processes and stack-ups that any volume board house can build
+- a full manufacturing package:
+  - native CAD files, Gerbers and assembly drawings
+  - pick-and-place data
+  - a BOM with manufacturer part numbers and alternates
+  - the test specification and test-fixture design
+  - the programming procedure
+- design files and IP owned by us
+- your support during the transfer, such as answering the volume manufacturer's
+  questions and reviewing first articles
+
+We'd like to know whether this model works for you, and how you'd price the
+prototype runs and the transfer support.
+
 The formal product requirements are the
 [PIR Sensor v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185/PIR+Sensor+v3+Technical+Requirements+and+Design+Proposals+for+PIRW+2026+Redesign) and
 [RAIS Base Station v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793/RAIS+Base+Station+v3+Technical+Requirements+for+PIRW+2026+Redesign)
@@ -49,9 +76,8 @@ flowchart LR
 
 Every link is two-way. The base station sends ACKs and settings to sensors,
 and the cloud sends commands and firmware updates down. Both products replace
-an existing line (the PIRW2 sensor and the RAIS2.1 base station). v3 sensors
-must also work with base stations already installed in the field, after a
-concentrator firmware update (`RF-2`).
+an existing line (the PIRW2 sensor and the RAIS2.1 base station). An upgrade to v3 replaces every component on site, so v3
+doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations.
 
 ## Base station
 
@@ -62,11 +88,13 @@ concentrator firmware update (`RF-2`).
 | Host MCU | [M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4) (SKU U213) | ESP32-P4NRW32: MQTT over TLS, OTA, web setup, RF node management | Working |
 | Ethernet + PoE | On the same board | IP101GRI PHY over RMII; PoE input (board supplies up to 6 W) | Working, including MQTT over TLS |
 | Sub-1 GHz concentrator | [TI LAUNCHXL-CC1312R1](https://www.ti.com/tool/LAUNCHXL-CC1312R1) | CC1312R runs the coordinator firmware and forwards node data to the host over SPI | Working on the bench with CC1310 nodes |
-| Wi-Fi | ESP32-C6 (dev board) | Wi-Fi co-processor for the P4, using Espressif's esp-hosted firmware over SDIO | **Planned, not yet built** |
+| Wi-Fi | ESP32-C6 (dev board) | Wi-Fi co-processor for the P4, using Espressif's ESP-Hosted-MCU firmware over SDIO | **Planned, not yet built** |
 
 The P4 was chosen for the PoC because its RMII Ethernet runs MQTT over TLS
-reliably. An earlier ESP32-S3 + W5500 SPI Ethernet build couldn't, because of
-limits in the Arduino networking library it used. The ESP32-P4 has **no radio
+reliably. An earlier ESP32-S3 + W5500 SPI Ethernet build couldn't, because the
+Arduino WIZnet library it used runs TCP/IP inside the W5500 and couldn't carry
+TLS. That's a library limitation, not a hardware one: the W5500 also works
+through the ESP32's own network stack. The ESP32-P4 has **no radio
 of its own**, so Wi-Fi needs a second chip. That's why the C6 is in the plan.
 
 ### Not wanted in production
@@ -105,16 +133,39 @@ v3 changes the sensor significantly:
 | Area | v3 requirement |
 | --- | --- |
 | Battery | CR123A (Li-MnO₂, 3 V), user-replaceable, standard holder (`PWR-2`) |
-| Battery life | ≥ 3 years at 15,000 impressions/day, ≤ 1,200 mAh usable (`PWR-1`) |
+| Battery life | ≥ 3 years at 15,000 impressions/day, designed to 1,200 mAh usable: derated from about 1,500 mAh nominal for cold, pulse load, self-discharge and cut-off voltage (`PWR-1`) |
 | Sleep current | ≤ 5 µA target, ≤ 8 µA absolute maximum, with an itemised budget (`PWR-3`) |
 | Supercapacitor | Evaluate removing the 0.5 F part (`PWR-5`) |
 | Range | ≥ 99 % packet delivery at 50 m non-line-of-sight, 15–20 dB better link budget than PIRW2 (`RF-1`) |
 | Bands | One design for 868 MHz and 915 MHz; antenna measured in both bands in the final enclosure (`RF-4`, `ENV-6`) |
 | Enclosure | IP65 by design, not potting; UV-stable, black and white; −20 °C to +60 °C proposed (`ENV-1`, `ENV-3`) |
-| Sealed openings | Fresnel lens as the IR window; membrane or magnetic reset; sealed LED light pipe (`ENV-2`) |
+| Sealed openings | Fresnel lens as the IR window; LEDs visible through a translucent case or a sealed light pipe; reset by a magnet-operated reed switch rather than a button (`ENV-2`) |
 
 The larger CR123A board allows a bigger ground plane, and so a properly tuned
-antenna. That's worth about 2–3 dB of the range target.
+antenna. We estimate that's worth 2–3 dB of the range target. The rest is the
+hard part: the v3 PHY (`FW-2`) is about 14 dB less sensitive than the Long
+Range mode the PoC uses, and at 868 MHz the ERP limit caps transmit power. We'd
+value your view on whether the target is achievable (see
+[Open questions](#open-questions)).
+
+Over 3 years, 1,200 mAh is an average of about 46 µA, so radio traffic, not
+sleep current, dominates the battery budget.
+
+**LEDs and reset without breaking the seal.** PIRW2 has LEDs and a reset
+button. To keep the IP65 rating, v3 would have no openings for them:
+
+- **LEDs:**
+  - shine through a translucent case, or through a sealed light pipe
+  - a translucent case suits the white variant; the black variant probably
+    needs a light pipe or a clear window
+  - indications should be short pulses, to protect the battery budget
+- **Reset:**
+  - a reed switch operated by a magnet held against a marked spot on the case
+  - a reed switch draws no standby current, which suits the 5 µA sleep target
+  - glass reeds can crack in a drop, so it needs a shock-rated part
+  - a nanopower Hall-effect switch is the alternative, but it draws current
+    continuously
+  - a hold time of a few seconds stops a stray magnet causing a reset
 
 ## Interfaces and pin map
 
@@ -136,13 +187,24 @@ signals exist and how they're used.
 | Factory reset button | GPIO 45 | | Active low |
 | Debug console (UART0) | GPIO 37 (TX), 38 (RX) | | |
 
+**The PoC SPI wiring isn't on the CC1312R ROM bootloader's pins.** According
+to TI's bootloader application note (SWRA466), the bootloader's SPI uses fixed
+pins: DIO10 clock, DIO11 chip-select, DIO9 MOSI and DIO8 MISO, in SPI mode 3.
+Its UART uses DIO2 (RX) and DIO3 (TX). Only the clock matches the PoC, so
+reflashing over SPI can't work as wired. On the production board, putting the
+data-link SPI on the bootloader pins would let one bus carry both data and
+reflash; the host switches SPI mode for flashing.
+
 Signals production needs that the PoC doesn't wire:
 
 - **CC1312 reset and bootloader lines** from the host (RESET_N plus the
   bootloader-entry DIO) for field reflash (`PLT-2`).
-- **A CC1312 bootloader transport.** The v3 requirements assume a UART. The PoC
-  data link is SPI and has no reflash path yet. Routing a UART as well as SPI
-  keeps the known-good RAIS2.1 update method available.
+- **A CC1312 bootloader transport.** The v3 requirements assume a UART. Either
+  route the bootloader UART (DIO2/DIO3) as well as SPI, which keeps the
+  known-good RAIS2.1 update method, or put the SPI link on the bootloader pins
+  (above). The bootloader uses whichever interface it sees first and needs a
+  reset to switch. Check TI's errata for restrictions on the bootloader-entry
+  pin.
 - **A CC1312 → host reset line** for the mutual watchdog (`PLT-3`).
 - **Programming pads** for each MCU on the production line: cJTAG for the
   CC13xx parts, and UART or USB plus the boot strap for the ESP32.
@@ -214,11 +276,12 @@ review.
 **Our planned PoC:** an [M5Stack Unit CatM](https://docs.m5stack.com/en/products/sku/U128)
 (SIM7080G, LTE-M/NB-IoT) on a spare UART of the PoC host, with an IoT data
 SIM. It connects with four wires (5 V, GND, TX, RX at 115200 baud) and has a
-nano-SIM slot and an SMA antenna. The SIM7080G is in the same SIMCom family as
-the SIM7070 profile in the Arduino `PPP` library, so we expect the existing
-MQTT-over-TLS code to run over it unchanged. The PoC is meant to prove:
+nano-SIM slot and an SMA antenna. The Arduino `PPP` library has no SIM7080
+profile, but its SIM7070 profile uses the same AT command set, so we expect it
+to work and the existing MQTT-over-TLS code to run unchanged. The PoC is meant
+to prove:
 
-- PPP comes up and holds a connection
+- PPP comes up with the SIM7070 profile and holds a connection
 - MQTT over TLS works over cellular without code changes
 - fallback between Ethernet, Wi-Fi and cellular (`NET-3`)
 - real data use at our upload cadence (see "Data cost" below)
@@ -243,15 +306,20 @@ can't recover a hung modem. The production requirements below still apply.
 **Design points for the daughterboard itself:**
 
 - a pre-certified LTE-M/NB-IoT module. Options include the SIM7080G, as used
-  in our PoC, and the nRF9160/nRF9151 family, which would match the RAIS2.1
-  reference. If the PoC goes well, it argues for staying with SIMCom, because
-  the Arduino `PPP` library supports those modems directly. We'd value your
-  recommendation.
+  in our PoC, and the nRF9151 (Nordic's successor to the nRF9160 in the
+  RAIS2.1 reference). If the PoC goes well, it argues for staying with SIMCom,
+  because the Arduino `PPP` library has profiles for SIMCom modems. We'd value
+  your recommendation.
+- LTE-M rather than NB-IoT for the data link: NB-IoT suits occasional small
+  messages, not an always-on PPP link with a 10 s upload cadence
+- level shifting where needed: the SIM7080G's UART runs at 1.8 V, and the
+  header is 3.3 V
 - an external LTE antenna connector
-- **coexistence with the 868/915 MHz radio:** LTE bands 20, 8 and 5 sit close
-  to the sub-GHz band, so the combined unit needs isolation and filtering
-  between the two radios
-- a nano-SIM holder, or an eSIM (MFF2)
+- **coexistence with the 868/915 MHz radio:** the LTE band 20 uplink
+  (832–862 MHz) ends 1 MHz below the 868 band, and the band 8 uplink
+  (880–915 MHz) overlaps the 915 band where band 8 is deployed. The combined
+  unit needs isolation and filtering between the two radios.
+- a nano-SIM holder, or a soldered MFF2 SIM (optionally an eUICC/eSIM)
 
 **Power:** a cellular site probably has no PoE, so the USB-C input must carry
 the full load, including the modem (see [Power](#power)).
@@ -261,7 +329,8 @@ but a base station fitted with the daughterboard still needs RED/UKCA and FCC
 as a combination. Some markets and networks also require carrier or PTCRB/GCF
 approval; US carrier approval is likely the biggest cost and schedule item.
 Because the daughterboard is optional, this campaign can happen after the
-main product ships.
+main product ships. A base station with the daughterboard fitted is a new
+radio configuration, so co-location and RF exposure need assessing too.
 
 **Data cost:** the base station uploads small messages every 10 s. That
 cadence, plus TLS overhead, sets the monthly data bill, so a cellular unit may
@@ -279,7 +348,7 @@ Interface priority would be Ethernet, then Wi-Fi, then cellular (`NET-3`).
 
 | Product | Source | Budget or target |
 | --- | --- | --- |
-| Base station | PoE 802.3af Class 1 (isolated PD, e.g. Ag99xx or Si34xx class) and USB-C 5 V | About 1.5–2 W worst case, estimated as roughly double the RAIS2.1's measured 175 mW average and 660 mW peak |
+| Base station | PoE 802.3af Class 1 through an isolated PD (e.g. a Silvertel Ag99xx module, or a PD controller and flyback such as the TI TPS23753A used on the PoC board, or Skyworks Si340x), and USB-C 5 V | About 1.5–2 W worst case at the input. This is an allowance, not a measurement: RAIS2.1 measured 175 mW average and 660 mW peak, and v3 adds an RMII PHY, a faster host and Wi-Fi. We'll measure the PoC board. |
 | Sensor node | One CR123A primary cell | ≥ 3 years at the worst-case traffic profile, ≤ 5 µA sleep |
 
 A parameterised energy model for the sensor, validated against measured
@@ -287,7 +356,10 @@ current, is a project deliverable (`PWR-4`).
 
 A cellular base station is likely to run from USB-C, because sites that need
 cellular usually have no wired network and so no PoE. Size the USB-C path for
-the modem's transmit peaks as well as the rest of the board.
+the modem's transmit peaks as well as the rest of the board. With only the
+5.1 kΩ pull-downs, the board may draw no more than the source advertises:
+500 mA by default, unless it reads a 1.5 A or 3 A advertisement from the
+source. Arbitration between PoE and USB-C must never back-feed VBUS.
 
 ## RF, antennas and certification
 
@@ -296,21 +368,41 @@ the modem's transmit peaks as well as the rest of the board.
   dual-band 863–928 MHz antenna or one antenna per SKU. At 868 MHz the limit is
   ERP, so conducted power must back off to allow for antenna gain (`RAD-4`).
 - **Target PHY:** about 50 kbps GFSK at up to +14 dBm (`FW-2`), with ETSI duty
-  cycle or listen-before-talk on both ends (`FW-3`).
+  cycle or listen-before-talk on both ends (`FW-3`). The concentrator's own
+  transmissions (ACKs and settings to every sensor) count against its budget:
+  in the 865–868.6 MHz sub-band, 1 % is 36 s per hour.
+- **915 MHz under FCC:** a 50 kbps GFSK signal is too narrow for the FCC
+  digital-modulation rule (15.247 needs at least 500 kHz bandwidth). That leaves
+  frequency hopping under 15.247 (at least 50 channels, higher power allowed) or
+  15.249 (about −1 dBm EIRP). The requirements don't yet say which, and it
+  decides the US transmit power and whether the firmware has to hop (see
+  [Open questions](#open-questions)).
 - **Wi-Fi:** 2.4 GHz with an external antenna connector (`NET-4`).
-- **Certification:** FCC (915 MHz), UKCA and CE RED (868 MHz), plus EMC and
-  safety for the PoE and USB-C paths (EN 62368-1, EN 55032/55035). Pre-certified
-  radio modules would reduce the test campaign; we'd value your view on where
-  modules make sense.
+- **Certification, EU and UK (RED and UK Radio Equipment Regulations):**
+  - radio: EN 300 220-1/-2 (sub-GHz), EN 300 328 (2.4 GHz Wi-Fi), and
+    EN 301 908-1/-13 (LTE, if fitted)
+  - EMC: EN 301 489-1 with parts -3 (short-range devices), -17 (Wi-Fi) and -52
+    (cellular)
+  - safety and RF exposure: EN 62368-1, plus EN 62311 or EN 62479; the sensor
+    needs these too, despite its low voltage
+  - cybersecurity: EN 18031-1, mandatory for internet-connected radio equipment
+    since August 2025. The Cyber Resilience Act's vulnerability-reporting duties
+    apply from September 2026.
+  - RoHS, REACH, WEEE and the EU Battery Regulation (2023/1542)
+- **Certification, US:** FCC Part 15B (unintentional emissions), Part 15.247
+  (Wi-Fi, and 915 MHz if hopping) or 15.249, RF exposure and co-location (KDB
+  447498), and PTCRB plus carrier approval for cellular.
+- Pre-certified radio modules would reduce the test campaign; we'd value your
+  view on where modules make sense.
 
 ## Memory, programming and OTA
 
 | Item | PoC | Production need |
 | --- | --- | --- |
-| Host flash and PSRAM | 16 MB flash, 32 MB PSRAM (ESP32-P4NRW32); current firmware images are about 1.2 MB | Room for two firmware images (OTA with rollback) plus certificates; sizes to confirm |
+| Host flash and PSRAM | ESP32-P4NRW32 (32 MB in-package PSRAM) with 16 MB external flash on the M5Stack board; current firmware images are about 1.2 MB | Room for two firmware images (OTA with rollback) plus certificates; sizes to confirm |
 | Host OTA | Triggered over MQTT; downloads over HTTPS (HTTP also accepted), checks SHA256, supports rollback | Keep, HTTPS only (`SEC-1`) |
-| CC1312 update | No reflash path on the PoC yet | Required: host-driven reflash through the ROM bootloader, with rollback (`PLT-2`) |
-| C6 update | esp-hosted supports updating the C6 from the host | Keep, if the C6 is used |
+| CC1312 update | No reflash path on the PoC yet | Required: host-driven reflash through the ROM bootloader (`PLT-2`). The ROM bootloader has no rollback, so the host keeps the last good image and reflashes it on failure. A bad write to the CC1312's configuration area (CCFG) can disable the bootloader, so cJTAG pads stay as the recovery path. |
+| C6 update | ESP-Hosted-MCU supports updating the C6 from the host | Keep, if the C6 is used |
 | Sensor update | Not implemented | To decide; it may need external SPI flash on the sensor |
 | Secrets at rest | Stored in NVS | Encrypted storage using the MCU's flash/NVS encryption (`SEC-4`) |
 
@@ -321,21 +413,61 @@ We still need to supply these before you can quote:
 - [ ] Volumes per product and per SKU (868 / 915 MHz; Ethernet, Wi-Fi and cellular variants)
 - [ ] Target unit cost per product
 - [ ] Schedule and prototype milestones
-- [ ] Confirm the enclosure supplier (likely another company within our group) and the hand-off between them and you
+- [ ] Introduce our group's enclosure company and agree the hand-off between them and you
+
+## Requirements still to define
+
+We know a quote needs these, and we'll confirm them with you:
+
+- [ ] **Markets and certification priority:** which regions first (UK/EU, US,
+  and whether Canada or Australia/NZ, which allows 915–928 MHz only, are
+  planned), and EMC Class A (commercial) or Class B (residential)
+- [ ] **Base-station environment:** operating and storage temperature (the PoC
+  board is rated 0–40 °C only), humidity, and wall or ceiling mounting
+- [ ] **ESD and surge:** IEC 61000-4-2 levels on RJ45, USB-C and the expansion
+  header; Ethernet surge only if cables leave the building; 1500 V isolation
+  between the Ethernet port and every user-accessible conductor (USB-C shell,
+  expansion header)
+- [ ] **Production test and provisioning:**
+  - per-unit RF power and frequency calibration
+  - sensor sleep-current, IP65 leak and PIR functional tests
+  - who builds the fixtures
+  - device certificates and keys
+  - secure boot and flash-encryption eFuses (`SEC-4`)
+  - MAC address, serial number and label printing
+- [ ] **Lifetime:** product service life, sensor shelf and field life, and a
+  field-return target
+- [ ] **BOM rules:** no NRND or end-of-life parts, second sources for passives and
+  power parts, preferred distributors, and lifecycle checks
+- [ ] **Design files and deliverables:** the transfer package for the volume
+  manufacturer (see [How we'd like to work](#how-wed-like-to-work)), CAD tool
+  preference, DFM/DFT report and certification test plan
+- [ ] **Prototype phases and quantities:** the first run is about 5 base
+  stations and 10 sensors. Still to agree: how many rounds, the split per SKU,
+  and who holds the certification lab budget.
+- [ ] **Measured PoC power,** and the expansion header's power allowance per rail
+- [ ] **Range test definition:** what an "impression" is (a PIR trigger or a
+  radio packet, and whether triggers are aggregated), what "50 m
+  non-line-of-sight" means (walls, floors, materials, mounting height), and
+  PIRW2's PHY and transmit power as the baseline for `RF-1`
 
 ## Enclosure
 
-The enclosures for both products may be designed by another company within our
-group rather than by you. If so, we'd need you to work with them on:
+We expect another company within our group to design, and probably
+manufacture, the enclosures for both products. We'd need you to work with them
+on:
 
 - the PCB outline, mounting points, and connector, LED and antenna positions
 - antenna keep-out and clearance requirements, from your RF design
 - antenna tuning and RF verification with their final enclosure fitted
   (`RF-4`, `ENV-6`)
-- for the sensor: the sealed openings (Fresnel lens, reset, LED light pipe;
-  `ENV-2`) and battery access without breaking the IP65 seal (`ENV-5`)
+- for the sensor: the Fresnel lens, the LED window or light pipe and the reed
+  switch's magnet target (`ENV-2`), and battery access without breaking the
+  IP65 seal (`ENV-5`)
 - for the base station: RJ45, USB-C, both antenna connectors, status LEDs and
   the label area (`MEC-1`), plus access to the expansion header
+- RF-transparent materials near the antennas, including an RF-transparent black
+  pigment (some carbon-black pigments absorb RF)
 
 ## Open questions
 
@@ -343,24 +475,52 @@ group rather than by you. If so, we'd need you to work with them on:
    PHY (`PLT-1`), which gives Ethernet MAC and Wi-Fi on one chip. The PoC uses
    an ESP32-P4 plus an ESP32-C6. Which do you recommend for cost, BOM and
    certification? We don't depend on anything P4-specific beyond Ethernet
-   with TLS.
-2. **CC1312 reflash transport.** UART alongside SPI, or bootloader over SPI? The
-   latter hasn't been verified.
-3. **C6 pins, if the P4 is kept.** The planned SDIO pins are on a separately
-   powered I/O group on the P4. We haven't yet measured whether the M5Stack
-   runs it at 1.8 V or 3.3 V.
+   with TLS. An ESP32-S3 + W5500 also remains viable (see
+   [Base station](#base-station)). If the P4 is kept, which silicon revision
+   would you design with?
+2. **CC1312 reflash transport.** Put the data link on the bootloader's SPI pins
+   and flash over SPI, or route the bootloader UART as well? Neither is verified
+   yet, and the PoC wiring rules out SPI as it stands (see
+   [Interfaces and pin map](#interfaces-and-pin-map)).
+3. **C6 pins, if the P4 is kept.** The P4's SDMMC pins are on a separately
+   powered I/O domain, which a custom board must supply. We'd expect 3.3 V, to
+   match the C6, or the second SDMMC slot on other pins through the GPIO
+   matrix. Do you agree?
 4. **Module or chip-down** for the CC1312R, the CC1310 and the Wi-Fi radio.
+   With modules, what co-location and desense test criteria would you set for
+   Wi-Fi and LTE next to the sub-GHz radio?
 5. **Cellular daughterboard (optional).** What does the main board need so a
    snap-on cellular daughterboard can be added later without a redesign? Which
    module would you recommend? See [Cellular option](#cellular-option).
-6. **Sensor OTA.** Is external flash needed on the sensor to support future
-   remote updates?
+6. **Sensor OTA and MCU.** Is external flash needed on the sensor to support
+   future remote updates? The CC1310F128 has 128 KB of flash; would a newer
+   part such as the CC1311R3 or CC1312R7 be a better choice?
 7. **PoE class with add-ons.** 802.3af Class 1 allows up to 3.84 W at the
-   device. A power-hungry add-on such as a radar may need a higher class. What
-   power allowance should the expansion header have?
-8. **Sub-GHz PHY.** The PoC coordinator firmware currently uses TI's SimpleLink
-   Long Range mode, which `FW-2` rules out as the default. This is a firmware
-   change, but it affects the RF matching and the link budget you design for.
+   device, roughly 3.1–3.3 W after conversion. Class 2 (6.49 W) needs only a
+   different class resistor. Is there a reason to stay at Class 1 (`PWR-1`),
+   such as legacy switches or injectors? What power allowance should the
+   expansion header have on each rail?
+8. **Sub-GHz PHY and link budget.** The PoC coordinator firmware currently uses
+   TI's SimpleLink Long Range mode, which `FW-2` rules out as the default. The
+   switch is a firmware change, but the 50 kbps PHY is about 14 dB less
+   sensitive. Is `RF-1`'s 15–20 dB improvement over PIRW2 realistic, and what
+   would it take: antenna, transmit power or PHY?
+9. **915 MHz FCC route.** Frequency hopping under 15.247, or 15.249 at low power?
+   Which would you recommend for our range target?
+10. **Antenna strategy.** One PCB with a per-band matching variant, or a true
+    dual-band antenna? Which antenna supplier? What material constraints should
+    the enclosure company work to?
+11. **Firmware split.** We write the product firmware. Who writes board
+    bring-up, factory-test and CC1312 bootloader-integration firmware?
+12. **Sensor LEDs and reset.** Reed switch or nanopower Hall switch for the
+    sealed reset? Translucent case or light pipe for the LEDs, especially on
+    the black variant?
+13. **Volume transfer.** Have you handed designs over to volume manufacturers
+    in China before? What do you include in a transfer package, and what
+    support do you offer during the first volume build?
+14. **Sensor optics.** PIR element type, lens design and supplier, detection
+    pattern and mounting height. Do you cover optics, or should we find a
+    specialist?
 
 ## Reference designs and documents
 
