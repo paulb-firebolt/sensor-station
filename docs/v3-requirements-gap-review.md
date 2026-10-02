@@ -1,16 +1,65 @@
 ---
-title: v3 Requirements Gap Review
+title: v3 Requirements Change Register
 created: 2026-09-07T11:44:00Z
-lastModified: 2026-09-07T11:44:00Z
+lastModified: 2026-10-02T00:00:00Z
 ---
 
-## Purpose
+JJ's v3 requirement documents now live in Confluence and are the source of truth:
 
-[2026 PIR v3 Technical Requirements](pir-v3-technical-requirements.md) and [2026 RAIS Base Station v3 Technical Requirements](rais-base-station-v3-technical-requirements.md) (author: JJ, Glimpse) have been added to this repo as the formal requirements for the PIRW 2026 redesign. The code in this repo is an early POC for the same end-to-end idea (sub-1GHz sensor → CC1312R coordinator → ESP32 → MQTT), built independently and ahead of the formal spec.
+- [PIR Sensor v3 Technical Requirements](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185/PIR+Sensor+v3+Technical+Requirements+and+Design+Proposals+for+PIRW+2026+Redesign) (page 1246429185)
+- [RAIS Base Station v3 Technical Requirements](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793/RAIS+Base+Station+v3+Technical+Requirements+for+PIRW+2026+Redesign) (page 1246625793)
 
-This review checks whether the POC's current direction is consistent with the new requirements, and lists the conflicts and gaps found. It is not a full requirement-by-requirement traceability matrix — it focuses on the items serious enough to raise before treating the current build as "on track."
+This register lists every change we propose to those pages, why, and the
+evidence. It drives the Confluence edits and records what was applied. The
+analysis further down, from the original gap review (2026-09-07), is the
+evidence behind the rows. Where the two differ, the register is current.
 
-**Scope note:** this repo (`basic-network`, ESP32) pairs over SPI with a separate CC1312 coordinator firmware repo at `~/Documents/sensor-station-cc1312-coordinator` (GitHub: `paulb-firebolt/sensor-station-cc1312-coordinator`) — see `docs/bidirectional-rf-migration.md`. That pairing is **not** the same project as `~/Documents/sensor-2026/station-esp8266` + `station-cc1312`, which is a separate, more mature rewrite of the _existing_ RAIS2.1 hardware (ESP8266 + a real UART host link, `57600 8E1`) — the actual baseline both requirement docs describe. This review compares the formal v3 requirements against the ESP32+SPI pairing (`basic-network` / `sensor-station-cc1312-coordinator`), not against the RAIS2.1/ESP8266 rewrite.
+## Process
+
+1. **Propose:** add a row here with status *proposed*.
+2. **Agree:** review the row; mark it *agreed*, *deferred* or *rejected*.
+3. **Apply** agreed rows to Confluence, one page at a time:
+    - **Correction** and **Decision** rows: edit the page text, then anchor an
+      inline comment on the changed text ("Changed (CR-nn): what, why,
+      evidence"). Add a row to the page's *Revision history* table.
+    - **Question** rows: an inline comment only; the text is not edited.
+    - **Internal** rows: no Confluence change.
+    - Each publish uses a version message naming the rows, and one footer
+      comment summarises the change set.
+4. **Record:** set the row to *applied*, with the Confluence version number.
+
+This repo is public, so rows cite requirement IDs and short phrases rather than
+copying the requirement text.
+
+## Register
+
+| ID | Page | Requirement | Type | Proposed change | Reasoning and evidence | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| CR-01 | Base | Baseline, PLT-1, PLT-2, A.2 | Correction | The host↔CC1312 data link is SPI, not UART. The CC1312 reflash transport is still to be decided: a UART alongside SPI, or SPI if the ROM bootloader supports it. | Both ends of the PoC use SPI (conflict 1 below; [CC1312R SPI interaction](development/cc1312r-spi-interaction.mdx)). No reflash path exists on the SPI pairing yet. | proposed |
+| CR-02 | Base | PLT-1, A.2, A.7 item 1 | Correction | Rule out W5500. The architecture options become classic ESP32 + LAN8720, or ESP32-P4 + ESP32-C6. | MQTTS is impossible over W5500 with its driver ([Ethernet TLS limitation](ETHERNET_TLS_LIMITATION.md)). P4 RMII Ethernet with TLS is proven. See the draft comment text below and [hardware design brief](hardware-design-brief.mdx#open-questions) question 1. | proposed |
+| CR-03 | Base | NET-1 | Correction | Drop "existing … cellular variants". Cellular is an optional, not-yet-tested daughterboard. | No cellular units have been used since the acquisition. [Brief: cellular option](hardware-design-brief.mdx#cellular-option). | proposed |
+| CR-04 | Base | RAD-6 | Correction | The 96-point upload cap and heap pressure are ESP8266-era limits. Re-derive capacity from the new host's memory. | See the draft comment text below. | proposed |
+| CR-05 | Base | SEC-1 | Correction | The priority already says Must, but the rationale still says "recommend elevating to Must". Make them consistent, and note that MQTT over TLS (mutual TLS) is proven on the PoC. | TLS confirmed end to end on 2026-03-17 (conflict 3 below). | proposed |
+| CR-06 | Base | A.3 | Question | Keep the ThingsBoard gateway API as-is, or adopt a broker-neutral MQTT contract so ThingsBoard or AWS IoT Core can sit behind it? | [MQTT plan: broker-neutral contract](development/mqtt-asyncapi-plan.md#broker-neutral-contract-affects-step-2). | proposed |
+| CR-07 | Base | New requirement | Decision | Add an expansion header for directly attached sensors and add-ons (priority to agree). | [Brief: expansion header](hardware-design-brief.mdx#expansion-header). | proposed |
+| CR-08 | Base | New requirement, NET-3 | Decision | Base-station availability through an MQTT Last Will, rather than the current external check that the base station is on the site Wi-Fi. | The SSID check can't work for Ethernet or cellular units. [MQTT plan: liveness](development/mqtt-asyncapi-plan.md#liveness-three-separate-links). | proposed |
+| CR-09 | Base | PWR-1, A.5 | Question | Does 802.3af Class 1 leave enough headroom for the expansion header and add-ons? | [Brief: open question 7](hardware-design-brief.mdx#open-questions). | proposed |
+| CR-10 | Sensor | RF-2 rationale | Correction | The concentrator is a CC1312R, not "CC13x0". | The base-station page's own baseline says CC1312R. | proposed |
+| CR-11 | Sensor | A.1, base-station compatibility | Correction | Answer the open question "can the concentrator be field-reflashed?": yes on RAIS2.1, and it's required in v3 by PLT-2. | Base-station page baseline and PLT-2. | proposed |
+| CR-12 | Sensor | FW-1, PWR-6 | Decision | Allow a slow sensor heartbeat (e.g. every 1–6 h, carrying battery voltage and RSSI) as an exception to "transmit only when non-zero". | Under FW-1 a healthy sensor in a quiet spot looks the same as a dead one. [MQTT plan: liveness](development/mqtt-asyncapi-plan.md#liveness-three-separate-links). | proposed |
+| CR-13 | Sensor | New requirement | Decision | Node settings must survive a power cycle (config persistence). | Not implemented on either node project (config persistence section below). | proposed |
+| CR-14 | Sensor | RF-2 scope | Question | Is remote sensor firmware update in scope for v3? | Only a design note exists (sensor OTA section below). | proposed |
+| CR-15 | Sensor | FW-2 | Internal | Switch the PoC from SimpleLink Long Range to the ~50 kbps target PHY. No document change. | Conflict 2 below. | proposed |
+
+## Evidence (original gap review, 2026-09-07)
+
+The sections below are the original review. Some details have moved on since
+(see the register); they're kept because the rows cite them.
+
+Scope: the review compares the requirements with this repo's ESP32 + SPI pairing
+(`basic-network` with `sensor-station-cc1312-coordinator`). That is a different
+project from the RAIS2.1 ESP8266 rewrite (`sensor-2026/station-esp8266` +
+`station-cc1312`, UART host link), which is the baseline the requirements describe.
 
 ## Critical conflicts
 
@@ -91,9 +140,9 @@ Not exhaustive — a quick pass over the areas most likely to matter next.
 | PLT-4 — UK/EU timezone/DST handling                              | Not checked in this pass; worth a follow-up look at NTP/timezone config if this becomes relevant soon.                                                                                                                                                                                                                                                    |
 | RAD-3 / RAD-4 — 868 MHz variant, per-band ERP power tables       | Band/PHY selection lives in CC1312 firmware, not reviewed here.                                                                                                                                                                                                                                                                                           |
 
-## Draft comments for JJ's requirements doc (Google Doc)
+## Draft comment text (now CR-02 and CR-04)
 
-Not part of the review findings above — a working set of review comments to paste into the source Google Doc, since JJ authored the requirements on the RAIS2.1/ESP8266 baseline and some of the base-station assumptions need updating for a custom-PCB v3 build. Deliberately excludes anything about UART/the bootloader-reflash mechanism (PLT-2, PLT-1's SoftwareSerial framing, RAD-1's "existing ESP-driven bootloader path") — that's a separate discussion about why SPI is the better choice, not a "this assumption is wrong" comment.
+Originally drafted (2026-09) to paste into the source Google Doc; now carried by CR-02 and CR-04 in the register above. Kept as evidence: since JJ authored the requirements on the RAIS2.1/ESP8266 baseline and some of the base-station assumptions need updating for a custom-PCB v3 build. Deliberately excludes anything about UART/the bootloader-reflash mechanism (PLT-2, PLT-1's SoftwareSerial framing, RAD-1's "existing ESP-driven bootloader path") — that's a separate discussion about why SPI is the better choice, not a "this assumption is wrong" comment.
 
 **1. Attach to PLT-1 / Appendix A.2's "Two credible architectures..." paragraph:**
 
@@ -117,41 +166,8 @@ Not part of the review findings above — a working set of review comments to pa
 
 > This cap and the heap-pressure history are specific to the ESP8266's limited RAM. Once the concentrator host moves to ESP32 (any variant), available heap increases substantially, so 96 may not be the right number to carry forward — might be worth re-deriving the v3 capacity target from the new host's actual memory budget rather than the ESP8266-era ceiling.
 
-## Bench-test wiring plan: ESP32-C6 SPI link on the Unit PoE P4
+## C6 bench-test wiring (superseded)
 
-Internal reference for actually trying the P4+C6 esp-hosted pairing on the current POC board — not doc-comment material for JJ, just our own bring-up plan. Uses SPI transport (per Espressif's `esp-hosted-mcu` docs) rather than the Tab5's SDIO layout, specifically to sidestep the GPIO 8-12/15 collision with our existing CC1312 wiring noted above.
-
-**Confirmed pins already in use on the Unit PoE P4** (from this repo's code and the Tab5 board variant file):
-
-| GPIOs            | Used for                                                                  |
-| ---------------- | ------------------------------------------------------------------------- |
-| 8, 9, 10, 11, 12 | CC1312 SPI (MOSI/MISO/CLK/CS/DRDY)                                        |
-| 13               | Reserved by the Tab5 board template for SDIO (unused here, but earmarked) |
-| 15, 16, 17       | RGB status LED (R/G/B)                                                    |
-| 19, 20           | LD2450 UART1                                                              |
-| 31, 51, 52       | RMII MDC / PHY_RST / MDIO (`network.h`)                                   |
-| 37, 38           | UART0 (serial console)                                                    |
-| 45               | Factory reset button                                                      |
-| 53, 54           | I2C SDA/SCL                                                               |
-
-**Soft conflict zone** — not explicitly used in our code, but candidate pins for the RMII data bus per Espressif's ESP32-P4 hardware design guidelines (RXD0: 29/46/52, RXD1: 30/47/53, RXER: 31/48/54, CLK: 32/44/50, TXEN: 33/40/49, TXD0: 34/41, TXD1: 35/42, TXER: 36/43, REF_CLK: 23/39). Our code only pins down MDC/MDIO/PHY_RST explicitly — the actual RMII data pins are "pre-defined in ETH.h for ESP32-P4" internally, so treat **GPIO 23, 29-36, 39-54** as off-limits without further digging into the exact Arduino-ESP32 P4 EMAC defaults.
-
-**Proposed wiring** (clear of every conflict above):
-
-| Signal     | GPIO |
-| ---------- | ---- |
-| CLK        | 14   |
-| MOSI       | 18   |
-| MISO       | 21   |
-| CS         | 22   |
-| Handshake  | 6    |
-| Data Ready | 7    |
-| Reset      | 4    |
-
-GPIO 0-3 deliberately avoided for the lower-numbered signals — GPIO0 is the classic ESP32-family boot-strap pin and 1-3 are often UART0/strap-adjacent; exact P4 strapping behavior wasn't confirmed, so the lowest few were skipped rather than assumed safe.
-
-**Not verified:** this is deduced from source files (`network.h`, the Tab5 `pins_arduino.h`, Espressif's P4 datasheet), not from the Unit PoE P4's actual Hat2-Bus connector schematic — couldn't locate that locally. Confirm GPIO 14/18/21/22/4/6/7 are actually broken out to the Hat2-Bus header (not internal-only) before soldering.
-
-## Suggested next step
-
-Items 1 and 2 above should go in front of the requirements author (JJ) and electronics engineering before/at the kickoff — they are disagreements with Must requirements in the current direction, not backlog items. Item 3 just needs the board decision (M5Stack/RMII over W5500) and its TLS rationale communicated back so Appendix A.2 doesn't get re-litigated later. The gap table is lower urgency and can be worked through as normal engineering backlog.
+The earlier ESP32-C6-over-SPI bench plan is superseded. The prebuilt Arduino
+libraries only support SDIO for esp-hosted, and the pin plan is now in the
+[ESP32-C6 Wi-Fi co-processor plan](development/esp32-c6-wifi-coprocessor-plan.mdx).

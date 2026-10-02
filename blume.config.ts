@@ -40,8 +40,9 @@ export default defineConfig({
         items: [
           "/hardware-design-brief",
           "/v3-requirements-gap-review",
-          "/pir-v3-technical-requirements",
-          "/rais-base-station-v3-technical-requirements",
+          // The v3 requirement documents live in Confluence.
+          { label: "PIR Sensor v3 requirements (Confluence)", href: "https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185/PIR+Sensor+v3+Technical+Requirements+and+Design+Proposals+for+PIRW+2026+Redesign" },
+          { label: "RAIS Base Station v3 requirements (Confluence)", href: "https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793/RAIS+Base+Station+v3+Technical+Requirements+for+PIRW+2026+Redesign" },
         ],
       },
       {
