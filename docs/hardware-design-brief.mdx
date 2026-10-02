@@ -199,8 +199,8 @@ checking, long wires pick up noise, and each device needs its own chip-select.
 **Nice to have, not essential.** A cellular connection would be attractive
 for sites with no usable wired network or Wi-Fi. We'd like it as an optional
 **daughterboard that snaps onto the base station**, so the main board doesn't
-change and only sites that need cellular pay for it. We've done no testing or
-PoC for this yet.
+change and only sites that need cellular pay for it. We haven't tested
+cellular yet; our planned PoC is described below.
 
 **What we know:** we haven't shipped a cellular unit since acquiring the
 product line, and we don't know of any in the field or in stock. The RAIS2.1
@@ -210,6 +210,23 @@ Nordic nRF9160** (LTE-M/NB-IoT). It connected to the base station over a
 (`cell-v1.0.0.0`). Treat that as a design reference, not proven hardware. The
 v3 requirements' mention of existing cellular variants (`NET-1`) predates this
 review.
+
+**Our planned PoC:** an [M5Stack Unit CatM](https://docs.m5stack.com/en/products/sku/U128)
+(SIM7080G, LTE-M/NB-IoT) on a spare UART of the PoC host, with an IoT data
+SIM. It connects with four wires (5 V, GND, TX, RX at 115200 baud) and has a
+nano-SIM slot and an SMA antenna. The SIM7080G is in the same SIMCom family as
+the SIM7070 profile in the Arduino `PPP` library, so we expect the existing
+MQTT-over-TLS code to run over it unchanged. The PoC is meant to prove:
+
+- PPP comes up and holds a connection
+- MQTT over TLS works over cellular without code changes
+- fallback between Ethernet, Wi-Fi and cellular (`NET-3`)
+- real data use at our upload cadence (see "Data cost" below)
+- whether LTE transmit bursts affect the 868 MHz link
+
+The Unit CatM is a prototyping part, not a production design. Its cable has
+no RTS/CTS flow control and no modem power-on or reset lines, so the host
+can't recover a hung modem. The production requirements below still apply.
 
 **What the main board needs so a cellular daughterboard can be added later:**
 
@@ -225,9 +242,11 @@ review.
 
 **Design points for the daughterboard itself:**
 
-- a pre-certified LTE-M/NB-IoT module. The nRF9160/nRF9151 family would match
-  the RAIS2.1 reference, but we have no hands-on experience with it and would
-  value your recommendation.
+- a pre-certified LTE-M/NB-IoT module. Options include the SIM7080G, as used
+  in our PoC, and the nRF9160/nRF9151 family, which would match the RAIS2.1
+  reference. If the PoC goes well, it argues for staying with SIMCom, because
+  the Arduino `PPP` library supports those modems directly. We'd value your
+  recommendation.
 - an external LTE antenna connector
 - **coexistence with the 868/915 MHz radio:** LTE bands 20, 8 and 5 sit close
   to the sub-GHz band, so the combined unit needs isolation and filtering
@@ -253,6 +272,7 @@ interface over PPP, so the existing MQTT-over-TLS code runs unchanged.
 Arduino-ESP32 3.x includes a `PPP` library with built-in profiles for SIMCom
 (SIM7000/7070/7600) and Quectel BG96 modems. An nRF91 module would need its
 generic profile and PPP-capable modem firmware, which we'd need to confirm.
+The SIM7080G PoC will test the SIMCom route first.
 Interface priority would be Ethernet, then Wi-Fi, then cellular (`NET-3`).
 
 ## Power
@@ -352,6 +372,7 @@ group rather than by you. If so, we'd need you to work with them on:
 | [M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4) | Mainboard, power board and HAT schematics (PDF) for the PoC host |
 | [ESP32-P4 hardware design guidelines](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32p4/index.html) | Espressif's layout and power guidance |
 | [ESP32-C6 hardware design guidelines](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32c6/index.html) | Espressif's layout and RF guidance |
+| [M5Stack Unit CatM](https://docs.m5stack.com/en/products/sku/U128) | The SIM7080G unit planned for the cellular PoC |
 | [CC1312R SPI interaction](development/cc1312r-spi-interaction.mdx) | The host ↔ CC1312 SPI protocol |
 | [ESP32-C6 Wi-Fi co-processor plan](development/esp32-c6-wifi-coprocessor-plan.mdx) | The planned P4 ↔ C6 wiring |
 | [v3 requirements change register](v3-requirements-gap-review.md) | Proposed changes to the v3 requirements, with reasoning and evidence |
