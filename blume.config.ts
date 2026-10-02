@@ -38,6 +38,8 @@ export default defineConfig({
       {
         label: "Requirements",
         items: [
+          "/v3-functional-specification",
+          "/v3-data-contract",
           "/hardware-design-brief",
           "/v3-requirements-gap-review",
           // The v3 requirement documents live in Confluence.
