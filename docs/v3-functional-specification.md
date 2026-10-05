@@ -5,7 +5,7 @@ created: 2026-10-02T00:00:00Z
 lastModified: 2026-10-05T00:00:00Z
 ---
 
-**Draft for review, version 0.2.** This specification describes **what** the v3
+**Draft for review, version 0.3.** This specification describes **what** the v3
 system must achieve, not how. We're asking a supplier to design and build the
 whole system: the sensors, whatever collects their data on site, all of the
 firmware, and the secure links between them. The system ends at our MQTT broker.
@@ -83,6 +83,11 @@ with reasons.
 so v3 doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations
 (change register `CR-16`).
 
+**The RAIS2.1 HTTP endpoints and the ThingsBoard gateway API.** v3 talks to us
+only through the MQTT data contract, which is broker-neutral (change register
+`CR-06`). Firmware images are fetched from the HTTPS URL given in each
+`firmware_update` command.
+
 ## 2. Functional requirements
 
 | ID | Requirement |
@@ -96,13 +101,16 @@ so v3 doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations
 | `FR-7` | **Pairing and enrolment.** A defined procedure pairs a sensor with a base station. We prefer factory pre-provisioning keyed to the QR label, with no installer action needed. Sensors can be moved to another base station by command. |
 | `FR-8` | **Link security.** Every wireless link is encrypted and authenticated, with replay protection and unique keys per site or pairing, whatever the technology. |
 | `FR-9` | **Cloud security.** Mutual TLS to our broker, server certificates validated, and a CA bundle that can be updated in the field. Secrets stored encrypted at rest, with secure boot enabled. |
-| `FR-10` | **Customer network.** The base station connects by Ethernet (DHCP and static IP) or Wi-Fi, with Ethernet preferred and automatic fallback. A cellular option is welcome but not essential. |
+| `FR-10` | **Customer network.** The base station connects by Ethernet (DHCP and static IP) or Wi-Fi, with Ethernet preferred and automatic fallback. Wi-Fi range to the site's access point must be at least as good as RAIS2.1's. A cellular option is welcome but not essential. |
 | `FR-11` | **Installation.** An installer with no technical knowledge can install a base station and its sensors using a phone or a local setup page. This includes Ethernet-only sites. |
 | `FR-12` | **Self-recovery.** The system recovers from firmware hangs, link faults and network loss without intervention. |
 | `FR-13` | **Store and forward.** No data is lost during a network outage within the buffer duration (`PR-6`). |
 | `FR-14` | **Sealed sensor.** The sensor has no unsealed openings. Status indication and reset must work without breaking the seal, for example with a light pipe and a magnetic reset. |
 | `FR-15` | **Diagnostics.** A sensor or base station can be diagnosed remotely from the data contract's health fields alone. A local diagnostic interface for engineers is also provided, and is disabled or protected in production. |
 | `FR-16` | **Other sensor types.** The design must allow other battery sensor types to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
+| `FR-17` | **One design for all markets.** One hardware design per product serves every market, with the region set at manufacture or provisioning, so we stock as few SKUs as possible. If this costs more than per-region variants, the supplier shows the trade-off. |
+| `FR-18` | **Placement aid.** The installer gets placement guidance and can check each sensor's link quality on site, before leaving, using a phone or the base station. |
+| `FR-19` | **Wired add-ons (could).** The base station can accept directly attached sensors or add-ons, such as a wired sensor or a cellular module, through a defined interface. |
 
 ## 3. Performance requirements
 
@@ -129,9 +137,18 @@ Each one has an acceptance test in section 5.
   - UV-stable, in black and white
   - removable from a wall bracket for battery changes, then refitted in the
     same position
+  - the seal survives repeated battery changes ([TBD] open-and-close cycles),
+    with no tools beyond opening the battery door
+  - no condensation damage through outdoor temperature cycling, for example
+    with a breathable vent membrane
+  - an optional lens-cover accessory (45° spread) that keeps the seal
+  - space for our QR/ID label, including the FCC ID
 - **Base station:**
   - indoor, with no IP rating needed
-  - powered by PoE (IEEE 802.3af) or USB-C
+  - powered by PoE (IEEE 802.3af) or USB-C, with no reboot when the power source
+    changes
+  - space for our QR/ID label, including the FCC ID; Glimpse logo embossed
+    (could, with the enclosure company)
   - operating temperature [TBD]
 - **Markets:** UK, EU and US first. The supplier certifies every radio
   technology used, for each market (UKCA, CE under RED, and FCC), including EMC,
@@ -153,8 +170,8 @@ assigned to it passes.
 | Test | Covers | Method | Stage |
 | --- | --- | --- | --- |
 | `AT-1` | `FR-3`, data contract | Run our contract checker against live traffic for 24 h. Every message validates against the AsyncAPI schema, and every topic is seen. | A, B, C |
-| `AT-2` | `PR-1` | Count against a ground truth (video or manual count) at a controlled test lane and at a pilot site [TBD: method]. | A (lane), B (site) |
-| `AT-3` | `PR-2` | Signal-strength and message-loss survey at a worst-case pilot site, plus the supplier's link-budget analysis. | A, B |
+| `AT-2` | `PR-1` | Count against a ground truth (video or manual count) at a controlled test lane, an indoor pilot site and an outdoor placement with sunlight and moving foliage [TBD: method]. | A (lane), B (sites) |
+| `AT-3` | `PR-2`, `FR-18` | Signal-strength and message-loss survey at a worst-case pilot site with production enclosures fitted, plus the supplier's link-budget analysis. The installer's link check agrees with the survey. | A, B |
 | `AT-4` | `PR-3` | Current-profile capture (sleep, one impression, one report, one dwell), compared with the energy model within ±20 %. | A, C |
 | `AT-5` | `FR-13`, `PR-6` | Disconnect the network for 72 h at full simulated load. Every record arrives afterwards, with no gaps in `seq`. | A, C |
 | `AT-6` | `FR-4`, `PR-7`, `PR-8` | Remove a sensor's battery, then cut the base station's power and network in turn. The correct events and availability appear in time. | A, B |
@@ -202,8 +219,89 @@ wording.
 - [ ] Missing-sensor detection time (`PR-7`) and configuration latency (`PR-10`)
 - [ ] Base-station ID format and QR label content
 - [ ] Base-station operating temperature range
+- [ ] How many battery-change cycles the sensor seal must survive
+- [ ] Check this specification against the PIR v3 and Base Station v3 product requirements (ask JJ for them)
 - [ ] Pilot size and sites (acceptance stage B)
 - [ ] Maintenance term in years (`IP-6`)
 - [ ] Cellular upload cadence and data budget
 - [ ] Which back end: Mosquitto, AWS IoT Core or ThingsBoard. The data contract
   works with any of them.
+
+## Appendix: traceability to the requirement pages
+
+Every requirement in JJ's
+[PIR Sensor v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185)
+and
+[RAIS Base Station v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793)
+pages, and where it went. **Covered** means this specification or the data
+contract requires the outcome. **Supplier's choice** means it describes how our
+current design meets an outcome, which the supplier may meet another way. **Not
+required** means we've decided against it.
+
+### PIR Sensor v3
+
+| ID | Where it went |
+| --- | --- |
+| `RF-1` | Covered: `PR-2`. The link-budget breakdown is the supplier's choice. |
+| `RF-2`, `RF-3` | Not required: no backward compatibility (`CR-16`). |
+| `RF-4` | Covered: `FR-17` and section 4 (markets). Antenna characterisation is part of certification and `AT-3`. |
+| `RF-5` | Supplier's choice: occupied bandwidth is specific to the sub-GHz design; certification covers compliance. |
+| `PWR-1` | Covered: `PR-3`. |
+| `PWR-2` | Covered: `PR-3` and section 4 (user-replaceable, widely available battery, no tools). CR123A is no longer mandated. |
+| `PWR-3` | Supplier's choice: the sleep floor is part of meeting `PR-3`. |
+| `PWR-4` | Covered: `PR-3`, `AT-4`. |
+| `PWR-5` | Supplier's choice. |
+| `PWR-6` | Covered: `FR-4`; data contract `battery_mv` and `battery_low`. |
+| `FW-1` | Covered: `FR-1`, `FR-4`; data contract `tick_s` and `heartbeat_s`. |
+| `FW-2` | Supplier's choice. |
+| `FW-3` | Covered: section 4 (certification). |
+| `FW-4` | Supplier's choice; data contract `tx_power_dbm` is optional. |
+| `FW-5` | Covered: `FR-5`. |
+| `ENV-1` | Covered: section 4. |
+| `ENV-2` | Covered: `FR-14`. |
+| `ENV-3` | Covered: section 4. |
+| `ENV-4` | Covered: section 4 (condensation). |
+| `ENV-5` | Covered: section 4 (bracket, repeated battery changes). |
+| `ENV-6` | Covered: `AT-3` runs with production enclosures fitted. |
+| `ENV-7` | Covered: `PR-1` and `AT-2` (outdoor placement); data contract `sensitivity`. |
+| `REG-1` to `REG-3` | Covered: section 4 (markets). |
+| `REG-4` | Covered: section 4 (label area). |
+| Appendix A.3: lens-cover accessory | Covered: section 4. |
+| Appendix A.3: battery isolation tab | Supplier's choice. |
+
+### RAIS Base Station v3
+
+| ID | Where it went |
+| --- | --- |
+| `NET-1` | Covered: `FR-10`. |
+| `NET-2` | Covered: `FR-10`, `FR-11`; data contract `set_network`. |
+| `NET-3` | Covered: `FR-10`; data contract `status.interface`. |
+| `NET-4` | Covered: `FR-10` (Wi-Fi range). An external antenna is the supplier's choice. |
+| `NET-5` | Covered: `PR-8`; data contract `availability`. |
+| `SEC-1` | Covered: `FR-9`; data contract (connection). |
+| `SEC-2` | Covered: `FR-9`; data contract `update_ca_bundle` and "no time, no data". |
+| `SEC-3` | Covered: `FR-7`, `FR-8`. |
+| `SEC-4` | Covered: `FR-9`. |
+| `PWR-1` | Covered: section 4 (802.3af). The PoE class is the supplier's choice. |
+| `PWR-2` | Covered: section 4 (USB-C). |
+| `PWR-3` | Covered: section 4 (no reboot on swap); data contract `status.power_source`. |
+| `RAD-1` | Not required for RAIS2.1 field updates (`CR-16`). Matching the sensor's radio is the supplier's design. |
+| `RAD-2` | Not required (`CR-16`). |
+| `RAD-3`, `RAD-4` | Covered: `FR-17` and section 4 (certification). Antenna and power tables are the supplier's choice. |
+| `RAD-5` | Covered: `FR-18`, `PR-2`. |
+| `RAD-6` | Covered: `PR-5`; data contract `records_dropped` and `buffer_overflow`. |
+| `PLT-1` | Supplier's choice. |
+| `PLT-2` | Covered: `FR-6`; data contract `status.fw`. |
+| `PLT-3` | Covered: `FR-12`. |
+| `PLT-4` | Covered: the data contract uses UTC throughout, and our back end handles local time. |
+| `PLT-5` | Covered: `FR-11`. |
+| `PLT-6` | Covered: `FR-19`. |
+| `MEC-1` | Covered: section 4. Connectors follow from `FR-10` and the power options. |
+| `MEC-2` | Covered: section 4 (logo). |
+| `REG-1` to `REG-4` | Covered: section 4. |
+| Appendix A.3: ThingsBoard gateway API and HTTP endpoints | Not required (`CR-06`, section 1). |
+| Appendix A.4: pairing model | Covered: `FR-7` (our preference). |
+| Appendix A.6: fleet migration | Not required (`CR-16`). |
+
+The upstream PIR v3 and Base Station v3 **product** requirements haven't been
+checked against this specification yet.
