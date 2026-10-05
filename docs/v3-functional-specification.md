@@ -11,6 +11,10 @@ system: the sensors, the base station, all of their firmware, and the encrypted
 link between them. The system ends at our MQTT broker. What it must deliver
 there is defined in the [data contract](v3-data-contract.md).
 
+**The PIR footfall sensor is the reason for this project,** and the only sensor
+to be designed now. The system must not rule out other sensor types later
+(`FR-16`).
+
 Items marked **[TBD]** still need a decision on our side. Values marked
 **(proposed)** are our starting point, and the supplier may suggest alternatives
 with reasons.
@@ -82,6 +86,7 @@ take precedence. One requirement no longer applies:
 | `FR-13` | **Store and forward.** No data is lost during a network outage within the buffer duration (`PR-6`). |
 | `FR-14` | **Sealed controls.** The sensor has no unsealed openings. LEDs show through a translucent case or a sealed light pipe, and reset is magnetic, such as a reed or Hall switch (sensor `ENV-2`). |
 | `FR-15` | **Diagnostics.** A sensor or base station can be diagnosed remotely from the data contract's health fields alone. A local diagnostic interface for engineers is also provided, and is disabled or protected in production. |
+| `FR-16` | **Other sensor types.** The radio protocol, pairing, encryption, firmware updates and data contract must allow other battery sensor types to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Directly attached sensors use the expansion header (base `PLT-6`). Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
 
 ## 3. Performance requirements
 
