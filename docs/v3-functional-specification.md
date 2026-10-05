@@ -320,7 +320,9 @@ required** means we've decided against it.
 
 ### PIR Sensor v3 product requirements
 
-The product requirements that JJ's technical pages were written from.
+The product requirements that JJ's technical pages were written from:
+[PIR Sensor v3 — Product Requirements](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1249771522) and
+[RAIS Base Station v3 — Product Requirements](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1249804289).
 
 | Requirement | Priority | Where it went |
 | --- | --- | --- |
