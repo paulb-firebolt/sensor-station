@@ -1,19 +1,48 @@
 ---
 title: Sensor Station v3 — Functional Specification
-description: What a turnkey supplier must deliver for v3. It covers the system's functions, performance targets with acceptance tests, IP ownership, deliverables and support.
+description: What a turnkey supplier must deliver for v3. It covers outcomes, performance targets with acceptance tests, IP ownership, deliverables and support, and leaves the technology to the supplier.
 created: 2026-10-02T00:00:00Z
-lastModified: 2026-10-02T00:00:00Z
+lastModified: 2026-10-05T00:00:00Z
 ---
 
-**Draft for review, version 0.1.** This specification describes **what** the v3
-system must do, not how. We're asking a supplier to design and build the whole
-system: the sensors, the base station, all of their firmware, and the encrypted
-link between them. The system ends at our MQTT broker. What it must deliver
-there is defined in the [data contract](v3-data-contract.md).
+**Draft for review, version 0.2.** This specification describes **what** the v3
+system must achieve, not how. We're asking a supplier to design and build the
+whole system: the sensors, whatever collects their data on site, all of the
+firmware, and the secure links between them. The system ends at our MQTT broker.
+What it must deliver there is defined in the [data contract](v3-data-contract.md).
 
 **The PIR footfall sensor is the reason for this project,** and the only sensor
 to be designed now. The system must not rule out other sensor types later
 (`FR-16`).
+
+## Technology is the supplier's choice
+
+The data contract is the only fixed interface, because our back-end systems
+depend on it. Everything on the device side of the broker is open:
+
+- the wireless technology: sub-GHz, BLE, Zigbee, Thread, Wi-Fi HaLow or anything
+  else
+- the architecture: a base station or gateway, a mesh, or something else
+- chips, modules, batteries, protocols and firmware platform
+
+Where this specification says **base station**, it means whatever device
+connects to our broker on behalf of the sensors.
+
+We include our own work as **reference material, not requirements**:
+
+- **Our proof of concept:** a working system using TI CC13xx sub-GHz radios and
+  an ESP32-P4 base station, sending MQTT over TLS. The
+  [hardware design brief](hardware-design-brief.mdx) describes it, what it has
+  proven, and how we'd take it to production on that technology. Take a look,
+  and reuse anything that helps.
+- **The requirement pages,**
+  [PIR Sensor v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185)
+  and
+  [RAIS Base Station v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793).
+  These were written around our current sub-GHz design. Their targets for
+  range, battery life, sealing and markets are carried into this specification.
+  Their implementation detail (radio PHY, bands, chips, protocols) is background
+  only.
 
 Items marked **[TBD]** still need a decision on our side. Values marked
 **(proposed)** are our starting point, and the supplier may suggest alternatives
@@ -23,13 +52,13 @@ with reasons.
 
 ### What the supplier delivers
 
-- **The PIR sensor:** a battery-powered, IP65 footfall sensor that counts
-  impressions and dwell, with 868 MHz and 915 MHz variants.
-- **The base station:** an indoor unit, powered by PoE or USB-C, that receives
-  from up to 50 sensors (proposed) and delivers their data to our broker over
-  Ethernet or Wi-Fi, with cellular as an option.
-- **All firmware** for both products, including the radio link, pairing,
-  encryption, remote configuration and firmware updates.
+- **The PIR sensor:** a battery-powered, weatherproof footfall sensor that
+  counts impressions and dwell, for indoor and outdoor retail use.
+- **The base station** (or whatever the design uses instead): it collects data
+  from up to 50 sensors (proposed) and delivers it to our broker over the
+  customer's network.
+- **All firmware,** including the sensor links, pairing, encryption, remote
+  configuration and firmware updates.
 - **Manufacturing support:**
   - prototype builds
   - a golden sample
@@ -38,55 +67,42 @@ with reasons.
 
 ### What we provide
 
-- This specification, the [data contract](v3-data-contract.md) and the detailed
-  requirements:
-  - [PIR Sensor v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246429185)
-  - [RAIS Base Station v3](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1246625793)
+- This specification and the [data contract](v3-data-contract.md).
 - The MQTT broker and everything behind it.
 - A certificate authority for device certificates, and the firmware-signing keys
   (section 6).
 - The enclosures, which our group's enclosure company designs and probably
-  manufactures. The supplier works with them on fit, sealing and antenna
+  manufactures. The supplier works with them on fit, sealing and wireless
   performance.
 - Test sites and access for pilot installations.
-- Our proof of concept as a reference: an ESP32-P4 base station, a CC1312R
-  concentrator and CC1310 sensor nodes, sending MQTT over TLS. Its design isn't
-  binding (see the [hardware design brief](hardware-design-brief.mdx) for
-  background).
+- The reference material above.
 
-### Where the detailed requirements apply
+### Not required
 
-The Confluence requirement pages still apply for environmental, mechanical,
-radio, power and regulatory detail. They're referenced by ID below, for example
-sensor `PWR-1` or base `NET-2`. Where they describe a particular
-implementation, treat it as guidance. This specification and the data contract
-take precedence. One requirement no longer applies:
-
-- **Backward compatibility is not required.** An upgrade to v3 replaces every
-  component on site. Sensor `RF-2` and `RF-3`, base `RAD-1` (its RAIS2.1
-  field-update part) and `RAD-2`, and the rollout plan in base Appendix A.6 do
-  not apply (change register `CR-16`).
+**Backward compatibility.** An upgrade to v3 replaces every component on site,
+so v3 doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations
+(change register `CR-16`).
 
 ## 2. Functional requirements
 
 | ID | Requirement |
 | --- | --- |
-| `FR-1` | **Counting.** Each sensor detects and counts PIR impressions, and reports them in batches per configurable tick (sensor `FW-1`). |
+| `FR-1` | **Counting.** Each sensor detects and counts PIR impressions, and reports the count at a configurable interval (10–60 s, proposed). |
 | `FR-2` | **Dwell.** Each sensor detects and reports dwell episodes [TBD: definition, see the data contract]. |
 | `FR-3` | **Delivery.** The base station delivers counts, dwell, sensor health, events and its own status to our broker exactly as the [data contract](v3-data-contract.md) defines. |
-| `FR-4` | **Sensor health.** Sensors send a heartbeat with battery voltage and signal strength, even when nothing is counted (sensor `FW-1` exception, `PWR-6`). The base station reports a sensor missing and back. |
-| `FR-5` | **Remote configuration.** Every setting in the data contract can be changed from our platform and survives battery changes and power cycles (sensor `FW-5`). |
-| `FR-6` | **Firmware updates.** The base-station host, its radio, and the sensors can all be updated remotely through our platform, using images signed with our key. A failed update rolls back automatically. No update needs a site visit. |
-| `FR-7` | **Pairing and enrolment.** A defined procedure pairs a sensor with a base station. We prefer factory pre-provisioning keyed to the QR label, with no installer action needed (base Appendix A.4). Sensors can be moved to another base station by command. |
-| `FR-8` | **Radio security.** The sensor link is encrypted and authenticated, with replay protection and a unique key per site or pairing (base `SEC-3`). |
-| `FR-9` | **Cloud security.** Mutual TLS to our broker, server certificates validated, CA bundle updatable in the field (base `SEC-1`, `SEC-2`). Secrets stored encrypted at rest, with secure boot enabled (base `SEC-4`). |
-| `FR-10` | **Network.** Ethernet (DHCP and static IP) and Wi-Fi, with Ethernet preferred and automatic fallback. Cellular is an optional variant (base `NET-1` to `NET-4`). |
-| `FR-11` | **Installation.** An installer with no technical knowledge can install a base station and its sensors using a phone or the base station's local setup page. This includes Ethernet-only sites (base `PLT-5`). |
-| `FR-12` | **Self-recovery.** The base station recovers from firmware hangs, radio faults and network loss without intervention (base `PLT-3`). |
+| `FR-4` | **Sensor health.** Every sensor reports its battery level and link quality regularly, even when nothing is counted. The base station reports a sensor missing and back. |
+| `FR-5` | **Remote configuration.** Every setting in the data contract can be changed from our platform, and survives battery changes and power cycles. |
+| `FR-6` | **Firmware updates.** Every programmable part of the system can be updated remotely through our platform, using images signed with our key. A failed update rolls back automatically. No update needs a site visit. |
+| `FR-7` | **Pairing and enrolment.** A defined procedure pairs a sensor with a base station. We prefer factory pre-provisioning keyed to the QR label, with no installer action needed. Sensors can be moved to another base station by command. |
+| `FR-8` | **Link security.** Every wireless link is encrypted and authenticated, with replay protection and unique keys per site or pairing, whatever the technology. |
+| `FR-9` | **Cloud security.** Mutual TLS to our broker, server certificates validated, and a CA bundle that can be updated in the field. Secrets stored encrypted at rest, with secure boot enabled. |
+| `FR-10` | **Customer network.** The base station connects by Ethernet (DHCP and static IP) or Wi-Fi, with Ethernet preferred and automatic fallback. A cellular option is welcome but not essential. |
+| `FR-11` | **Installation.** An installer with no technical knowledge can install a base station and its sensors using a phone or a local setup page. This includes Ethernet-only sites. |
+| `FR-12` | **Self-recovery.** The system recovers from firmware hangs, link faults and network loss without intervention. |
 | `FR-13` | **Store and forward.** No data is lost during a network outage within the buffer duration (`PR-6`). |
-| `FR-14` | **Sealed controls.** The sensor has no unsealed openings. LEDs show through a translucent case or a sealed light pipe, and reset is magnetic, such as a reed or Hall switch (sensor `ENV-2`). |
+| `FR-14` | **Sealed sensor.** The sensor has no unsealed openings. Status indication and reset must work without breaking the seal, for example with a light pipe and a magnetic reset. |
 | `FR-15` | **Diagnostics.** A sensor or base station can be diagnosed remotely from the data contract's health fields alone. A local diagnostic interface for engineers is also provided, and is disabled or protected in production. |
-| `FR-16` | **Other sensor types.** The radio protocol, pairing, encryption, firmware updates and data contract must allow other battery sensor types to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Directly attached sensors use the expansion header (base `PLT-6`). Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
+| `FR-16` | **Other sensor types.** The design must allow other battery sensor types to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
 
 ## 3. Performance requirements
 
@@ -95,37 +111,33 @@ Each one has an acceptance test in section 5.
 | ID | Requirement | Target |
 | --- | --- | --- |
 | `PR-1` | **Counting accuracy:** impressions counted against a ground-truth count, in a defined test set-up | ±[TBD] % over [TBD] hours, at [TBD] impressions per hour |
-| `PR-2` | **Range:** packet delivery from sensor to base station | ≥ 99 % at 50 m non-line-of-sight in a typical retail environment, with a 10 dB fade margin (sensor `RF-1`) |
-| `PR-3` | **Battery life** on one CR123A | ≥ 3 years at 15,000 impressions per day (sensor `PWR-1`), shown by an energy model validated against measured current (`PWR-4`) |
-| `PR-4` | **Latency:** time from impression to arrival at our broker, on Ethernet | ≤ tick + 10 s, for 99 % of records (proposed) |
-| `PR-5` | **Capacity** per base station | 50 sensors (proposed) at the worst-case traffic profile, with no lost records (base `RAD-6`) |
+| `PR-2` | **Range:** message delivery from sensor to base station | ≥ 99 % at 50 m non-line-of-sight in a typical retail environment, with margin for fading. A mesh or repeater may be used to reach it. |
+| `PR-3` | **Battery life** on a user-replaceable, widely available battery | ≥ 3 years at 15,000 impressions per day, shown by an energy model validated against measured current |
+| `PR-4` | **Latency:** time from impression to arrival at our broker, on Ethernet | ≤ reporting interval + 10 s, for 99 % of records (proposed) |
+| `PR-5` | **Capacity** per base station | 50 sensors (proposed) at the worst-case traffic profile, with no lost records |
 | `PR-6` | **Buffer duration:** network outage survived without data loss, at full capacity | ≥ 72 hours (proposed) |
-| `PR-7` | **Missing-sensor detection** | Reported within 3 heartbeat intervals |
-| `PR-8` | **Base-station offline detection** | Visible to us within 1.5 × the MQTT keepalive (base `NET-5`) |
+| `PR-7` | **Missing-sensor detection** | Reported within [TBD, e.g. 3 hours] |
+| `PR-8` | **Base-station offline detection** | Visible to us within 1.5 × the MQTT keepalive |
 | `PR-9` | **Update reliability** | Interrupting an update (power or network loss) never leaves a device unrecoverable |
-| `PR-10` | **Configuration latency** to a sensor | Applied within 2 ticks of the sensor's next transmission |
+| `PR-10` | **Configuration latency** to a sensor | Applied within [TBD, e.g. 5 minutes] |
 
 ## 4. Environmental, mechanical and regulatory
 
-These are as in the requirement pages:
-
 - **Sensor:**
-  - IP65 by design (`ENV-1` to `ENV-6`)
-  - −20 °C to +60 °C (proposed, `ENV-3`)
-  - CR123A, user-replaceable (`PWR-2`)
-  - black and white variants
+  - IP65 by design, not by potting
+  - −20 °C to +60 °C (proposed)
+  - UV-stable, in black and white
+  - removable from a wall bracket for battery changes, then refitted in the
+    same position
 - **Base station:**
-  - indoor (`MEC-1`)
-  - PoE 802.3af and USB-C (`PWR-1` to `PWR-3`)
+  - indoor, with no IP rating needed
+  - powered by PoE (IEEE 802.3af) or USB-C
   - operating temperature [TBD]
-- **Markets:** UK, EU and US first. Certification is UKCA/CE (RED) for 868 MHz
-  and FCC for 915 MHz, including EMC, safety, RF exposure and EN 18031-1
-  cybersecurity. The supplier prepares the technical file. We're likely to be
-  the legal manufacturer, so the evidence must be ours (section 6).
-
-The detailed certification list is in the
-[hardware design brief](hardware-design-brief.mdx), under "RF, antennas and
-certification".
+- **Markets:** UK, EU and US first. The supplier certifies every radio
+  technology used, for each market (UKCA, CE under RED, and FCC), including EMC,
+  safety, RF exposure and EN 18031-1 cybersecurity. The supplier prepares the
+  technical file. We're likely to be the legal manufacturer, so the evidence
+  must be ours (section 6).
 
 ## 5. Acceptance
 
@@ -142,20 +154,20 @@ assigned to it passes.
 | --- | --- | --- | --- |
 | `AT-1` | `FR-3`, data contract | Run our contract checker against live traffic for 24 h. Every message validates against the AsyncAPI schema, and every topic is seen. | A, B, C |
 | `AT-2` | `PR-1` | Count against a ground truth (video or manual count) at a controlled test lane and at a pilot site [TBD: method]. | A (lane), B (site) |
-| `AT-3` | `PR-2` | RSSI and packet-error survey at a worst-case pilot site; bench link-budget review. | A, B |
-| `AT-4` | `PR-3` | Current-profile capture (sleep, one impression, one batched transmission, one dwell), compared with the energy model within ±20 %. | A, C |
+| `AT-3` | `PR-2` | Signal-strength and message-loss survey at a worst-case pilot site, plus the supplier's link-budget analysis. | A, B |
+| `AT-4` | `PR-3` | Current-profile capture (sleep, one impression, one report, one dwell), compared with the energy model within ±20 %. | A, C |
 | `AT-5` | `FR-13`, `PR-6` | Disconnect the network for 72 h at full simulated load. Every record arrives afterwards, with no gaps in `seq`. | A, C |
 | `AT-6` | `FR-4`, `PR-7`, `PR-8` | Remove a sensor's battery, then cut the base station's power and network in turn. The correct events and availability appear in time. | A, B |
-| `AT-7` | `FR-6`, `PR-9` | Update each target from our platform. Then interrupt an update with power loss and with network loss. Unsigned or wrongly signed images are rejected. | A, C |
+| `AT-7` | `FR-6`, `PR-9` | Update each component from our platform. Then interrupt an update with power loss and with network loss. Unsigned or wrongly signed images are rejected. | A, C |
 | `AT-8` | `FR-5`, `PR-10` | Change each sensor setting remotely, change the battery, and confirm the settings are kept. | A |
-| `AT-9` | `FR-8`, `FR-9` | Try to inject and replay radio frames with an SDR or dev kit; this must fail. A flash dump yields no secrets. A broker with an invalid certificate is refused. | A, C |
+| `AT-9` | `FR-8`, `FR-9` | Try to inject and replay wireless messages with suitable test equipment; this must fail. A flash dump yields no secrets. A broker with an invalid certificate is refused. | A, C |
 | `AT-10` | `PR-5` | Load test with 50 real or simulated sensors at worst-case traffic for 24 h, with no records lost. | A, C |
 | `AT-11` | `FR-10`, `FR-11` | Install on Ethernet with DHCP, Ethernet with static IP, and Wi-Fi, following only the supplied installation guide. Test Ethernet-to-Wi-Fi fallback. | A, B |
-| `AT-12` | `FR-12` | Inject faults: hang the host, hang the radio, drop the network. The system recovers unattended. | A |
+| `AT-12` | `FR-12` | Inject faults: hang each processor, break the sensor links, drop the network. The system recovers unattended. | A |
 | `AT-13` | `IP-2` | A third party builds every firmware image from the delivered package. The images match the delivered binaries. | C |
 
-Our proof of concept can act as a reference base station for `AT-1` before the
-supplier's hardware exists.
+Our proof of concept can be adapted to speak the data contract, so it can act as
+a reference base station for `AT-1` before the supplier's hardware exists.
 
 ## 6. IP, deliverables and support
 
@@ -172,12 +184,22 @@ wording.
 | `IP-6` | **Maintenance and security support.** A separate agreement covering:<ul><li>at least [TBD] years of support after launch</li><li>a vulnerability-handling process, with response times for security fixes that meet our Cyber Resilience Act and EN 18031 obligations</li><li>rates for changes</li></ul>Because we own the source, another supplier can take over at any time. |
 | `IP-7` | **Volume transfer.** Support during transfer to a volume manufacturer: answering their questions, reviewing first articles, and remote help with production test bring-up. |
 
-## 7. Decisions still to make on our side
+## 7. What we'd like in the supplier's proposal
+
+- the chosen architecture and wireless technology, and why
+- how it meets `PR-2` (range) and `PR-3` (battery life), with the supporting
+  analysis
+- the certification plan and its cost for each market
+- how other sensor types would be added (`FR-16`)
+- which parts of our proof of concept they would reuse, if any
+
+## 8. Decisions still to make on our side
 
 - [ ] `PR-1` accuracy target and test method, and what an "impression" means for
   the business
 - [ ] Dwell definition (`FR-2`, data contract)
 - [ ] Declared capacity per base station (`PR-5`) and buffer duration (`PR-6`)
+- [ ] Missing-sensor detection time (`PR-7`) and configuration latency (`PR-10`)
 - [ ] Base-station ID format and QR label content
 - [ ] Base-station operating temperature range
 - [ ] Pilot size and sites (acceptance stage B)

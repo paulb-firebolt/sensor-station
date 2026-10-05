@@ -1,9 +1,11 @@
 asyncapi: 3.0.0
 info:
   title: Sensor Station v3 Data Contract
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    MQTT interface between a v3 base station and our platform. Draft for review.
+    MQTT interface between a v3 system and our platform. Draft for review.
+    Independent of the device-side technology: the "base station" is whatever
+    device connects to the broker on behalf of the sensors.
     Human-readable version: docs/v3-data-contract.md. Operations are described
     from the base station's point of view: "send" means the base station
     publishes, "receive" means it subscribes.
@@ -231,7 +233,6 @@ components:
                 last_heard: "2026-10-02T14:14:52.000Z"
                 battery_mv: 2980
                 rssi_dbm: -87
-                tx_power_dbm: 10
                 fw_version: 3.1.0
                 config_version: 7
     events:
@@ -265,10 +266,9 @@ components:
             ip: 10.1.20.33
             power_source: poe
             time_synced: true
-            band: "868"
             sensors: { enrolled: 12, ok: 11, missing: 1, lowest_battery_mv: 2710 }
             buffer: { records_pending: 0, oldest_pending: null }
-            counters: { records_dropped: 0, radio_crc_errors: 14, mqtt_reconnects: 2 }
+            counters: { records_dropped: 0, mqtt_reconnects: 2 }
     command:
       name: command
       payload:
@@ -301,13 +301,13 @@ components:
       description: UTC, ISO 8601 with milliseconds and a Z suffix.
     SensorId:
       type: string
-      pattern: "^[0-9A-F]{16}$"
-      description: Radio MCU IEEE address, uppercase hex.
+      pattern: "^[0-9A-Z]{8,32}$"
+      description: Unique ID fixed at manufacture and printed on the label, chosen by the supplier.
     Seq:
       type: integer
       minimum: 0
       maximum: 4294967295
-      description: Sensor frame counter; (sensor, seq) is unique across counts and dwell.
+      description: Per-sensor sequence number, never reused; (sensor, seq) is unique across counts and dwell.
     Envelope:
       type: object
       required: [v, bs, sent_at]
@@ -381,7 +381,7 @@ components:
                   last_heard: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
                   battery_mv: { type: integer, minimum: 0, maximum: 4000 }
                   rssi_dbm: { type: integer, minimum: -150, maximum: 0 }
-                  tx_power_dbm: { type: integer, minimum: -20, maximum: 30 }
+                  tx_power_dbm: { type: integer, minimum: -20, maximum: 30, description: "Optional; only if the technology adjusts transmit power." }
                   fw_version: { type: string }
                   config_version: { type: integer, minimum: 0 }
 
@@ -408,7 +408,7 @@ components:
                       - sensor_removed
                       - battery_low
                       - sensor_reset
-                      - radio_fault
+                      - link_fault
                       - buffer_overflow
                   at: { $ref: "#/components/schemas/Timestamp" }
                   sensor: { $ref: "#/components/schemas/SensorId" }
@@ -421,22 +421,19 @@ components:
       allOf:
         - $ref: "#/components/schemas/Envelope"
         - type: object
-          required: [fw, uptime_s, interface, power_source, time_synced, band, sensors, buffer, counters]
+          required: [fw, uptime_s, interface, power_source, time_synced, sensors, buffer, counters]
           properties:
             fw:
               type: object
-              additionalProperties: false
-              required: [host, radio]
-              properties:
-                host: { type: string }
-                radio: { type: string }
+              description: Firmware version per component; component names are chosen by the supplier and used as firmware_update targets.
+              minProperties: 1
+              additionalProperties: { type: string }
             uptime_s: { type: integer, minimum: 0 }
             boot_reason: { type: string, enum: [power_on, watchdog, update, command, other] }
             interface: { type: string, enum: [ethernet, wifi, cellular] }
             ip: { type: string }
             power_source: { type: string, enum: [poe, usb] }
             time_synced: { type: boolean }
-            band: { type: string, enum: ["868", "915"] }
             sensors:
               type: object
               additionalProperties: false
@@ -467,8 +464,6 @@ components:
         tick_s: { type: integer, minimum: 10, maximum: 60 }
         heartbeat_s: { type: integer, minimum: 3600, maximum: 21600 }
         sensitivity: { type: integer, description: "Range to be defined." }
-        dual_detect: { type: boolean }
-        tx_power_max_dbm: { type: integer }
         led: { type: string, enum: ["on", "off", install] }
 
     Command:
@@ -507,7 +502,7 @@ components:
         ethernet: { type: object }
         wifi: { type: object }
         cellular: { type: object }
-        target: { type: string, enum: [host, radio, sensor] }
+        target: { type: string, minLength: 1, description: "sensor, or a component name from status.fw." }
         url: { type: string, format: uri, pattern: "^https://" }
         version: { type: string }
         sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
