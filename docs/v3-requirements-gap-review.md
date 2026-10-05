@@ -50,7 +50,7 @@ copying the requirement text.
 | CR-13 | Sensor | New requirement | Decision | Node settings must survive a power cycle (config persistence). | Not implemented on either node project (config persistence section below). | applied (sensor v2) |
 | CR-14 | Sensor | RF-2 scope | Question | Is remote sensor firmware update in scope for v3? | Only a design note exists (sensor OTA section below). | commented (sensor v2) |
 | CR-15 | Sensor | FW-2 | Internal | Switch the PoC from SimpleLink Long Range to the ~50 kbps target PHY. No document change. | Conflict 2 below. | noted (sensor v2 footer); PoC work open |
-| CR-16 | Sensor, Base | Sensor RF-2; Base A.6 rollout | Decision | Drop backward compatibility with installed PIRW2/RAIS2.1 hardware. A v3 upgrade replaces every component on site, so the new PHY doesn't need to be deployable to installed base stations by firmware alone. | Agreed with JJ on 2026-10-02. It also removes the conflict between RF-2 and the FW-2 PHY, and the 868 MHz problem with installed 902–928 MHz antennas. | agreed; Confluence edit pending |
+| CR-16 | Sensor, Base | Sensor RF-2; Base A.6 rollout | Decision | Drop backward compatibility with installed PIRW2/RAIS2.1 hardware. A v3 upgrade replaces every component on site, so the new PHY doesn't need to be deployable to installed base stations by firmware alone. | Agreed with JJ on 2026-10-02. It also removes the conflict between RF-2 and the FW-2 PHY, and the 868 MHz problem with installed 902–928 MHz antennas. | applied ([functional specification](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1249181697) v3, section 1 "Not required"); requirement pages not edited, as they're now reference only |
 
 ## Applied change sets
 
@@ -58,6 +58,7 @@ copying the requirement text.
 | --- | --- | --- | --- | --- |
 | 2026-10-02 | Base station | 2 | CR-01 to CR-05, CR-07, CR-08 edited; CR-06, CR-09 commented | One inline comment per row plus a footer summary. A reply on CR-08 corrects an overstated claim about ThingsBoard Last Will support. |
 | 2026-10-02 | Sensor | 2 | CR-10 to CR-13 edited; CR-14 commented | One inline comment per row plus a footer summary, which also notes CR-15 (PoC still on SimpleLink Long Range). |
+| 2026-10-05 | [Functional specification](https://firebolt.atlassian.net/wiki/spaces/SD/pages/1249181697) | 3 | CR-16 | Backward compatibility listed under "Not required"; the traceability appendix maps sensor `RF-2`/`RF-3` and base `RAD-1`/`RAD-2`/A.6 to CR-16. JJ's requirement pages are left as written: under the turnkey approach they're reference material, and the functional specification takes precedence. |
 
 ## Evidence (original gap review, 2026-09-07)
 
