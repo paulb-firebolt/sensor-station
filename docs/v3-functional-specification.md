@@ -12,8 +12,10 @@ firmware, and the secure links between them. The system ends at our MQTT broker.
 What it must deliver there is defined in the [data contract](v3-data-contract.md).
 
 **The PIR footfall sensor is the reason for this project,** and the only sensor
-to be designed now. The system must not rule out other sensor types later
-(`FR-16`).
+to be designed now. Its job is to detect people passing (impressions) and people
+lingering (dwell). PIR is the expected technology, but the supplier may propose
+another, such as mmWave, if it meets the same accuracy and battery targets. The
+system must not rule out other sensor types later (`FR-16`).
 
 ## Technology is the supplier's choice
 
@@ -135,14 +137,23 @@ Each one has an acceptance test in section 5.
   - IP65 by design, not by potting
   - −20 °C to +60 °C (proposed)
   - UV-stable, in black and white
-  - removable from a wall bracket for battery changes, then refitted in the
-    same position
+  - mountable at 90° (straight ahead), 45° and 22.5° pointing down, and 0°
+    (straight down), to set the detection area
+  - a separate wall bracket, fixed by screws or 3M VHB tape; the sensor clips
+    on, and can be removed for battery changes and refitted in the same position
   - the seal survives repeated battery changes ([TBD] open-and-close cycles),
     with no tools beyond opening the battery door
   - no condensation damage through outdoor temperature cycling, for example
     with a breathable vent membrane
-  - an optional lens-cover accessory (45° spread) that keeps the seal
-  - space for our QR/ID label, including the FCC ID
+  - a 45° detection spread, as on PIRW-017, so only people passing directly in
+    front of the store entrance are counted. If a lens cover achieves this, it
+    keeps the seal.
+  - a high-quality look that clients don't object to having on show, and as
+    compact as possible, or made to look smaller, for example with tapered
+    edges
+  - space for our QR/ID label, including the sensor ID and FCC ID; Glimpse logo
+    embossed (could)
+  - batteries fitted at installation, so no battery isolation tab is needed
 - **Base station:**
   - indoor, with no IP rating needed
   - powered by PoE (IEEE 802.3af) or USB-C, with no reboot when the power source
@@ -209,6 +220,10 @@ wording.
 - the certification plan and its cost for each market
 - how other sensor types would be added (`FR-16`)
 - which parts of our proof of concept they would reuse, if any
+- whether to keep two PIR elements that must agree, to reject false triggers
+  (as in the original sensor), or another way to meet `PR-1`
+- whether another sensing technology, such as mmWave, would count people better
+  within the battery budget
 
 ## 8. Decisions still to make on our side
 
@@ -220,7 +235,7 @@ wording.
 - [ ] Base-station ID format and QR label content
 - [ ] Base-station operating temperature range
 - [ ] How many battery-change cycles the sensor seal must survive
-- [ ] Check this specification against the PIR v3 and Base Station v3 product requirements (ask JJ for them)
+- [ ] Get the sensor Theory of Operation from JJ: it should settle the impression and dwell definitions (`PR-1`, `FR-2`)
 - [ ] Pilot size and sites (acceptance stage B)
 - [ ] Maintenance term in years (`IP-6`)
 - [ ] Cellular upload cadence and data budget
@@ -266,8 +281,8 @@ required** means we've decided against it.
 | `ENV-7` | Covered: `PR-1` and `AT-2` (outdoor placement); data contract `sensitivity`. |
 | `REG-1` to `REG-3` | Covered: section 4 (markets). |
 | `REG-4` | Covered: section 4 (label area). |
-| Appendix A.3: lens-cover accessory | Covered: section 4. |
-| Appendix A.3: battery isolation tab | Supplier's choice. |
+| Appendix A.3: lens-cover accessory | Covered: section 4 (45° spread). |
+| Appendix A.3: battery isolation tab | Covered: section 4 (batteries fitted at installation). |
 
 ### RAIS Base Station v3
 
@@ -303,5 +318,41 @@ required** means we've decided against it.
 | Appendix A.4: pairing model | Covered: `FR-7` (our preference). |
 | Appendix A.6: fleet migration | Not required (`CR-16`). |
 
-The upstream PIR v3 and Base Station v3 **product** requirements haven't been
-checked against this specification yet.
+### PIR Sensor v3 product requirements
+
+The product requirements that JJ's technical pages were written from.
+
+| Requirement | Priority | Where it went |
+| --- | --- | --- |
+| Choice of mounting angles | Must | Covered: section 4. |
+| Separate mounting bracket | Should | Covered: section 4 (screws or VHB tape). |
+| Narrower sensor spread (45°) | Should | Covered: section 4. |
+| Longer battery life | Must | Covered: `PR-3`. CR123A is suggested, and alternatives are welcome. |
+| User-replaceable battery | Should | Covered: `PR-3`, section 4. |
+| Weather-sealed enclosure | Must | Covered: section 4 (IP65), `FR-14`. |
+| Increase radio range | Must | Covered: `PR-2`. Working with existing base stations: not required (`CR-16`). |
+| Aesthetically pleasing design and materials | Should | Covered: section 4. |
+| Look sleek, less bulky | Should | Covered: section 4. |
+| QR code sticker | Must | Covered: section 4. |
+| UKCA, FCC and CE approval or exemption | Must | Covered: section 4. |
+| Remove battery isolation tab | Could | Covered: section 4. |
+| Glimpse logo in the enclosure | Could | Covered: section 4. |
+| Choice of colours (black and white) | Must | Covered: section 4. |
+| Explore alternative detection methods | Could | Covered: introduction and section 7. |
+| Improve detection accuracy (dual PIR) | Should | Covered: `PR-1`, section 7. |
+
+### RAIS Base Station v3 product requirements
+
+| Requirement | Priority | Where it went |
+| --- | --- | --- |
+| Ethernet | Must | Covered: `FR-10`. |
+| DHCP and static IP | Must | Covered: `FR-10`. |
+| Secure protocol over Ethernet | Should | Covered: `FR-9` and the data contract. TLS is required on every interface, not only Ethernet. |
+| PoE, keeping USB power | Must | Covered: section 4. |
+| USB-C | Should | Covered: section 4. |
+| Increase radio range | Must | Covered: `PR-2`. Working with existing sensors: not required (`CR-16`). |
+| Change from ESP8266 to ESP32 | Should | Supplier's choice. |
+| Encrypt the sub-GHz radio link, with pairing | Should | Covered: `FR-7`, `FR-8`, for whatever wireless technology is used. |
+| External Wi-Fi antenna | Should | Covered: `FR-10` (Wi-Fi range). The antenna is the supplier's choice. |
+| UKCA, FCC and CE approval or exemption | Must | Covered: section 4. |
+| Glimpse logo in the enclosure | Could | Covered: section 4. |
