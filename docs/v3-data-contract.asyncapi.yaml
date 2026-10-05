@@ -1,0 +1,538 @@
+asyncapi: 3.0.0
+info:
+  title: Sensor Station v3 Data Contract
+  version: 0.1.0
+  description: |
+    MQTT interface between a v3 base station and our platform. Draft for review.
+    Human-readable version: docs/v3-data-contract.md. Operations are described
+    from the base station's point of view: "send" means the base station
+    publishes, "receive" means it subscribes.
+
+defaultContentType: application/json
+
+servers:
+  broker:
+    host: "{brokerHost}:8883"
+    protocol: mqtts
+    protocolVersion: "3.1.1"
+    description: Our MQTT broker. Mutual TLS with a per-device X.509 certificate from our CA.
+    variables:
+      brokerHost:
+        description: Broker hostname (not published in this repo).
+        default: broker.example.com
+    security:
+      - $ref: "#/components/securitySchemes/mutualTls"
+    bindings:
+      mqtt:
+        cleanSession: false
+        keepAlive: 60
+        lastWill:
+          topic: glimpse/v1/{bs}/availability
+          qos: 1
+          message: '{"state":"offline"}'
+          retain: true
+
+channels:
+  availability:
+    address: glimpse/v1/{bs}/availability
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      availability:
+        $ref: "#/components/messages/availability"
+  counts:
+    address: glimpse/v1/{bs}/counts
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      counts:
+        $ref: "#/components/messages/counts"
+  dwell:
+    address: glimpse/v1/{bs}/dwell
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      dwell:
+        $ref: "#/components/messages/dwell"
+  sensors:
+    address: glimpse/v1/{bs}/sensors
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      sensors:
+        $ref: "#/components/messages/sensors"
+  events:
+    address: glimpse/v1/{bs}/events
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      events:
+        $ref: "#/components/messages/events"
+  status:
+    address: glimpse/v1/{bs}/status
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      status:
+        $ref: "#/components/messages/status"
+  cmd:
+    address: glimpse/v1/{bs}/cmd
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      command:
+        $ref: "#/components/messages/command"
+  cmdRes:
+    address: glimpse/v1/{bs}/cmd/res
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      commandResult:
+        $ref: "#/components/messages/commandResult"
+
+operations:
+  sendAvailability:
+    action: send
+    channel:
+      $ref: "#/channels/availability"
+    summary: Retained online/offline state; "offline" is the Last Will.
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
+  sendCounts:
+    action: send
+    channel:
+      $ref: "#/channels/counts"
+    summary: Batched impression counts.
+    bindings:
+      mqtt:
+        qos: 1
+  sendDwell:
+    action: send
+    channel:
+      $ref: "#/channels/dwell"
+    summary: Batched dwell episodes.
+    bindings:
+      mqtt:
+        qos: 1
+  sendSensors:
+    action: send
+    channel:
+      $ref: "#/channels/sensors"
+    summary: Health snapshot of every enrolled sensor.
+    bindings:
+      mqtt:
+        qos: 1
+  sendEvents:
+    action: send
+    channel:
+      $ref: "#/channels/events"
+    summary: State changes, sent as they happen.
+    bindings:
+      mqtt:
+        qos: 1
+  sendStatus:
+    action: send
+    channel:
+      $ref: "#/channels/status"
+    summary: Base-station health.
+    bindings:
+      mqtt:
+        qos: 1
+  receiveCommand:
+    action: receive
+    channel:
+      $ref: "#/channels/cmd"
+    summary: Commands from our platform.
+    bindings:
+      mqtt:
+        qos: 1
+  sendCommandResult:
+    action: send
+    channel:
+      $ref: "#/channels/cmdRes"
+    summary: Acknowledgement and final result for each command, correlated by id.
+    bindings:
+      mqtt:
+        qos: 1
+
+components:
+  securitySchemes:
+    mutualTls:
+      type: X509
+      description: Per-base-station client certificate issued by our CA; subject CN is the base station ID.
+
+  parameters:
+    bs:
+      description: Base station ID (QR label; also the MQTT client ID). Format to be confirmed.
+
+  messages:
+    availability:
+      name: availability
+      payload:
+        $ref: "#/components/schemas/Availability"
+      examples:
+        - name: online
+          payload: { state: online }
+    counts:
+      name: counts
+      payload:
+        $ref: "#/components/schemas/Counts"
+      examples:
+        - name: oneRecord
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:05:10.250Z"
+            records:
+              - sensor: 00124B002D6D5A04
+                seq: 48213
+                start: "2026-10-02T14:04:50.000Z"
+                end: "2026-10-02T14:05:00.000Z"
+                impressions: 3
+    dwell:
+      name: dwell
+      payload:
+        $ref: "#/components/schemas/Dwell"
+      examples:
+        - name: oneEpisode
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:07:00.100Z"
+            records:
+              - sensor: 00124B002D6D5A04
+                seq: 48230
+                start: "2026-10-02T14:05:31.000Z"
+                duration_s: 74
+    sensors:
+      name: sensors
+      payload:
+        $ref: "#/components/schemas/Sensors"
+      examples:
+        - name: oneSensor
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:15:00.000Z"
+            sensors:
+              - sensor: 00124B002D6D5A04
+                state: ok
+                last_heard: "2026-10-02T14:14:52.000Z"
+                battery_mv: 2980
+                rssi_dbm: -87
+                tx_power_dbm: 10
+                fw_version: 3.1.0
+                config_version: 7
+    events:
+      name: events
+      payload:
+        $ref: "#/components/schemas/Events"
+      examples:
+        - name: sensorMissing
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:20:01.000Z"
+            events:
+              - type: sensor_missing
+                sensor: 00124B002D6D5A04
+                at: "2026-10-02T14:20:00.000Z"
+    status:
+      name: status
+      payload:
+        $ref: "#/components/schemas/Status"
+      examples:
+        - name: healthy
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:25:00.000Z"
+            fw: { host: 3.0.4, radio: 3.0.2 }
+            uptime_s: 86400
+            boot_reason: power_on
+            interface: ethernet
+            ip: 10.1.20.33
+            power_source: poe
+            time_synced: true
+            band: "868"
+            sensors: { enrolled: 12, ok: 11, missing: 1, lowest_battery_mv: 2710 }
+            buffer: { records_pending: 0, oldest_pending: null }
+            counters: { records_dropped: 0, radio_crc_errors: 14, mqtt_reconnects: 2 }
+    command:
+      name: command
+      payload:
+        $ref: "#/components/schemas/Command"
+      examples:
+        - name: setTick
+          payload:
+            v: 1
+            id: 5b0e2c1a-6f7d-4c1e-9a8b-2d4f6e8a0c11
+            action: set_sensor_config
+            sensor: 00124B002D6D5A04
+            settings: { tick_s: 15 }
+    commandResult:
+      name: commandResult
+      payload:
+        $ref: "#/components/schemas/CommandResult"
+      examples:
+        - name: accepted
+          payload:
+            v: 1
+            bs: BS-7Q2K4M9X1A
+            sent_at: "2026-10-02T14:30:00.500Z"
+            id: 5b0e2c1a-6f7d-4c1e-9a8b-2d4f6e8a0c11
+            result: accepted
+
+  schemas:
+    Timestamp:
+      type: string
+      format: date-time
+      description: UTC, ISO 8601 with milliseconds and a Z suffix.
+    SensorId:
+      type: string
+      pattern: "^[0-9A-F]{16}$"
+      description: Radio MCU IEEE address, uppercase hex.
+    Seq:
+      type: integer
+      minimum: 0
+      maximum: 4294967295
+      description: Sensor frame counter; (sensor, seq) is unique across counts and dwell.
+    Envelope:
+      type: object
+      required: [v, bs, sent_at]
+      properties:
+        v: { type: integer, const: 1 }
+        bs: { type: string, minLength: 1 }
+        sent_at: { $ref: "#/components/schemas/Timestamp" }
+
+    Availability:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { type: string, enum: [online, offline] }
+
+    Counts:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [records]
+          properties:
+            records:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [sensor, seq, start, end, impressions]
+                properties:
+                  sensor: { $ref: "#/components/schemas/SensorId" }
+                  seq: { $ref: "#/components/schemas/Seq" }
+                  start: { $ref: "#/components/schemas/Timestamp" }
+                  end: { $ref: "#/components/schemas/Timestamp" }
+                  impressions: { type: integer, minimum: 1 }
+
+    Dwell:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [records]
+          properties:
+            records:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [sensor, seq, start, duration_s]
+                properties:
+                  sensor: { $ref: "#/components/schemas/SensorId" }
+                  seq: { $ref: "#/components/schemas/Seq" }
+                  start: { $ref: "#/components/schemas/Timestamp" }
+                  duration_s: { type: integer, minimum: 0 }
+
+    Sensors:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [sensors]
+          properties:
+            sensors:
+              type: array
+              items:
+                type: object
+                additionalProperties: false
+                required: [sensor, state]
+                properties:
+                  sensor: { $ref: "#/components/schemas/SensorId" }
+                  state: { type: string, enum: [ok, missing] }
+                  last_heard: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
+                  battery_mv: { type: integer, minimum: 0, maximum: 4000 }
+                  rssi_dbm: { type: integer, minimum: -150, maximum: 0 }
+                  tx_power_dbm: { type: integer, minimum: -20, maximum: 30 }
+                  fw_version: { type: string }
+                  config_version: { type: integer, minimum: 0 }
+
+    Events:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [events]
+          properties:
+            events:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                additionalProperties: false
+                required: [type, at]
+                properties:
+                  type:
+                    type: string
+                    enum:
+                      - sensor_missing
+                      - sensor_back
+                      - sensor_joined
+                      - sensor_removed
+                      - battery_low
+                      - sensor_reset
+                      - radio_fault
+                      - buffer_overflow
+                  at: { $ref: "#/components/schemas/Timestamp" }
+                  sensor: { $ref: "#/components/schemas/SensorId" }
+                  battery_mv: { type: integer, minimum: 0, maximum: 4000 }
+                  reason: { type: string, enum: [battery_change, magnetic_reset, watchdog, other] }
+                  detail: { type: string }
+                  dropped: { type: integer, minimum: 1 }
+
+    Status:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [fw, uptime_s, interface, power_source, time_synced, band, sensors, buffer, counters]
+          properties:
+            fw:
+              type: object
+              additionalProperties: false
+              required: [host, radio]
+              properties:
+                host: { type: string }
+                radio: { type: string }
+            uptime_s: { type: integer, minimum: 0 }
+            boot_reason: { type: string, enum: [power_on, watchdog, update, command, other] }
+            interface: { type: string, enum: [ethernet, wifi, cellular] }
+            ip: { type: string }
+            power_source: { type: string, enum: [poe, usb] }
+            time_synced: { type: boolean }
+            band: { type: string, enum: ["868", "915"] }
+            sensors:
+              type: object
+              additionalProperties: false
+              required: [enrolled, ok, missing]
+              properties:
+                enrolled: { type: integer, minimum: 0 }
+                ok: { type: integer, minimum: 0 }
+                missing: { type: integer, minimum: 0 }
+                lowest_battery_mv: { type: [integer, "null"] }
+            buffer:
+              type: object
+              additionalProperties: false
+              required: [records_pending, oldest_pending]
+              properties:
+                records_pending: { type: integer, minimum: 0 }
+                oldest_pending: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
+            counters:
+              type: object
+              description: Totals since boot. Further counters may be added in minor revisions.
+              additionalProperties: { type: integer, minimum: 0 }
+              required: [records_dropped]
+
+    SensorSettings:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        tick_s: { type: integer, minimum: 10, maximum: 60 }
+        heartbeat_s: { type: integer, minimum: 3600, maximum: 21600 }
+        sensitivity: { type: integer, description: "Range to be defined." }
+        dual_detect: { type: boolean }
+        tx_power_max_dbm: { type: integer }
+        led: { type: string, enum: ["on", "off", install] }
+
+    Command:
+      type: object
+      required: [v, id, action]
+      properties:
+        v: { type: integer, const: 1 }
+        id: { type: string, format: uuid }
+        expires_at: { $ref: "#/components/schemas/Timestamp" }
+        action:
+          type: string
+          enum:
+            - get_status
+            - reboot
+            - discovery
+            - enrol_sensor
+            - remove_sensor
+            - get_sensor_config
+            - set_sensor_config
+            - set_reporting
+            - set_network
+            - firmware_update
+            - firmware_rollback
+            - findme
+            - update_ca_bundle
+        sensor:
+          oneOf:
+            - $ref: "#/components/schemas/SensorId"
+            - { type: string, const: all }
+        settings: { $ref: "#/components/schemas/SensorSettings" }
+        on: { type: boolean }
+        duration_s: { type: integer, minimum: 1, maximum: 3600 }
+        status_s: { type: integer, minimum: 60 }
+        sensors_s: { type: integer, minimum: 60 }
+        upload_s: { type: integer, minimum: 10, maximum: 900 }
+        ethernet: { type: object }
+        wifi: { type: object }
+        cellular: { type: object }
+        target: { type: string, enum: [host, radio, sensor] }
+        url: { type: string, format: uri, pattern: "^https://" }
+        version: { type: string }
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+      allOf:
+        - if: { properties: { action: { enum: [enrol_sensor, remove_sensor, get_sensor_config] } } }
+          then: { required: [sensor], properties: { sensor: { $ref: "#/components/schemas/SensorId" } } }
+        - if: { properties: { action: { const: set_sensor_config } } }
+          then: { required: [sensor, settings] }
+        - if: { properties: { action: { const: discovery } } }
+          then: { required: ["on"] }
+        - if: { properties: { action: { const: firmware_update } } }
+          then: { required: [target, url, version, sha256] }
+        - if: { properties: { action: { const: firmware_rollback } } }
+          then: { required: [target] }
+        - if: { properties: { action: { const: update_ca_bundle } } }
+          then: { required: [url, sha256] }
+
+    CommandResult:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          required: [id, result]
+          properties:
+            id: { type: string, format: uuid }
+            result: { type: string, enum: [accepted, done, failed, rejected, expired] }
+            error: { type: string }
+            data: { type: object }
+          allOf:
+            - if: { properties: { result: { enum: [failed, rejected] } } }
+              then: { required: [error] }
