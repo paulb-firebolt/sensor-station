@@ -27,6 +27,9 @@ Items marked **[TBD]** still need a decision on our side. Values marked
   broker acknowledges them.
 - **Health is reported separately from data.** A quiet sensor and a dead
   sensor must look different.
+- **PIR first, other sensors later.** PIR footfall is the only sensor type
+  today, but nothing here is PIR-only except `counts` and `dwell` (see "Other
+  sensor types").
 
 ## Connection
 
@@ -159,6 +162,7 @@ recently.
   "sensors": [
     {
       "sensor": "00124B002D6D5A04",
+      "type": "pir",
       "state": "ok",
       "last_heard": "2026-10-02T14:14:52.000Z",
       "battery_mv": 2980,
@@ -173,6 +177,7 @@ recently.
 
 | Field            | Meaning                                                                                                    |
 | ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `type`           | Sensor type: `pir` today. New types are added in minor revisions.                                          |
 | `state`          | `ok`, or `missing` (no heartbeat or data for 3 heartbeat intervals, proposed)                              |
 | `last_heard`     | Last time any frame arrived from the sensor                                                                |
 | `battery_mv`     | From the latest heartbeat or data frame (sensor `PWR-6`)                                                   |
@@ -332,6 +337,20 @@ exactly one final result.
   never sends records with guessed times.
 - **Order.** Records for one sensor are sent in `seq` order. We don't depend on
   order across sensors.
+
+## Other sensor types
+
+The contract is written so other sensor types can be added later without
+breaking it:
+
+- **Shared by every type:** sensor IDs, `sensors`, `events`, commands,
+  firmware updates and the delivery guarantees. Each sensor reports its `type`.
+- **Specific to each type:** its data channel and its `settings`. `counts` and
+  `dwell` are the PIR channels. A new type gets its own channel, named for its
+  data (for example `glimpse/v1/{bs}/temperature`), using the same record rules:
+  a `records` array, keyed by `(sensor, seq)`.
+- Adding a type is a minor revision (see "Versioning"), so existing consumers
+  are not affected.
 
 ## Versioning
 

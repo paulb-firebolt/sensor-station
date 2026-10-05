@@ -226,6 +226,7 @@ components:
             sent_at: "2026-10-02T14:15:00.000Z"
             sensors:
               - sensor: 00124B002D6D5A04
+                type: pir
                 state: ok
                 last_heard: "2026-10-02T14:14:52.000Z"
                 battery_mv: 2980
@@ -372,9 +373,10 @@ components:
               items:
                 type: object
                 additionalProperties: false
-                required: [sensor, state]
+                required: [sensor, type, state]
                 properties:
                   sensor: { $ref: "#/components/schemas/SensorId" }
+                  type: { type: string, pattern: "^[a-z][a-z0-9_]*$", description: "Sensor type; pir today, more added in minor revisions." }
                   state: { type: string, enum: [ok, missing] }
                   last_heard: { oneOf: [{ $ref: "#/components/schemas/Timestamp" }, { type: "null" }] }
                   battery_mv: { type: integer, minimum: 0, maximum: 4000 }
