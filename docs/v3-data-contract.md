@@ -22,8 +22,8 @@ alternatives.
 ## Principles
 
 - **One device talks to us.** The **base station** is whatever device connects
-  to our broker on behalf of the sensors: a gateway, a hub or a mesh border
-  router. Sensors never connect to the broker themselves. The base station
+  to our broker on behalf of the sensors, such as a gateway or hub. Sensors
+  never connect to the broker themselves. The base station
   reports for every sensor enrolled to it.
 - **Technology-neutral.** Nothing here depends on the radio, chips or protocols
   the supplier chooses.
@@ -189,7 +189,7 @@ recently.
 | `state` | `ok`, or `missing` (not heard within the missing-sensor time, `PR-7` in the functional specification) |
 | `last_heard` | Last time anything arrived from the sensor |
 | `battery_mv` | Latest battery voltage |
-| `rssi_dbm` | Signal strength of the latest message, as received by the base station or the nearest relay |
+| `rssi_dbm` | Signal strength of the latest message, as received by the base station |
 | `tx_power_dbm` | Optional: the sensor's transmit power, if the technology adjusts it |
 | `fw_version` | Sensor firmware version |
 | `config_version` | Increments whenever the sensor's settings change. It shows whether a `set_sensor_config` has been applied. |

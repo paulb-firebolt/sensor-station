@@ -24,7 +24,8 @@ depend on it. Everything on the device side of the broker is open:
 
 - the wireless technology: sub-GHz, BLE, Zigbee, Thread, Wi-Fi HaLow or anything
   else
-- the architecture: a base station or gateway, a mesh, or something else
+- the architecture: a base station, a gateway or something else, with each sensor
+  linked directly to it (`PR-2`)
 - chips, modules, batteries, protocols and firmware platform
 
 Where this specification says **base station**, it means whatever device
@@ -121,7 +122,7 @@ Each one has an acceptance test in section 5.
 | ID | Requirement | Target |
 | --- | --- | --- |
 | `PR-1` | **Counting accuracy:** impressions counted against a ground-truth count, in a defined test set-up | ±[TBD] % over [TBD] hours, at [TBD] impressions per hour |
-| `PR-2` | **Range:** message delivery from sensor to base station | ≥ 99 % at 50 m non-line-of-sight in a typical retail environment, with margin for fading. A mesh or repeater may be used to reach it. |
+| `PR-2` | **Range:** message delivery from sensor to base station | ≥ 99 % at 50 m non-line-of-sight in a typical retail environment, with margin for fading, over a direct link from sensor to base station. No mesh, repeater or other relay: sites have no infrastructure to power one. |
 | `PR-3` | **Battery life** on a user-replaceable, widely available battery | ≥ 3 years at 15,000 impressions per day, shown by an energy model validated against measured current |
 | `PR-4` | **Latency:** time from impression to arrival at our broker, on Ethernet | ≤ reporting interval + 10 s, for 99 % of records (proposed) |
 | `PR-5` | **Capacity** per base station | 50 sensors (proposed) at the worst-case traffic profile, with no lost records |
