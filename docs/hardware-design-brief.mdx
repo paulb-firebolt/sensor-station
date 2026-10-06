@@ -84,8 +84,9 @@ flowchart LR
 
 Every link is two-way. The base station sends ACKs and settings to sensors,
 and the cloud sends commands and firmware updates down. Both products replace
-an existing line (the PIRW2 sensor and the RAIS2.1 base station). An upgrade to v3 replaces every component on site, so v3
-doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations.
+an existing line (the PIRW2 sensor and the RAIS2.1 base station). On this
+route, v3 sensors must also work with base stations already installed in the
+field, after a concentrator firmware update (`RF-2`).
 
 ## Base station
 
@@ -515,18 +516,21 @@ on:
    would it take: antenna, transmit power or PHY?
 9. **915 MHz FCC route.** Frequency hopping under 15.247, or 15.249 at low power?
    Which would you recommend for our range target?
-10. **Antenna strategy.** One PCB with a per-band matching variant, or a true
+10. **Legacy compatibility (`RF-2`).** Installed RAIS2.1 base stations have
+    902–928 MHz antennas. How should 868 MHz v3 sensors work with them? And does
+    `RF-2` force the legacy PHY onto v3 sensors, against `FW-2`?
+11. **Antenna strategy.** One PCB with a per-band matching variant, or a true
     dual-band antenna? Which antenna supplier? What material constraints should
     the enclosure company work to?
-11. **Firmware split.** We write the product firmware. Who writes board
+12. **Firmware split.** We write the product firmware. Who writes board
     bring-up, factory-test and CC1312 bootloader-integration firmware?
-12. **Sensor LEDs and reset.** Reed switch or nanopower Hall switch for the
+13. **Sensor LEDs and reset.** Reed switch or nanopower Hall switch for the
     sealed reset? Translucent case or light pipe for the LEDs, especially on
     the black variant?
-13. **Volume transfer.** Have you handed designs over to volume manufacturers
+14. **Volume transfer.** Have you handed designs over to volume manufacturers
     in China before? What do you include in a transfer package, and what
     support do you offer during the first volume build?
-14. **Sensor optics.** PIR element type, lens design and supplier, detection
+15. **Sensor optics.** PIR element type, lens design and supplier, detection
     pattern and mounting height. Do you cover optics, or should we find a
     specialist?
 
