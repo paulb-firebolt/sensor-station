@@ -240,6 +240,10 @@ wording.
 - [ ] Missing-sensor detection time (`PR-7`) and configuration latency (`PR-10`)
 - [ ] Base-station ID format and QR label content
 - [ ] Base-station operating temperature range
+- [ ] Wi-Fi range target for `FR-10`, and whether the `FR-18` installation check
+  covers Wi-Fi signal too. Field evidence (October 2026): a v2 base station at
+  -69/-70 dBm to its hotspot stays connected for only 1–5 minutes at a time, even
+  after a bigger antenna was fitted to the hotspot.
 - [ ] How many battery-change cycles the sensor seal must survive
 - [ ] Get the sensor Theory of Operation from JJ: it should settle the impression and dwell definitions (`PR-1`, `FR-2`)
 - [ ] Pilot size and sites (acceptance stage B)
