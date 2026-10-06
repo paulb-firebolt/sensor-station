@@ -99,6 +99,14 @@ channels:
     messages:
       commandResult:
         $ref: "#/components/messages/commandResult"
+  enrolment:
+    address: glimpse/v1/{bs}/enrolment
+    parameters:
+      bs:
+        $ref: "#/components/parameters/bs"
+    messages:
+      enrolment:
+        $ref: "#/components/messages/enrolment"
 
 operations:
   sendAvailability:
@@ -166,6 +174,15 @@ operations:
     bindings:
       mqtt:
         qos: 1
+  receiveEnrolment:
+    action: receive
+    channel:
+      $ref: "#/channels/enrolment"
+    summary: Full enrolment list from our platform, retained; applied only if its version is newer.
+    bindings:
+      mqtt:
+        qos: 1
+        retain: true
 
 components:
   securitySchemes:
@@ -266,6 +283,7 @@ components:
             ip: 10.1.20.33
             power_source: poe
             time_synced: true
+            enrolment_version: 12
             sensors: { enrolled: 12, ok: 11, missing: 1, lowest_battery_mv: 2710 }
             buffer: { records_pending: 0, oldest_pending: null }
             counters: { records_dropped: 0, mqtt_reconnects: 2 }
@@ -293,6 +311,21 @@ components:
             sent_at: "2026-10-02T14:30:00.500Z"
             id: 5b0e2c1a-6f7d-4c1e-9a8b-2d4f6e8a0c11
             result: accepted
+    enrolment:
+      name: enrolment
+      payload:
+        $ref: "#/components/schemas/Enrolment"
+      examples:
+        - name: oneSensor
+          payload:
+            v: 1
+            version: 12
+            issued_at: "2026-10-06T09:00:00.000Z"
+            sensors:
+              - sensor: 00124B002D6D5A04
+                type: pir
+                key: q83vEjRWeJCrze8SNFZ4kA==
+                settings: { tick_s: 10 }
 
   schemas:
     Timestamp:
@@ -409,6 +442,7 @@ components:
                       - battery_low
                       - sensor_reset
                       - link_fault
+                      - sensor_seen
                       - buffer_overflow
                   at: { $ref: "#/components/schemas/Timestamp" }
                   sensor: { $ref: "#/components/schemas/SensorId" }
@@ -416,6 +450,8 @@ components:
                   reason: { type: string, enum: [battery_change, magnetic_reset, watchdog, other] }
                   detail: { type: string }
                   dropped: { type: integer, minimum: 1 }
+                  sensor_type: { type: string, pattern: "^[a-z][a-z0-9_]*$" }
+                  rssi_dbm: { type: integer, minimum: -150, maximum: 0 }
 
     Status:
       allOf:
@@ -434,6 +470,7 @@ components:
             ip: { type: string }
             power_source: { type: string, enum: [poe, usb] }
             time_synced: { type: boolean }
+            enrolment_version: { type: integer, minimum: 0 }
             sensors:
               type: object
               additionalProperties: false
@@ -455,6 +492,26 @@ components:
               description: Totals since boot. Further counters may be added in minor revisions.
               additionalProperties: { type: integer, minimum: 0 }
               required: [records_dropped]
+
+    Enrolment:
+      type: object
+      additionalProperties: false
+      required: [v, version, issued_at, sensors]
+      properties:
+        v: { type: integer, const: 1 }
+        version: { type: integer, minimum: 1 }
+        issued_at: { $ref: "#/components/schemas/Timestamp" }
+        sensors:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [sensor, type, key]
+            properties:
+              sensor: { $ref: "#/components/schemas/SensorId" }
+              type: { type: string, pattern: "^[a-z][a-z0-9_]*$" }
+              key: { type: string, contentEncoding: base64, minLength: 16, description: "Link key; delivery method to be decided (plain over TLS, or encrypted to the base station certificate)." }
+              settings: { $ref: "#/components/schemas/SensorSettings" }
 
     SensorSettings:
       type: object
