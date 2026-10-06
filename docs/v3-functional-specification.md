@@ -111,7 +111,7 @@ only through the MQTT data contract, which is broker-neutral (change register
 | `FR-13` | **Store and forward.** No data is lost during a network outage within the buffer duration (`PR-6`). |
 | `FR-14` | **Sealed sensor.** The sensor has no unsealed openings. Status indication and reset must work without breaking the seal, for example with a light pipe and a magnetic reset. |
 | `FR-15` | **Diagnostics.** A sensor or base station can be diagnosed remotely from the data contract's health fields alone. A local diagnostic interface for engineers is also provided, and is disabled or protected in production. |
-| `FR-16` | **Other sensor types.** The design must allow other battery sensor types to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
+| `FR-16` | **Other sensor types.** The design must allow other self-powered sensor types (battery, optionally topped up by energy harvesting) to join the same base station later, without changing its hardware. Examples: a door contact, a temperature sensor or an occupancy radar. Each sensor reports its type. Only the PIR sensor is designed in this project; for the rest, the supplier shows in design review how a new type would be added. |
 | `FR-17` | **One design for all markets.** One hardware design per product serves every market, with the region set at manufacture or provisioning, so we stock as few SKUs as possible. If this costs more than per-region variants, the supplier shows the trade-off. |
 | `FR-18` | **Placement aid.** The installer gets placement guidance and can check each sensor's link quality on site, before leaving, using a phone or the base station. |
 | `FR-19` | **Wired add-ons (could).** The base station can accept directly attached sensors or add-ons, such as a wired sensor or a cellular module, through a defined interface. |
@@ -136,6 +136,10 @@ Each one has an acceptance test in section 5.
 ## 4. Environmental, mechanical and regulatory
 
 - **Sensor:**
+  - no power or network cabling is available at the sensor's location, so sensors
+    must be self-powered. Energy harvesting, such as a small indoor solar cell in
+    a lit shopping centre, could top up the battery (could); outdoor solar can't
+    be relied on.
   - IP65 by design, not by potting
   - −20 °C to +60 °C (proposed)
   - UV-stable, in black and white
@@ -236,6 +240,10 @@ wording.
 - [ ] Missing-sensor detection time (`PR-7`) and configuration latency (`PR-10`)
 - [ ] Base-station ID format and QR label content
 - [ ] Base-station operating temperature range
+- [ ] Wi-Fi range target for `FR-10`, and whether the `FR-18` installation check
+  covers Wi-Fi signal too. Field evidence (October 2026): a v2 base station at
+  -69/-70 dBm to its hotspot stays connected for only 1–5 minutes at a time, even
+  after a bigger antenna was fitted to the hotspot.
 - [ ] How many battery-change cycles the sensor seal must survive
 - [ ] Get the sensor Theory of Operation from JJ: it should settle the impression and dwell definitions (`PR-1`, `FR-2`)
 - [ ] Pilot size and sites (acceptance stage B)
