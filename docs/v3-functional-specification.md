@@ -82,9 +82,10 @@ with reasons.
 
 ### Not required
 
-**Backward compatibility.** An upgrade to v3 replaces every component on site,
-so v3 doesn't need to work with installed PIRW2 sensors or RAIS2.1 base stations
-(change register `CR-16`).
+**Backward compatibility.** On this turnkey route, an upgrade to v3 replaces
+every component on site, so v3 doesn't need to work with installed PIRW2
+sensors or RAIS2.1 base stations (change register `CR-16`). If we develop our
+proof of concept instead, backward compatibility stays required.
 
 **The RAIS2.1 HTTP endpoints and the ThingsBoard gateway API.** v3 talks to us
 only through the MQTT data contract, which is broker-neutral (change register
