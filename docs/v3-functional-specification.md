@@ -102,7 +102,7 @@ only through the MQTT data contract, which is broker-neutral (change register
 | `FR-4` | **Sensor health.** Every sensor reports its battery level and link quality regularly, even when nothing is counted. The base station reports a sensor missing and back. |
 | `FR-5` | **Remote configuration.** Every setting in the data contract can be changed from our platform, and survives battery changes and power cycles. |
 | `FR-6` | **Firmware updates.** Every programmable part of the system can be updated remotely through our platform, using images signed with our key. A failed update rolls back automatically. No update needs a site visit. |
-| `FR-7` | **Pairing and enrolment.** A defined procedure pairs a sensor with a base station. We prefer factory pre-provisioning keyed to the QR label, with no installer action needed. Sensors can be moved to another base station by command. |
+| `FR-7` | **Sensor enrolment.** Which sensors belong to which base station is held on our platform, not decided in the field.<ul><li>Sets are paired in house before shipping, or by our platform at any time. Installers do no pairing.</li><li>Every sensor broadcasts its identity unencrypted, so any base station can detect it, for discovery and installer checks. Its data and commands are encrypted (`FR-8`), and only the base station it's paired with can read them.</li><li>The base station gets its enrolment list from our platform (sensor IDs, types, keys and settings) when it connects and whenever the list changes, as defined in the data contract. It keeps the list across restarts, and reports unpaired sensors it can hear.</li><li>A sensor is paired to one base station at a time. Moving it is a platform change, and base stations never contend for a sensor.</li><li>Link keys are generated and held by us (`IP-3`), and reach the base station only over its TLS connection, never in the clear over the radio.</li></ul> |
 | `FR-8` | **Link security.** Every wireless link is encrypted and authenticated, with replay protection and unique keys per site or pairing, whatever the technology. |
 | `FR-9` | **Cloud security.** Mutual TLS to our broker, server certificates validated, and a CA bundle that can be updated in the field. Secrets stored encrypted at rest, with secure boot enabled. |
 | `FR-10` | **Customer network.** The base station connects by Ethernet (DHCP and static IP) or Wi-Fi, with Ethernet preferred and automatic fallback. Wi-Fi range to the site's access point must be at least as good as RAIS2.1's. A cellular option is welcome but not essential. |
@@ -194,7 +194,7 @@ assigned to it passes.
 | `AT-6` | `FR-4`, `PR-7`, `PR-8` | Remove a sensor's battery, then cut the base station's power and network in turn. The correct events and availability appear in time. | A, B |
 | `AT-7` | `FR-6`, `PR-9` | Update each component from our platform. Then interrupt an update with power loss and with network loss. Unsigned or wrongly signed images are rejected. | A, C |
 | `AT-8` | `FR-5`, `PR-10` | Change each sensor setting remotely, change the battery, and confirm the settings are kept. | A |
-| `AT-9` | `FR-8`, `FR-9` | Try to inject and replay wireless messages with suitable test equipment; this must fail. A flash dump yields no secrets. A broker with an invalid certificate is refused. | A, C |
+| `AT-9` | `FR-7`, `FR-8`, `FR-9` | Try to inject and replay wireless messages with suitable test equipment; this must fail. A base station not paired with a sensor reports seeing it, but can't read its data or send it commands. Move a sensor between two base stations through the enrolment list; neither contends for it. A flash dump yields no secrets. A broker with an invalid certificate is refused. | A, C |
 | `AT-10` | `PR-5` | Load test with 50 real or simulated sensors at worst-case traffic for 24 h, with no records lost. | A, C |
 | `AT-11` | `FR-10`, `FR-11` | Install on Ethernet with DHCP, Ethernet with static IP, and Wi-Fi, following only the supplied installation guide. Test Ethernet-to-Wi-Fi fallback. | A, B |
 | `AT-12` | `FR-12` | Inject faults: hang each processor, break the sensor links, drop the network. The system recovers unattended. | A |
@@ -239,6 +239,9 @@ wording.
 - [ ] Declared capacity per base station (`PR-5`) and buffer duration (`PR-6`)
 - [ ] Missing-sensor detection time (`PR-7`) and configuration latency (`PR-10`)
 - [ ] Base-station ID format and QR label content
+- [ ] How link keys reach the base station in the `enrolment` list: plain over
+  TLS (relying on per-device topic access on the broker), or encrypted to the
+  base station's certificate
 - [ ] Base-station operating temperature range
 - [ ] Wi-Fi range target for `FR-10`, and whether the `FR-18` installation check
   covers Wi-Fi signal too. Field evidence (October 2026): a v2 base station at

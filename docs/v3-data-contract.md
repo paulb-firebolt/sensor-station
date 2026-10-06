@@ -76,6 +76,7 @@ version.
 | `status` | base station → us | no | Base-station health, every 5 min (proposed) and on any change of interface, power source or firmware |
 | `cmd` | us → base station | no | Commands |
 | `cmd/res` | base station → us | no | Command acknowledgements and results |
+| `enrolment` | us → base station | yes | The base station's full enrolment list: its sensors, their keys and settings |
 
 ## Common fields
 
@@ -222,6 +223,7 @@ Sent as they happen, one or more per message.
 | `battery_low` | `sensor`, `battery_mv` | The battery is below the low-battery threshold [TBD] |
 | `sensor_reset` | `sensor`, `reason` | The sensor restarted: battery change, magnetic reset or watchdog |
 | `link_fault` | `detail` | The base station's sensor-side link failed or restarted |
+| `sensor_seen` | `sensor`, `sensor_type`, `rssi_dbm` | An unpaired sensor can be heard. Sent at most once an hour per sensor, or as heard during `discovery`. |
 | `buffer_overflow` | `dropped` | The base station had to discard records. This must never happen within the specified buffer duration. |
 
 ### `status`: base-station health
@@ -238,6 +240,7 @@ Sent as they happen, one or more per message.
   "ip": "10.1.20.33",
   "power_source": "poe",
   "time_synced": true,
+  "enrolment_version": 12,
   "sensors": {
     "enrolled": 12,
     "ok": 11,
@@ -257,6 +260,7 @@ Sent as they happen, one or more per message.
 | `fw` | Firmware version of each programmable component in the base station. The supplier names the components (`host` and `radio` above are examples), and uses the same names in `firmware_update`. |
 | `interface` | `ethernet`, `wifi` or `cellular` |
 | `power_source` | `poe` or `usb` |
+| `enrolment_version` | The `version` of the enrolment list the base station holds |
 | `counters` | Totals since boot. `records_dropped` is required; the supplier may add diagnostic counters for their technology. |
 
 ### `availability`
@@ -265,6 +269,38 @@ Retained. Sent with `{"state":"online"}` on every connect. The broker sends the
 Last Will `{"state":"offline"}` if the connection is lost. This is the only
 message without the common fields, because the Last Will is fixed at connect
 time.
+
+## Enrolment
+
+Our platform decides which sensors belong to which base station (`FR-7`). We
+publish the base station's **full** list, retained, on `enrolment`, so the base
+station receives it on every connect and whenever we change it.
+
+```json
+{
+  "v": 1,
+  "version": 12,
+  "issued_at": "2026-10-06T09:00:00.000Z",
+  "sensors": [
+    {
+      "sensor": "00124B002D6D5A04",
+      "type": "pir",
+      "key": "q83vEjRWeJCrze8SNFZ4kA==",
+      "settings": { "tick_s": 10 }
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | Increases with every change. The base station applies a list only if its version is newer than the one it holds, and reports the version it holds in `status.enrolment_version`. |
+| `sensors[].key` | The sensor's link key, base64. [TBD: whether keys travel as plain base64 over the TLS connection, relying on the broker letting each base station read only its own topics, or encrypted to the base station's certificate.] |
+| `sensors[].settings` | Optional. Settings to apply to the sensor, as in `set_sensor_config`. |
+
+The base station keeps the list across restarts. Sensors missing from a new list
+are removed, and their keys are deleted. The supplier defines how a key is
+installed in the sensor itself, for example at manufacture.
 
 ## Commands
 
@@ -310,8 +346,8 @@ exactly one final result.
 | --- | --- | --- |
 | `get_status` | none | Publish `status` and `sensors` immediately |
 | `reboot` | none | Restart the base station |
-| `discovery` | `on` (bool), `duration_s` (default 300) | Open or close the pairing window for new sensors |
-| `enrol_sensor` | `sensor` | Allow a sensor to join this base station (for pre-provisioned sensors) |
+| `discovery` | `on` (bool), `duration_s` (default 300) | Report every unpaired sensor heard, as `sensor_seen` events without the hourly limit, for installer checks |
+| `enrol_sensor` | `sensor` | Shortcut to add one sensor before the next `enrolment` list arrives. The `enrolment` list is authoritative. |
 | `remove_sensor` | `sensor` | Remove a sensor and revoke its keys |
 | `get_sensor_config` | `sensor` | Return the sensor's settings in `data` |
 | `set_sensor_config` | `sensor` (or `"all"`), `settings` | Change sensor settings (below). Settings persist across battery changes. |
