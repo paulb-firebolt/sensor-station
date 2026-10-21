@@ -116,12 +116,15 @@ Why this is preferred:
 - All six SDIO lines are on one header, so the wires can be kept short and of
   equal length.
 
-:::warning[Check the grey pins' I/O voltage first]
+:::tip[Grey pins measured at 3.3 V (2026-10-21)]
 On the ESP32-P4 the SD pins (39–48) are on a separately powered I/O domain,
-which can be run at 1.8 V for UHS SD cards. The grey colouring may mean
-exactly that. **Before wiring the C6, measure a grey pin driven HIGH.** If
-it reads about 1.8 V rather than 3.3 V, don't connect it directly to the
-C6's 3.3 V I/O. Use Option B.
+which can run at 1.8 V for UHS SD cards. To check this board, G39–G44 were
+driven HIGH from a minimal Arduino sketch (pioarduino 55.03.37, default
+configuration). All six read **3.3 V**, so they connect directly to the C6.
+**Option A is confirmed.**
+
+If a later firmware or `sdkconfig` enables the P4's on-chip LDO for this
+domain (UHS SD), measure the pins again.
 :::
 
 ### Option B (fallback) — Tab5 layout for the C6, CC1312 moves to the yellow pins

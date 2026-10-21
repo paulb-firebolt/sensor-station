@@ -13,6 +13,33 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
+// ============================================================================
+// WiFi build capabilities (override via build_flags)
+//  - HAS_WIFI=1             a radio is present (native or esp-hosted)
+//  - WIFI_HOSTED=1          the radio is an external ESP32-C6 over SDIO (esp-hosted)
+//  - ETHERNET_FIRST_SETUP=1 first-run admin-password page over Ethernet; the
+//                           provisioning AP is only a fallback when Ethernet is down
+// ============================================================================
+#ifdef WIFI_DISABLED
+#error "WIFI_DISABLED was replaced by HAS_WIFI / WIFI_HOSTED / ETHERNET_FIRST_SETUP"
+#endif
+
+#ifndef HAS_WIFI
+#define HAS_WIFI 1
+#endif
+
+#ifndef WIFI_HOSTED
+#define WIFI_HOSTED 0
+#endif
+
+#ifndef ETHERNET_FIRST_SETUP
+#define ETHERNET_FIRST_SETUP 0
+#endif
+
+#if WIFI_HOSTED && !HAS_WIFI
+#error "WIFI_HOSTED=1 requires HAS_WIFI=1"
+#endif
+
 // WiFi AP Mode Configuration
 extern const char* WIFI_AP_SSID;
 extern const char* WIFI_AP_PASSWORD;

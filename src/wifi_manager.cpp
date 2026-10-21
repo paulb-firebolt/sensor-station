@@ -66,8 +66,12 @@ bool WiFiManager::connectStation(const String& ssid, const String& password) {
     WiFi.disconnect(true);
     delay(100);
 
-    // Set station mode
-    WiFi.mode(WIFI_STA);
+    // Set station mode. Fails when the radio is absent (e.g. no esp-hosted C6),
+    // so bail out instead of sitting through WIFI_CONNECT_TIMEOUT.
+    if (!WiFi.mode(WIFI_STA)) {
+        LOG_E("[WiFi] Radio unavailable - cannot enter station mode\n");
+        return false;
+    }
     WiFi.begin(ssid.c_str(), password.c_str());
 
     // Wait for connection with timeout
