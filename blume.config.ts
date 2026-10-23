@@ -40,6 +40,7 @@ export default defineConfig({
         items: [
           "/v3-functional-specification",
           "/v3-data-contract",
+          "/v2-sensor-radio-traffic",
           "/hardware-design-brief",
           "/v3-requirements-gap-review",
           // The v3 requirement documents live in Confluence.
