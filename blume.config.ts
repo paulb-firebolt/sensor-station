@@ -69,6 +69,7 @@ export default defineConfig({
               "/development/pirw-phase-1-behavior-capture",
               "/development/pirw-phase-2-cc1312-team-handoff",
               "/development/pirw-phase-2-launchpad-simulated-telemetry",
+              "/development/sensor-event-batching",
             ],
           },
         ],
