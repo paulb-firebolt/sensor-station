@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-lastModified: 2026-03-17T17:30:00Z
+lastModified: 2026-10-21T15:30:00Z
 ---
 
 How to run a local DHCP server and MQTT broker for development and testing
@@ -9,56 +9,84 @@ without needing external infrastructure.
 
 ---
 
-## DHCP Server (for direct Ethernet connection to device)
+## DHCP Server (dnsmasq, for direct Ethernet connection to device)
 
-When testing with the ESP32-P4 or S3 over a direct Ethernet connection (e.g.
-USB-Ethernet adapter on your dev machine), you need a DHCP server on that
-interface. Use the `networkboot/dhcpd` Docker image — no install required.
+When you test the ESP32-P4 or S3 over a direct Ethernet connection (for
+example a USB-Ethernet adapter on your dev machine), that interface needs a
+DHCP server. Without one, the P4 falls back to an AutoIP `169.254.x.x` address
+and can't reach the broker on `192.168.2.1`. Use the `dockurr/dnsmasq` image,
+run with Docker Compose from `~/docker/dnsmasq`.
 
-### 1. Create a config file
+The services are **started on demand** (`restart: no`), not at boot. Start
+them at the beginning of a bench session.
 
-```bash
-mkdir -p ~/docker/dhcp/data
-cat > ~/docker/dhcp/data/dhcpd.conf << 'EOF'
-subnet 192.168.2.0 netmask 255.255.255.0 {
-  range 192.168.2.100 192.168.2.200;
-}
-EOF
-```
+### 1. Assign a static IP to your Ethernet interface
 
-### 2. Assign a static IP to your Ethernet interface
-
-The DHCP server needs the host interface to already have an IP in the subnet:
+The DHCP server needs the host interface to already have an IP in the subnet.
+The address is added by hand and is lost when the adapter is unplugged, so
+re-add it after a replug:
 
 ```bash
-# Find your Ethernet interface name (e.g. enp4s0u2u4, eth0, enx...)
-ip link show
+# Find your USB-Ethernet interface name (e.g. enp85s0u2u4). It changes with the USB port.
+ip -br link
 
-# Assign static IP (adjust interface name as needed)
-sudo ip addr add 192.168.2.1/24 dev enp4s0u2u4
-sudo ip link set enp4s0u2u4 up
+sudo ip addr add 192.168.2.1/24 dev enp85s0u2u4
+sudo ip link set enp85s0u2u4 up
 ```
 
-### 3. Run the DHCP server
+### 2. Config files
+
+`~/docker/dnsmasq/dnsmasq.conf`:
+
+```text
+port=0                       # DHCP only; no DNS (port 53 is taken on the host)
+interface=enp85s0u2u4        # must match the interface above
+bind-interfaces              # bind to this NIC only; libvirt holds :67 on its bridges
+dhcp-range=192.168.2.100,192.168.2.200,24h
+dhcp-option=3,192.168.2.1    # default gateway
+dhcp-option=6,1.1.1.1        # DNS server
+```
+
+`~/docker/dnsmasq/compose.yml`:
+
+```yaml
+services:
+  dnsmasq:
+    image: dockurr/dnsmasq
+    container_name: dnsmasq
+    network_mode: host # Required — DHCP needs to be on the real network
+    # The image's entrypoint ignores `command:`; all settings (port=0, interface,
+    # DHCP range) come from this file.
+    volumes:
+      - ./dnsmasq.conf:/etc/dnsmasq.conf:ro
+    cap_add:
+      - NET_ADMIN
+    restart: no
+```
+
+### 3. Start / check
 
 ```bash
-docker run -it --rm --init \
-  --net host \
-  -v "$(pwd)/data":/data \
-  networkboot/dhcpd enp4s0u2u4
+cd ~/docker/dnsmasq
+docker compose up -d
+docker logs dnsmasq      # expect: "DHCP, sockets bound exclusively to interface enp85s0u2u4"
 ```
 
-Run from the `~/docker/dhcp` directory, or adjust the `-v` path accordingly.
+The device gets an IP in the `192.168.2.100–200` range. The host
+(`192.168.2.1`) is reachable from the device as the gateway and broker. Each
+`DHCPACK` shows in `docker logs dnsmasq`, which is the quickest way to find
+the device's IP.
 
-The device will get an IP in the `192.168.2.100–200` range. The host
-(`192.168.2.1`) is reachable from the device as the gateway/broker.
+### Troubleshooting
 
-### Notes
+| Symptom (`docker logs dnsmasq`) | Cause | Fix |
+| --- | --- | --- |
+| `failed to create listening socket for port 53: Address in use` | `dnsmasq.conf` isn't mounted, so the image's default config (with DNS) runs. Its entrypoint ignores `command:` flags such as `--port 0` | Mount `./dnsmasq.conf:/etc/dnsmasq.conf:ro` and keep `port=0` in the file |
+| `failed to bind DHCP server socket: Address in use` | libvirt's dnsmasq instances hold `:67` on `virbr*`, and a wildcard bind collides | Add `bind-interfaces` to `dnsmasq.conf` |
+| Container up but the device still gets `169.254.x.x` | Wrong `interface=` (the USB NIC was renamed) or no static IP on the host | Check `ip -br addr` and re-add `192.168.2.1/24` |
 
-- `--net host` is required — the container needs direct access to the interface
-- The interface name (`enp4s0u2u4`) must match your USB-Ethernet adapter exactly
-- Static IP on the host must be set before starting the container
-- Config changes require restarting the container
+After a config change, run `docker compose up -d --force-recreate`. The P4
+only requests an address at boot, so reset it afterwards.
 
 ---
 
@@ -321,18 +349,17 @@ This also allows flashing an older version if needed.
 ## Typical Dev Session
 
 ```bash
-# 1. Set up host network interface
-sudo ip addr add 192.168.2.1/24 dev enp4s0u2u4
-sudo ip link set enp4s0u2u4 up
+# 1. Set up host network interface (re-add after replugging the adapter)
+sudo ip addr add 192.168.2.1/24 dev enp85s0u2u4
+sudo ip link set enp85s0u2u4 up
 
-# 2. Start DHCP server (terminal 1)
-cd ~/docker/dhcp
-docker run -it --rm --init --net host -v "$(pwd)/data":/data \
-  networkboot/dhcpd enp4s0u2u4
+# 2. Start DHCP server
+cd ~/docker/dnsmasq
+docker compose up -d
 
-# 3. Start MQTT broker (terminal 2)
+# 3. Start MQTT broker
 cd ~/docker/mosquitto
-docker compose up
+docker compose up -d
 
 # 4. Start OTA HTTP server (terminal 3)
 cd ~/Documents/PlatformIO/Projects/basic-network/ota
@@ -349,6 +376,32 @@ mosquitto_sub -h 192.168.2.1 -p 8883 \
 cd ~/Documents/PlatformIO/Projects/basic-network
 pio run -e m5tab5-esp32p4 -t upload && pio device monitor -e m5tab5-esp32p4
 ```
+
+---
+
+## ESP32-C6 WiFi Link Test (P4 + esp-hosted)
+
+The P4 gets WiFi from an external ESP32-C6 over SDIO. Wiring and pins are in
+[ESP32-C6 WiFi Co-processor](/development/esp32-c6-wifi-coprocessor-plan).
+Prove the link with the `m5tab5-c6-hosted-test` env before testing the main
+firmware.
+
+1. Flash the C6 once over its own USB with the esp-hosted slave firmware
+   (2.11.6, built from `~/Documents/sensor-station-c6-hosted`; see its README).
+2. Wire the C6 to the P4 with the power off, including the 10 kΩ pull-ups.
+3. Flash and run the link test. WiFi credentials come from the environment
+   and never go into the repo:
+
+   ```bash
+   C6_TEST_SSID='<ssid>' C6_TEST_PASS='<password>' \
+     pio run -e m5tab5-c6-hosted-test -t upload && pio device monitor -e m5tab5-c6-hosted-test
+   ```
+
+A good run prints `esp-hosted link UP`, the host and slave versions (both
+`2.11.6`), a scan list, and an IP. `sdmmc_card_init failed` repeating, then
+`esp-hosted init FAILED`, means the C6 isn't answering. Check the wiring and
+pull-ups first, then the C6 firmware. With no C6 fitted, the main firmware
+runs Ethernet-only after about 9 s of failed link attempts at boot.
 
 ---
 

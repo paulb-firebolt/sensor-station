@@ -86,7 +86,7 @@ private:
     void handleScan(void);
     void handleSave(void);
     void handleNotFound(void);
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
     void handleDeviceSetup(void);
 #endif
 
@@ -122,7 +122,7 @@ private:
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     String generateEthernetProvisioningPage(void);  // Ethernet - manual input
 #endif
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
     String generateDeviceSetupPage(void);  // No-WiFi first-run setup
 #endif
     String generateStatusPage(void);
