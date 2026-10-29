@@ -1,7 +1,7 @@
 ---
 title: Sensor MQTT People Counter Firmware
 created: 2026-03-16T15:48:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-29T23:30:00Z
 ---
 
 This documentation site explains what this project is trying to do, which hardware paths it currently supports, and where the detailed implementation notes fit.
@@ -40,9 +40,13 @@ The only firmware target: the `m5tab5-esp32p4` PlatformIO environment, on the M5
 - WiFi delegated to an ESP32-C6 running `esp-hosted` over SDIO
 - WiFi is the primary data path and Ethernet the fallback; see [ESP32-C6 WiFi Co-processor](development/esp32-c6-wifi-coprocessor-plan)
 
-### Abandoned: ESP32-S3 plus W5500
+### ESP32-S3 plus W5500 (MAC-raw) plus native WiFi
 
-The earlier ESP32-S3 + W5500 target was removed from the code on 2026-10-29, because the WIZnet `Ethernet` library it used cannot do MQTTS. Read [Ethernet TLS — W5500 Limitation](ETHERNET_TLS_LIMITATION) before revisiting it. Many older provisioning and MQTT notes were written for the S3 and still describe it.
+The `esp32s3-poe-eth` environment, on the Waveshare ESP32-S3-POE-ETH: a single-chip alternative to the P4 + C6, with the same firmware and behaviour. The W5500 runs in MAC-raw mode under lwIP, so MQTTS works (bench-tested 2026-10-29).
+
+### Abandoned: W5500 with the WIZnet `Ethernet` library
+
+The original S3 build used the WIZnet `Ethernet` library, which cannot do MQTTS. It was removed from the code on 2026-10-29. Read [Ethernet TLS — W5500 Limitation](ETHERNET_TLS_LIMITATION) before revisiting it. Many older provisioning and MQTT notes were written for the S3 and still describe it.
 
 ## How to use these docs
 

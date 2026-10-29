@@ -16,7 +16,7 @@ The platform provides the common infrastructure those sensor applications need:
 - OTA firmware update support
 - room for device-specific sensor logic and reporting
 
-The firmware targets one board: the M5Stack Unit PoE P4 (ESP32-P4), with WiFi from an ESP32-C6 co-processor.
+The firmware builds for two boards with the same behaviour: the M5Stack Unit PoE P4 (ESP32-P4, with WiFi from an ESP32-C6 co-processor) and the single-chip Waveshare ESP32-S3-POE-ETH (native WiFi, W5500 Ethernet in MAC-raw mode).
 
 ## What the project is trying to do
 
@@ -38,13 +38,20 @@ The `m5tab5-esp32p4` environment, on the M5Stack Unit PoE P4.
 - WiFi comes from an ESP32-C6 co-processor running `esp-hosted` over SDIO
 - WiFi is the primary data path; Ethernet is the fallback (see `docs/development/esp32-c6-wifi-coprocessor-plan.mdx`)
 
-### Abandoned: ESP32-S3 plus W5500
+### ESP32-S3 plus W5500 (MAC-raw) plus native WiFi
 
-The earlier ESP32-S3 + W5500 SPI Ethernet target was removed from the code on
-2026-10-29. Its Arduino `Ethernet` (WIZnet) library runs TCP/IP inside the chip,
-so MQTTS was impossible on it. The same chip in MAC-raw mode under lwIP does
-MQTTS; this was bench-tested on 2026-10-29. `docs/ETHERNET_TLS_LIMITATION.md` has
-both results. Some older notes still describe the S3.
+The `esp32s3-poe-eth` environment, on the Waveshare ESP32-S3-POE-ETH.
+
+- A single chip: native WiFi, plus a W5500 on SPI driven in MAC-raw mode by the `ETH` library, so lwIP and MQTTS run on the S3
+- Same firmware and behaviour as the P4: WiFi primary, Ethernet fallback, AutoIP with DHCP probing, 5-press reset (on BOOT)
+- The W5500 links at 100 Mbit/s, but SPI limits throughput to a few Mbit/s, which is plenty for MQTT and OTA
+
+### Abandoned: W5500 with the WIZnet `Ethernet` library
+
+The original S3 build used the Arduino `Ethernet` (WIZnet) library, which runs
+TCP/IP inside the W5500, so MQTTS was impossible on it. That code was removed on
+2026-10-29. `docs/ETHERNET_TLS_LIMITATION.md` records why, and why MAC-raw mode
+works. Don't revive the WIZnet library path. Some older notes still describe it.
 
 ## Main firmware capabilities
 
@@ -58,10 +65,12 @@ both results. Some older notes still describe the S3.
 
 ## Build targets
 
-`platformio.ini` defines the main firmware and two bench test sketches:
+`platformio.ini` defines the main firmware for two boards, plus bench test sketches:
 
-- `m5tab5-esp32p4`: the main firmware
-- `m5tab5-tls-test`: standalone MQTTS-over-Ethernet test
+- `m5tab5-esp32p4`: main firmware, Unit PoE P4 (RMII Ethernet + ESP32-C6 WiFi)
+- `esp32s3-poe-eth`: main firmware, Waveshare ESP32-S3-POE-ETH (single chip: native WiFi + W5500 in MAC-raw mode)
+- `m5tab5-tls-test`: standalone MQTTS-over-RMII test
+- `esp32s3-w5500-tls-test`: standalone MQTTS-over-W5500 (MAC-raw) test
 - `m5tab5-c6-hosted-test`: ESP32-C6 SDIO link test
 
 ```bash

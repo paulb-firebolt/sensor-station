@@ -18,14 +18,27 @@
 
 
 
-// Tab5: built-in RMII Ethernet via ESP32-P4 EMAC + IP101 PHY.
+#include <ETH.h>
+#if CONFIG_IDF_TARGET_ESP32S3
+// Waveshare ESP32-S3-POE-ETH: W5500 on SPI, driven in MAC-raw mode by the ETH
+// library so lwIP (and therefore TLS) runs on the S3. Not the WIZnet Ethernet
+// library, which cannot do TLS: see docs/ETHERNET_TLS_LIMITATION.md.
+#define W5500_SCK      13
+#define W5500_MISO     12
+#define W5500_MOSI     11
+#define W5500_CS       14
+#define W5500_INT      10
+#define W5500_RST       9
+#define W5500_PHY_ADDR  1
+#else
+// Unit PoE P4: built-in RMII Ethernet via ESP32-P4 EMAC + IP101 PHY.
 // All RMII pin macros (ETH_RMII_CLK, ETH_RMII_TX0, etc.) are pre-defined
 // in ETH.h for ESP32-P4. Only PHY type/address and control pins needed here.
-#include <ETH.h>
 #define RMII_MDC      31    // SMI_MDC
 #define RMII_MDIO     52    // SMI_MDIO
 #define RMII_PHY_RST  51    // PHY_RST
 #define RMII_PHY_ADDR  1    // IP101 default address
+#endif
 
 #if WIFI_HOSTED
 // ESP32-C6 esp-hosted co-processor over SDIO (4-bit). Defaults are pin plan
