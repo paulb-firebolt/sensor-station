@@ -2,7 +2,7 @@
 title: Sensor Station v3 — Hardware Design Brief
 description: Starting brief for a hardware design partner covering the v3 base station and battery PIR sensor node.
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-10-05T00:00:00Z
+lastModified: 2026-10-29T23:00:00Z
 ---
 
 :::info
@@ -97,13 +97,14 @@ field, after a concentrator firmware update (`RF-2`).
 | Host MCU | [M5Stack Unit PoE-P4](https://docs.m5stack.com/en/unit/Unit_PoE-P4) (SKU U213) | ESP32-P4NRW32: MQTT over TLS, OTA, web setup, RF node management | Working |
 | Ethernet + PoE | On the same board | IP101GRI PHY over RMII; PoE input (board supplies up to 6 W) | Working, including MQTT over TLS |
 | Sub-1 GHz concentrator | [TI LAUNCHXL-CC1312R1](https://www.ti.com/tool/LAUNCHXL-CC1312R1) | CC1312R runs the coordinator firmware and forwards node data to the host over SPI | Working on the bench with CC1310 nodes |
-| Wi-Fi | ESP32-C6 (dev board) | Wi-Fi co-processor for the P4, using Espressif's ESP-Hosted-MCU firmware over SDIO | **Planned, not yet built** |
+| Wi-Fi | ESP32-C6 (dev board) | Wi-Fi co-processor for the P4, using Espressif's ESP-Hosted-MCU firmware over SDIO | Working on the bench (2026-10-29): jumper-wired 1-bit SDIO at 5 MHz. 4-bit at 40 MHz needs a PCB |
 
 The P4 was chosen for the PoC because its RMII Ethernet runs MQTT over TLS
 reliably. An earlier ESP32-S3 + W5500 SPI Ethernet build couldn't, because the
 Arduino WIZnet library it used runs TCP/IP inside the W5500 and couldn't carry
-TLS. That's a library limitation, not a hardware one: the W5500 also works
-through the ESP32's own network stack. The ESP32-P4 has **no radio
+TLS. That's a library limitation, not a hardware one. With the W5500 in MAC-raw
+mode under the ESP32's own network stack, an ESP32-S3 held a mutual-TLS MQTT
+session over Ethernet on the bench on 2026-10-29. The ESP32-P4 has **no radio
 of its own**, so Wi-Fi needs a second chip. That's why the C6 is in the plan.
 
 ### Not wanted in production
@@ -484,8 +485,8 @@ on:
    PHY (`PLT-1`), which gives Ethernet MAC and Wi-Fi on one chip. The PoC uses
    an ESP32-P4 plus an ESP32-C6. Which do you recommend for cost, BOM and
    certification? We don't depend on anything P4-specific beyond Ethernet
-   with TLS. An ESP32-S3 + W5500 also remains viable (see
-   [Base station](#base-station)). If the P4 is kept, which silicon revision
+   with TLS. An ESP32-S3 + W5500 in MAC-raw mode is also viable; it was
+   bench-tested with mutual-TLS MQTT (see [Base station](#base-station)). If the P4 is kept, which silicon revision
    would you design with?
 2. **CC1312 reflash transport.** Put the data link on the bootloader's SPI pins
    and flash over SPI, or route the bootloader UART as well? Neither is verified

@@ -42,9 +42,9 @@ The `m5tab5-esp32p4` environment, on the M5Stack Unit PoE P4.
 
 The earlier ESP32-S3 + W5500 SPI Ethernet target was removed from the code on
 2026-10-29. Its Arduino `Ethernet` (WIZnet) library runs TCP/IP inside the chip,
-so MQTTS was impossible on it. `docs/ETHERNET_TLS_LIMITATION.md` records why, and
-the one untested alternative. Read it before proposing the W5500 again. Some
-older notes still describe the S3.
+so MQTTS was impossible on it. The same chip in MAC-raw mode under lwIP does
+MQTTS; this was bench-tested on 2026-10-29. `docs/ETHERNET_TLS_LIMITATION.md` has
+both results. Some older notes still describe the S3.
 
 ## Main firmware capabilities
 

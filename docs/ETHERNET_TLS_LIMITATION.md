@@ -1,7 +1,7 @@
 ---
 title: Ethernet TLS — W5500 Limitation and RMII Solution
 created: 2025-12-15T20:56:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-29T23:00:00Z
 ---
 
 > **Status: abandoned. W5500 and ESP32-S3 support was removed from the code on
@@ -11,11 +11,18 @@ lastModified: 2026-10-29T21:00:00Z
 > **What failed:** the W5500 driven by the Arduino `Ethernet` (WIZnet) library,
 > which runs TCP/IP inside the chip. TLS cannot be layered on that path.
 >
-> **What was not tried:** Arduino-ESP32 3.x can also drive a W5500 as a plain MAC
-> (`ETH.begin(ETH_PHY_W5500, ...)`) under lwIP, the same stack the P4 uses. TLS
-> should work there, but this is untested. It was not pursued because the ESP32-P4's
-> built-in RMII Ethernet already does MQTTS. Revisit it only with a reason the P4
-> can't meet.
+> **What works (bench-tested 2026-10-29):** the same W5500 in **MAC-raw mode**,
+> driven by Arduino-ESP32 3.x's `ETH` library (`ETH.begin(ETH_PHY_W5500, ...)`).
+> lwIP then runs on the ESP32, the same stack the P4 uses, and
+> `NetworkClientSecure` works. On a Waveshare ESP32-S3-POE-ETH with Ethernet only
+> (WiFi never started), the S3 held a mutual-TLS MQTT session to the bench broker
+> and published every 10 s. Each TLS handshake took about 0.94 s, and free heap
+> stayed at about 271 KB. Reproduce with `src/samples/w5500_tls_test.cpp`
+> (env `esp32s3-w5500-tls-test`).
+>
+> **So the limitation is the WIZnet-offload library, not the W5500 chip.** A
+> W5500 (or another SPI MAC) under lwIP is a valid Ethernet option for a
+> single-chip base station.
 >
 > **Removed code:** the `esp32-s3-devkitc-1` env, the W5500 paths in `network`,
 > `web_server`, `mqtt_manager` and `ota_manager`, and `mdns_ethernet.cpp`. It is
@@ -25,10 +32,11 @@ lastModified: 2026-10-29T21:00:00Z
 
 | Ethernet Type        | Board                | TLS Works? | Why                                     |
 | -------------------- | -------------------- | ---------- | --------------------------------------- |
-| W5500 SPI (WIZnet)   | ESP32-S3 Waveshare   | ❌ No      | WIZnet stack, no hostname to BearSSL    |
+| W5500, WIZnet library | ESP32-S3 Waveshare  | ❌ No      | WIZnet stack, no hostname to BearSSL    |
+| W5500, MAC-raw (`ETH`) | ESP32-S3 Waveshare | ✅ Yes     | LwIP stack on the ESP32, mbedTLS works (2026-10-29) |
 | RMII (built-in EMAC) | ESP32-P4 Unit PoE P4 | ✅ Yes     | LwIP stack, same as WiFi, mbedTLS works |
 
-**MQTTS over W5500 Ethernet is architecturally impossible** — do not attempt again.
+**MQTTS over the W5500 with the WIZnet `Ethernet` library is architecturally impossible.** Don't attempt it again. MAC-raw mode via the `ETH` library is a different path, and it works (see the status note above).
 
 **MQTTS over RMII Ethernet works** — implemented and production-ready using `NetworkClientSecure`.
 

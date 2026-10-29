@@ -1,7 +1,7 @@
 ---
 title: Ethernet TLS and Security — Implementation Notes
 created: 2025-12-15T15:31:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-29T23:00:00Z
 ---
 
 > **2026-10-29:** the ESP32-S3 and W5500 target was removed from the code, because
@@ -13,7 +13,8 @@ lastModified: 2026-10-29T21:00:00Z
 | Feature                           | Board    | Status                        |
 | --------------------------------- | -------- | ----------------------------- |
 | MQTTS over WiFi                   | ESP32-S3 | ✅ Working                    |
-| MQTTS over W5500 Ethernet         | ESP32-S3 | ❌ Architecturally impossible |
+| MQTTS over W5500, WIZnet library  | ESP32-S3 | ❌ Architecturally impossible |
+| MQTTS over W5500, MAC-raw (`ETH`) | ESP32-S3 | ✅ Bench-tested 2026-10-29    |
 | MQTTS over RMII Ethernet          | ESP32-P4 | ✅ Working                    |
 | HTTP Basic Auth on /mqtt          | Both     | ✅ Implemented                |
 | Write-only certificate management | Both     | ✅ Implemented                |
