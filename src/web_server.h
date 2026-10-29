@@ -74,6 +74,7 @@ private:
     // Route handlers for WiFi WebServer
     void handleRoot(void);
     void handleFindMe(void);
+    void handleWiFiPage(void);
     void handleScan(void);
     void handleSave(void);
     void handleNotFound(void);
