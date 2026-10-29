@@ -816,8 +816,10 @@ void DeviceWebServer::handleScan(void) {
     if (!wifiManager.isAPActive() && !requireAuth()) {
         return;
     }
-    // scanNetworks() would bring the radio up itself, bypassing the circuit breaker
-    if (!wifiManager.isAPActive() && !wifiManager.radioUp(WIFI_STA)) {
+    // scanNetworks() would bring STA up itself, bypassing the circuit breaker and
+    // the stale-config clear in radioUp(); in AP mode the scan needs AP+STA
+    wifi_mode_t scanMode = wifiManager.isAPActive() ? WIFI_AP_STA : WIFI_STA;
+    if (!wifiManager.radioUp(scanMode)) {
         webServer.send(503, "text/plain", "WiFi radio unavailable");
         return;
     }
