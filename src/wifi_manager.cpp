@@ -13,6 +13,18 @@ const char* WIFI_NVS_NAMESPACE = "wifi_config";
 const char* WIFI_SSID_KEY = "ssid";
 const char* WIFI_PASSWORD_KEY = "password";
 
+#if WIFI_HOSTED
+#include <esp_attr.h>
+#include <esp_system.h>
+
+// Survive the software reset esp-hosted issues on transport failure; garbage
+// after power-on, so begin() only trusts them after a software reset.
+static RTC_NOINIT_ATTR uint32_t hostedBringupMarker;
+static RTC_NOINIT_ATTR uint32_t hostedFailedBoots;
+static const uint32_t HOSTED_BRINGUP_MAGIC = 0xC6B0071Eu;
+static const uint32_t HOSTED_MAX_FAILED_BOOTS = 2;
+#endif
+
 WiFiManager::WiFiManager() : apMode(false), lastConnectionCheck(0) {
     // Don't initialize Preferences here - must be done after nvs_flash_init()
 }
@@ -21,6 +33,50 @@ WiFiManager::WiFiManager() : apMode(false), lastConnectionCheck(0) {
 void WiFiManager::begin(void) {
     prefs.begin(WIFI_NVS_NAMESPACE, false);
     LOG_I("[WiFi] Manager initialized with NVS\n");
+
+#if WIFI_HOSTED
+    if (esp_reset_reason() != ESP_RST_SW) {
+        hostedFailedBoots = 0;  // power-on/brownout/watchdog: RTC values are not ours
+    } else if (hostedBringupMarker == HOSTED_BRINGUP_MAGIC) {
+        hostedFailedBoots++;  // previous boot was restarted mid bring-up
+    }
+    hostedBringupMarker = 0;
+    radioDisabled = hostedFailedBoots >= HOSTED_MAX_FAILED_BOOTS;
+    if (radioDisabled) {
+        LOG_E("[WiFi] C6 bring-up restarted the device %lu times - WiFi disabled until power "
+              "cycle, running Ethernet-only\n",
+              (unsigned long)hostedFailedBoots);
+    }
+#endif
+}
+
+bool WiFiManager::radioUp(wifi_mode_t mode) {
+    if (radioDisabled) {
+        return false;
+    }
+#if WIFI_HOSTED
+    bool staWasOn = (WiFi.getMode() & WIFI_MODE_STA) != 0;
+    hostedBringupMarker = HOSTED_BRINGUP_MAGIC;
+#endif
+    bool ok = WiFi.mode(mode);
+#if WIFI_HOSTED
+    hostedBringupMarker = 0;
+    if (ok) {
+        hostedFailedBoots = 0;
+    }
+    // The C6 keeps its own STA config in flash (a new board ships with a factory
+    // test SSID) and auto-reconnect keeps retrying it, which blocks every scan.
+    // Our credentials live in our NVS and are passed to WiFi.begin(), so clear
+    // the C6's copy whenever STA comes up. Only when newly enabled: clearing a
+    // running STA would drop a live connection.
+    if (ok && !staWasOn && (mode & WIFI_MODE_STA)) {
+        WiFi.STA.disconnect(true);
+        // Modem sleep held packets until the next beacon: ~0.2-0.8 s ping, multi-second
+        // HTTP. The device is PoE/mains powered, so latency matters more than power.
+        WiFi.setSleep(false);
+    }
+#endif
+    return ok;
 }
 
 // Check if WiFi credentials exist in NVS
@@ -66,8 +122,12 @@ bool WiFiManager::connectStation(const String& ssid, const String& password) {
     WiFi.disconnect(true);
     delay(100);
 
-    // Set station mode
-    WiFi.mode(WIFI_STA);
+    // Set station mode. Fails when the radio is absent (e.g. no esp-hosted C6),
+    // so bail out instead of sitting through WIFI_CONNECT_TIMEOUT.
+    if (!radioUp(WIFI_STA)) {
+        LOG_E("[WiFi] Radio unavailable - cannot enter station mode\n");
+        return false;
+    }
     WiFi.begin(ssid.c_str(), password.c_str());
 
     // Wait for connection with timeout
@@ -135,7 +195,10 @@ bool WiFiManager::startAP(void) {
     delay(100);
 
     // Configure AP mode
-    WiFi.mode(WIFI_AP);
+    if (!radioUp(WIFI_AP)) {
+        LOG_E("[WiFi] Radio unavailable - cannot start AP\n");
+        return false;
+    }
     WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
 
     bool success = WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD);

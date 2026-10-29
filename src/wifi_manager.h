@@ -13,6 +13,33 @@
 #include <WiFi.h>
 #include <Preferences.h>
 
+// ============================================================================
+// WiFi build capabilities (override via build_flags)
+//  - HAS_WIFI=1             a radio is present (native or esp-hosted)
+//  - WIFI_HOSTED=1          the radio is an external ESP32-C6 over SDIO (esp-hosted)
+//  - ETHERNET_FIRST_SETUP=1 first-run admin-password page over Ethernet; the
+//                           provisioning AP is only a fallback when Ethernet is down
+// ============================================================================
+#ifdef WIFI_DISABLED
+#error "WIFI_DISABLED was replaced by HAS_WIFI / WIFI_HOSTED / ETHERNET_FIRST_SETUP"
+#endif
+
+#ifndef HAS_WIFI
+#define HAS_WIFI 1
+#endif
+
+#ifndef WIFI_HOSTED
+#define WIFI_HOSTED 0
+#endif
+
+#ifndef ETHERNET_FIRST_SETUP
+#define ETHERNET_FIRST_SETUP 0
+#endif
+
+#if WIFI_HOSTED && !HAS_WIFI
+#error "WIFI_HOSTED=1 requires HAS_WIFI=1"
+#endif
+
 // WiFi AP Mode Configuration
 extern const char* WIFI_AP_SSID;
 extern const char* WIFI_AP_PASSWORD;
@@ -128,11 +155,29 @@ public:
     /** @brief Return the raw @c wl_status_t connection status from the WiFi driver. */
     wl_status_t getStatus(void);
 
+    /**
+     * @brief Bring the radio up in @p mode. Every path that starts WiFi must use this.
+     *
+     * On esp-hosted builds this is a circuit breaker: the prebuilt libraries restart
+     * the host when the SDIO transport fails (CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE),
+     * so a present-but-faulty C6 would reboot-loop the device. A marker that survives
+     * a software reset detects that; after @c HOSTED_MAX_FAILED_BOOTS such boots the
+     * radio stays off until a successful bring-up or a power cycle, and the device
+     * runs Ethernet-only.
+     *
+     * @return @c true if the radio is up in @p mode.
+     */
+    bool radioUp(wifi_mode_t mode);
+
+    /** @brief Return @c true if the circuit breaker has disabled the radio for this boot. */
+    bool isRadioDisabled(void) const { return radioDisabled; }
+
 private:
     Preferences prefs;
     bool apMode;
     unsigned long lastConnectionCheck;
     String currentSSID;
+    bool radioDisabled = false;
 
     void reconnectStation(void);
 };

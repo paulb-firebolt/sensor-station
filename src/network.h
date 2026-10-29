@@ -64,6 +64,35 @@
 #endif // USE_RMII_ETHERNET
 #endif // ENABLE_ETHERNET
 
+#if WIFI_HOSTED
+// ESP32-C6 esp-hosted co-processor over SDIO (4-bit). Defaults are pin plan
+// Option A for the Unit PoE P4: grey end-header SDMMC block (measured 3.3 V),
+// so the CC1312 keeps G8–G12. The C6 side is fixed in silicon:
+// CLK=IO19 CMD=IO18 D0=IO20 D1=IO21 D2=IO22 D3=IO23, reset → EN/RST.
+// See docs/development/esp32-c6-wifi-coprocessor-plan.mdx.
+#ifndef C6_SDIO_CLK
+#define C6_SDIO_CLK 43
+#endif
+#ifndef C6_SDIO_CMD
+#define C6_SDIO_CMD 44
+#endif
+#ifndef C6_SDIO_D0
+#define C6_SDIO_D0 39
+#endif
+#ifndef C6_SDIO_D1
+#define C6_SDIO_D1 40
+#endif
+#ifndef C6_SDIO_D2
+#define C6_SDIO_D2 41
+#endif
+#ifndef C6_SDIO_D3
+#define C6_SDIO_D3 42
+#endif
+#ifndef C6_RESET
+#define C6_RESET 13
+#endif
+#endif // WIFI_HOSTED
+
 // Network configuration
 const unsigned long DHCP_TIMEOUT = 10000; // 10 seconds
 const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
@@ -111,6 +140,15 @@ IPAddress getWiFiIPAddress(void);
 
 /** @brief Returns `true` if the Ethernet link is up and an IP address is assigned. */
 bool isEthernetConnected(void);
+
+/**
+ * @brief Returns `true` only if Ethernet has a DHCP lease, i.e. a real data path.
+ *
+ * Link alone doesn't count: Ethernet may be PoE power only (link up, no DHCP,
+ * AutoIP 169.254.x.x). WiFi is the primary data path and Ethernet the fallback,
+ * so this decides whether the provisioning AP is needed.
+ */
+bool isEthernetOnNetwork(void);
 
 /** @brief Returns `true` if the WiFi station is associated and has an IP address. */
 bool isWiFiConnected(void);

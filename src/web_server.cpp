@@ -63,9 +63,10 @@ void DeviceWebServer::begin(void) {
         // Setup WiFi WebServer routes
         webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
         webServer.on("/api/findme", HTTP_POST, [this]() { handleFindMe(); });
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
         webServer.on("/api/setup", HTTP_POST, [this]() { handleDeviceSetup(); });
-#else
+#endif
+#if HAS_WIFI
         webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
         webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
 #endif
@@ -268,7 +269,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
 
     // Determine the path
     if (requestLine.startsWith("GET / ") || requestLine.startsWith("GET /index")) {
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
         // On WiFi-disabled builds, show first-run setup until admin password is configured
         if (adminPassword.isEmpty()) {
             LOG_I("[Eth] Serving device setup page (first run)\n");
@@ -288,7 +289,7 @@ void DeviceWebServer::handleEthernetRequest(EthernetClient& client, const String
         }
 #endif
     } else if (requestLine.startsWith("POST /api/setup")) {
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
         // Handle admin password setup (WiFi-disabled first-run)
         int bodyStart = request.indexOf("\r\n\r\n") + 4;
         String body = request.substring(bodyStart);
@@ -753,8 +754,13 @@ void DeviceWebServer::handleFindMe(void) {
     }
 }
 
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
 void DeviceWebServer::handleDeviceSetup(void) {
+    // First-run only: once a password exists, changing it is not this route's job.
+    if (!adminPassword.isEmpty()) {
+        webServer.send(403, "text/plain", "Admin password already set");
+        return;
+    }
     String newPass = webServer.arg("admin_password");
     String confirm = webServer.arg("admin_password_confirm");
 
@@ -785,28 +791,38 @@ void DeviceWebServer::handleDeviceSetup(void) {
     webServer.sendHeader("Location", "/");
     webServer.send(303);
 }
-#endif  // WIFI_DISABLED
+#endif  // ETHERNET_FIRST_SETUP
 
 void DeviceWebServer::handleRoot(void) {
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
     if (adminPassword.isEmpty()) {
         webServer.send(200, "text/html", generateDeviceSetupPage());
-    } else {
-        webServer.send(200, "text/html", generateStatusPage());
+        return;
     }
-#else
+#endif
+#if HAS_WIFI
     if (wifiManager.isAPActive()) {
         // Provisioning mode - show WiFi setup form
         webServer.send(200, "text/html", generateProvisioningPage());
-    } else {
-        // Normal mode - show read-only status page
-        webServer.send(200, "text/html", generateStatusPage());
+        return;
     }
 #endif
+    // Normal mode - show read-only status page
+    webServer.send(200, "text/html", generateStatusPage());
 }
 
 // Handle WiFi scan request
 void DeviceWebServer::handleScan(void) {
+    if (!wifiManager.isAPActive() && !requireAuth()) {
+        return;
+    }
+    // scanNetworks() would bring STA up itself, bypassing the circuit breaker and
+    // the stale-config clear in radioUp(); in AP mode the scan needs AP+STA
+    wifi_mode_t scanMode = wifiManager.isAPActive() ? WIFI_AP_STA : WIFI_STA;
+    if (!wifiManager.radioUp(scanMode)) {
+        webServer.send(503, "text/plain", "WiFi radio unavailable");
+        return;
+    }
     LOG_I("[API] Scanning WiFi networks...\n");
 
     int n = WiFi.scanNetworks();
@@ -828,6 +844,12 @@ void DeviceWebServer::handleScan(void) {
 // Handle save credentials request
 void DeviceWebServer::handleSave(void) {
     LOG_I("[WiFi] Save credentials request\n");
+
+    // Open only during AP provisioning; otherwise it can reset the admin
+    // password, so it is admin-only (the P4 serves this route over Ethernet).
+    if (!wifiManager.isAPActive() && !requireAuth()) {
+        return;
+    }
 
     // Check for Ethernet-only mode
     bool ethernetOnly = webServer.hasArg("ethernet_only");
@@ -1136,7 +1158,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
 // Generate status page (read-only)
 String DeviceWebServer::generateStatusPage(void) {
     // Get current status
-#if !WIFI_DISABLED
+#if HAS_WIFI
     String wifiSSID = wifiManager.getConnectedSSID();
     IPAddress wifiIP = wifiManager.getStationIP();
     int wifiRSSI = wifiManager.getRSSI();
@@ -1249,7 +1271,7 @@ String DeviceWebServer::generateStatusPage(void) {
             ethernetMAC + R"HTML(</span>
       </div>)HTML";
 
-#if !WIFI_DISABLED
+#if HAS_WIFI
     html += R"HTML(
       <h2>WiFi Status</h2>
       <div class="status-item">
@@ -1318,7 +1340,7 @@ String DeviceWebServer::generateStatusPage(void) {
 
       <div class="info" style="margin-top:15px;">
         <strong>Factory Reset:</strong> Hold the boot button for 5 seconds to clear all settings and restart.)HTML"
-#if !WIFI_DISABLED
+#if HAS_WIFI && !ETHERNET_FIRST_SETUP  // factory reset only lands in the AP on WiFi-first builds
         R"HTML( The device will restart in setup mode at <strong>sensor-setup</strong> (password: 12345678).)HTML"
 #endif
         R"HTML(
@@ -1619,7 +1641,7 @@ String DeviceWebServer::generateMQTTSaveSuccessPage(void) {
 </html>)HTML";
 }
 
-#if WIFI_DISABLED
+#if ETHERNET_FIRST_SETUP
 // First-run setup page for WiFi-disabled builds (P4 / Ethernet-only)
 // Shown when no admin password has been set yet.
 String DeviceWebServer::generateDeviceSetupPage(void) {
@@ -1697,7 +1719,7 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
 </body>
 </html>)HTML";
 }
-#endif  // WIFI_DISABLED
+#endif  // ETHERNET_FIRST_SETUP
 
 // Load admin password from NVS
 void DeviceWebServer::loadAdminPassword(void) {

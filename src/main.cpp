@@ -132,6 +132,38 @@ static void ledHue(uint8_t hue) {
 }
 #endif  // ARDUINO_M5TAB5
 
+#if WIFI_HOSTED
+// Fail the build if a C6 pin collides with another peripheral, rather than
+// silently fighting over a GPIO at runtime.
+namespace {
+constexpr int kC6Pins[] = {C6_SDIO_CLK, C6_SDIO_CMD, C6_SDIO_D0, C6_SDIO_D1,
+                           C6_SDIO_D2,  C6_SDIO_D3,  C6_RESET};
+constexpr int kReservedPins[] = {
+#if ENABLE_CC1312
+    CC1312_MOSI_PIN, CC1312_MISO_PIN, CC1312_SCLK_PIN, CC1312_CS_PIN, CC1312_DRDY_PIN,
+#endif
+#if ENABLE_LD2450
+    LD2450_RX_PIN, LD2450_TX_PIN,
+#endif
+#if defined(ARDUINO_M5TAB5)
+    LED_R_PIN, LED_G_PIN, LED_B_PIN,
+#endif
+    FACTORY_RESET_PIN};
+
+constexpr bool c6PinsCollide() {
+    for (int c6 : kC6Pins) {
+        for (int reserved : kReservedPins) {
+            if (c6 == reserved) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+static_assert(!c6PinsCollide(), "C6_* pin collides with a CC1312, LD2450, LED or reset pin");
+}  // namespace
+#endif  // WIFI_HOSTED
+
 // Find-me state (LED rainbow for 15 seconds)
 #if defined(ARDUINO_M5TAB5)
 static bool findMeActive = false;
@@ -331,10 +363,17 @@ void setup() {
         netPrefs.end();
     }
 
-#if WIFI_DISABLED
-    LOG_I("\n[Info] WiFi disabled by build flag - skipping AP/provisioning\n");
+#if !HAS_WIFI
+    LOG_I("\n[Info] No WiFi hardware in this build - skipping AP/provisioning\n");
 #else
-    if (!ethernetOnly && !wifiManager.hasCredentials()) {
+    bool needsAP = !ethernetOnly && !wifiManager.hasCredentials();
+#if ETHERNET_FIRST_SETUP
+    // WiFi can be configured from the web UI when Ethernet carries data. Ethernet
+    // may be PoE power only (link up, no DHCP), so only a DHCP lease suppresses
+    // the AP; otherwise an unprovisioned unit would be unreachable.
+    needsAP = needsAP && !isEthernetOnNetwork();
+#endif
+    if (needsAP) {
         LOG_I("\n=== Starting Provisioning Mode ===\n");
         if (wifiManager.startAP()) {
             LOG_I("Provisioning AP started successfully\n");

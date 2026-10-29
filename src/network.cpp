@@ -1,5 +1,10 @@
 #include "network.h"
 #include "log.h"
+#if WIFI_HOSTED
+extern "C" {
+#include "esp_hosted_transport_config.h"  // C header without extern "C" guards
+}
+#endif
 
 // Global variables
 static byte mac[6];
@@ -265,6 +270,16 @@ bool isEthernetConnected(void) {
 #endif
 }
 
+bool isEthernetOnNetwork(void) {
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    return ethernetInitialized && ETH.linkUp() && ETH.hasIP() && !usingAutoIP;
+#elif ENABLE_ETHERNET
+    return ethernetInitialized && (Ethernet.linkStatus() == LinkON) && usingDHCP;
+#else
+    return false;
+#endif
+}
+
 // Check if WiFi is connected
 bool isWiFiConnected(void) {
     return wifiInitialized && wifiManagerPtr && wifiManagerPtr->isConnectedStation();
@@ -327,10 +342,27 @@ bool initEthernet(void) {
 
 // Initialize WiFi with credentials
 bool initWiFi(WiFiManager& wifiMgr) {
-#if WIFI_DISABLED
-    LOG_I("[WiFi] Disabled by build flag - skipping");
+#if !HAS_WIFI
+    LOG_I("[WiFi] No WiFi hardware in this build - skipping");
     return false;
 #else
+#if WIFI_HOSTED
+    // Must precede any WiFi.* call: the first one brings up esp-hosted on these pins.
+    // A missing/dead C6 only surfaces later as a failed connect, so the device
+    // carries on Ethernet-only.
+    if (!WiFi.setPins(C6_SDIO_CLK, C6_SDIO_CMD, C6_SDIO_D0, C6_SDIO_D1, C6_SDIO_D2, C6_SDIO_D3,
+                      C6_RESET)) {
+        LOG_E("[WiFi] esp-hosted SDIO pin setup failed");
+        return false;
+    }
+#if defined(C6_SDIO_CLOCK_KHZ) || defined(C6_SDIO_BUS_WIDTH)
+    {
+        struct esp_hosted_sdio_config sdio = esp_hosted_get_default_sdio_config();
+        LOG_I("[WiFi] esp-hosted SDIO override: %lu kHz, %u-bit",
+              (unsigned long)sdio.clock_freq_khz, sdio.bus_width);
+    }
+#endif
+#endif
     String ssid, password;
 
     // Check if Ethernet-only mode is configured
@@ -348,7 +380,7 @@ bool initWiFi(WiFiManager& wifiMgr) {
 
     // Check if credentials exist
     if (!wifiMgr.hasCredentials()) {
-        LOG_I("[WiFi] No credentials found - starting AP mode");
+        LOG_I("[WiFi] No credentials stored - not connecting");
         return false;
     }
 
@@ -379,7 +411,7 @@ bool initWiFi(WiFiManager& wifiMgr) {
 
     wifiInitialized = true;
     return true;
-#endif // WIFI_DISABLED
+#endif // !HAS_WIFI
 }
 
 // Initialize network (Ethernet + WiFi)
@@ -411,13 +443,13 @@ bool initNetwork(WiFiManager& wifiMgr) {
 #endif
 
     // Initialize WiFi if credentials exist
-#if WIFI_DISABLED
+#if !HAS_WIFI
     bool wifiSuccess = false;
 #else
     bool wifiSuccess = initWiFi(wifiMgr);
 
     if (!wifiSuccess && !wifiMgr.hasCredentials()) {
-        LOG_I("WiFi not configured - will start AP mode for provisioning");
+        LOG_I("WiFi not configured");
     } else if (!wifiSuccess) {
         LOG_W("WARNING: WiFi connection failed");
         if (ethSuccess) {
@@ -443,7 +475,7 @@ bool initNetwork(WiFiManager& wifiMgr) {
 #else
     LOG_I("  Ethernet: Disabled");
 #endif
-#if WIFI_DISABLED
+#if !HAS_WIFI
     LOG_I("  WiFi: Disabled");
 #else
     if (wifiSuccess) {
@@ -456,7 +488,7 @@ bool initNetwork(WiFiManager& wifiMgr) {
 #endif
     LOG_I("========================================\n");
 
-#if WIFI_DISABLED
+#if !HAS_WIFI
     return ethSuccess;
 #else
     return ethSuccess || wifiSuccess || !wifiMgr.hasCredentials();
