@@ -407,6 +407,10 @@ bool initWiFi(WiFiManager& wifiMgr) {
         return false;
     }
 
+    // Set before connecting: checkConnection() then keeps retrying even if
+    // the network is absent at boot (e.g. AP still powering up after a cut).
+    wifiInitialized = true;
+
     // Connect to WiFi
     if (!wifiMgr.connectStation(ssid, password)) {
         LOG_W("[WiFi] Connection failed - WiFi unavailable");
@@ -426,7 +430,6 @@ bool initWiFi(WiFiManager& wifiMgr) {
         LOG_W("WARNING: WiFi mDNS failed to start");
     }
 
-    wifiInitialized = true;
     return true;
 #endif // !HAS_WIFI
 }

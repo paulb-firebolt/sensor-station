@@ -246,9 +246,14 @@ void checkFactoryReset(void) {
 
             LOG_I("\n");
             LOG_I("All settings cleared successfully!\n");
-            LOG_I("Rebooting into provisioning mode...\n");
+            LOG_I("Release the button to reboot into provisioning mode...\n");
             LOG_I("========================================\n\n");
 
+            // Restarting with the button still held leaves the P4 in ROM
+            // download mode (boot:0x204) instead of running the firmware.
+            while (digitalRead(FACTORY_RESET_PIN) == LOW) {
+                delay(10);
+            }
             delay(1000);
             ESP.restart();
         }

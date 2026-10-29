@@ -8,7 +8,7 @@ const IPAddress WIFI_AP_IP = IPAddress(192, 168, 4, 1);
 const IPAddress WIFI_AP_GATEWAY = IPAddress(192, 168, 4, 1);
 const IPAddress WIFI_AP_SUBNET = IPAddress(255, 255, 255, 0);
 const unsigned long WIFI_CONNECT_TIMEOUT = 30000;
-const unsigned long WIFI_CHECK_INTERVAL = 10000;
+const unsigned long WIFI_CHECK_INTERVAL = 30000;  // > one connect + DHCP, so a retry doesn't abort it
 const char* WIFI_NVS_NAMESPACE = "wifi_config";
 const char* WIFI_SSID_KEY = "ssid";
 const char* WIFI_PASSWORD_KEY = "password";
@@ -267,7 +267,10 @@ void WiFiManager::checkConnection(void) {
 void WiFiManager::reconnectStation(void) {
     String ssid, password;
 
-    if (loadCredentials(ssid, password)) {
-        connectStation(ssid, password);
+    // Non-blocking: the loop must keep serving Ethernet while WiFi is down.
+    // The next checkConnection() sees the result.
+    if (loadCredentials(ssid, password) && radioUp(WIFI_STA)) {
+        currentSSID = ssid;
+        WiFi.begin(ssid.c_str(), password.c_str());
     }
 }

@@ -906,19 +906,17 @@ void DeviceWebServer::handleSave(void) {
         LOG_E("[WiFi] ERROR: Failed to save Ethernet-only preference\n");
     }
 
-    // Save admin password
+    // Save admin password. An empty field keeps the current one: only a
+    // factory reset clears it, so a WiFi-only change can't unprotect the device.
     Preferences authPrefs;
-    if (authPrefs.begin("auth", false)) {
-        if (adminPassword.length() > 0) {
+    if (adminPassword.length() > 0) {
+        if (authPrefs.begin("auth", false)) {
             authPrefs.putString("admin_password", adminPassword);
+            authPrefs.end();
             LOG_I("[WiFi] Admin password saved\n");
         } else {
-            authPrefs.remove("admin_password");
-            LOG_I("[WiFi] Admin password cleared\n");
+            LOG_E("[WiFi] ERROR: Failed to save admin password\n");
         }
-        authPrefs.end();
-    } else {
-        LOG_E("[WiFi] ERROR: Failed to save admin password\n");
     }
 
     // Send success page BEFORE reboot
