@@ -10,9 +10,6 @@
 
 #include <Arduino.h>
 #include <NetworkClientSecure.h>
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-#include <Ethernet.h>
-#endif
 #include <PubSubClient.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>

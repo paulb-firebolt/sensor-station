@@ -16,7 +16,7 @@ The platform provides the common infrastructure those sensor applications need:
 - OTA firmware update support
 - room for device-specific sensor logic and reporting
 
-The project is no longer accurately described as a single ESP32-S3 application. It currently contains two hardware paths with shared goals but different networking implementations.
+The firmware targets one board: the M5Stack Unit PoE P4 (ESP32-P4), with WiFi from an ESP32-C6 co-processor.
 
 ## What the project is trying to do
 
@@ -30,22 +30,21 @@ The main objective is to produce firmware that stays manageable after the board 
 
 ## Hardware targets
 
-### ESP32-S3 plus W5500
-
-This is the older and more established path in the repo.
-
-- Ethernet uses a W5500 over SPI
-- WiFi runs directly on the ESP32-S3
-- many of the existing implementation notes were written for this target
-
 ### ESP32-P4 plus RMII Ethernet plus ESP32-C6 hosted WiFi
 
-This is the newer path represented by the `m5tab5-esp32p4` environment.
+The `m5tab5-esp32p4` environment, on the M5Stack Unit PoE P4.
 
-- Ethernet uses the ESP32-P4 internal MAC with an external PHY over RMII
-- WiFi depends on an ESP32-C6 co-processor running compatible `esp-hosted` firmware
-- Ethernet bring-up is the active path today
-- WiFi on the M5Stack Unit PoE P4 is still blocked until the C6 firmware and UART flashing path are fully confirmed
+- Ethernet uses the ESP32-P4 internal MAC with an IP101 PHY over RMII, powered by PoE
+- WiFi comes from an ESP32-C6 co-processor running `esp-hosted` over SDIO
+- WiFi is the primary data path; Ethernet is the fallback (see `docs/development/esp32-c6-wifi-coprocessor-plan.mdx`)
+
+### Abandoned: ESP32-S3 plus W5500
+
+The earlier ESP32-S3 + W5500 SPI Ethernet target was removed from the code on
+2026-10-29. Its Arduino `Ethernet` (WIZnet) library runs TCP/IP inside the chip,
+so MQTTS was impossible on it. `docs/ETHERNET_TLS_LIMITATION.md` records why, and
+the one untested alternative. Read it before proposing the W5500 again. Some
+older notes still describe the S3.
 
 ## Main firmware capabilities
 
@@ -59,15 +58,13 @@ This is the newer path represented by the `m5tab5-esp32p4` environment.
 
 ## Build targets
 
-The current `platformio.ini` defines two main environments:
+`platformio.ini` defines the main firmware and two bench test sketches:
 
-- `esp32-s3-devkitc-1`
-- `m5tab5-esp32p4`
-
-Build one explicitly:
+- `m5tab5-esp32p4`: the main firmware
+- `m5tab5-tls-test`: standalone MQTTS-over-Ethernet test
+- `m5tab5-c6-hosted-test`: ESP32-C6 SDIO link test
 
 ```bash
-pio run -e esp32-s3-devkitc-1
 pio run -e m5tab5-esp32p4
 ```
 

@@ -1,8 +1,25 @@
 ---
 title: Ethernet TLS — W5500 Limitation and RMII Solution
 created: 2025-12-15T20:56:00Z
-lastModified: 2026-03-17T17:45:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
+
+> **Status: abandoned. W5500 and ESP32-S3 support was removed from the code on
+> 2026-10-29.** This page is the record of why. Read it before proposing the
+> W5500 for this project again.
+>
+> **What failed:** the W5500 driven by the Arduino `Ethernet` (WIZnet) library,
+> which runs TCP/IP inside the chip. TLS cannot be layered on that path.
+>
+> **What was not tried:** Arduino-ESP32 3.x can also drive a W5500 as a plain MAC
+> (`ETH.begin(ETH_PHY_W5500, ...)`) under lwIP, the same stack the P4 uses. TLS
+> should work there, but this is untested. It was not pursued because the ESP32-P4's
+> built-in RMII Ethernet already does MQTTS. Revisit it only with a reason the P4
+> can't meet.
+>
+> **Removed code:** the `esp32-s3-devkitc-1` env, the W5500 paths in `network`,
+> `web_server`, `mqtt_manager` and `ota_manager`, and `mdns_ethernet.cpp`. It is
+> all in git history before 2026-10-29.
 
 ## Summary
 

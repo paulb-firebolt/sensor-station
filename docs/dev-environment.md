@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-lastModified: 2026-10-29T16:00:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
 
 How to run a local DHCP server and MQTT broker for development and testing
@@ -11,7 +11,7 @@ without needing external infrastructure.
 
 ## DHCP Server (dnsmasq, for direct Ethernet connection to device)
 
-When you test the ESP32-P4 or S3 over a direct Ethernet connection (for
+When you test the ESP32-P4 over a direct Ethernet connection (for
 example a USB-Ethernet adapter on your dev machine), that interface needs a
 DHCP server. Without one, the P4 falls back to an AutoIP `169.254.x.x` address
 and can't reach the broker on `192.168.2.1`. Use the `dockurr/dnsmasq` image,
@@ -260,13 +260,10 @@ HTTP server — Python's built-in server is all you need for local testing.
 
 ### Directory layout
 
-Keep firmware binaries organised by device in an `ota/` folder:
+Keep firmware binaries in an `ota/` folder, one subfolder per build env:
 
 ```text
 ~/Documents/PlatformIO/Projects/basic-network/ota/
-├── esp32-s3-devkitc-1/
-│   ├── firmware_0.0.9.bin
-│   └── firmware_0.1.0.bin
 └── m5tab5-esp32p4/
     ├── firmware_0.0.9.bin
     └── firmware_0.1.0.bin
@@ -285,25 +282,17 @@ cp .pio/build/m5tab5-esp32p4/firmware.bin \
    ota/m5tab5-esp32p4/firmware_0.1.0.bin
 ```
 
-For the S3:
-```bash
-pio run -e esp32-s3-devkitc-1
-cp .pio/build/esp32-s3-devkitc-1/firmware.bin \
-   ota/esp32-s3-devkitc-1/firmware_0.1.0.bin
-```
-
 ### 2. Start the HTTP server
 
-Serve from the `ota/` directory so both device folders are accessible:
+Serve from the `ota/` directory:
 
 ```bash
 cd ~/Documents/PlatformIO/Projects/basic-network/ota
 python -m http.server 8080
 ```
 
-Firmware is now available at:
-- `http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin`
-- `http://192.168.2.1:8080/esp32-s3-devkitc-1/firmware_0.1.0.bin`
+Firmware is now available at
+`http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin`.
 
 ### 3. Trigger OTA via MQTT
 

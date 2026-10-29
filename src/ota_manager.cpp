@@ -124,22 +124,17 @@ static bool isNewerVersion(const String& a, const String& b) {
 bool OTAManager::handleOTACommand(const JsonDocument& command) {
     // Parse OTA command
     // Expected format: {"action":"ota","url":"https://...","version":"1.2.3","sha256":"abc..."}
-    // If "url" is omitted, mDNS discovery of _ota._tcp is attempted (RMII builds only).
+    // If "url" is omitted, mDNS discovery of _ota._tcp is attempted.
 
     String url;
     if (command["url"].is<String>()) {
         url = command["url"].as<String>();
     } else {
-#if USE_RMII_ETHERNET
         LOG_I("[OTA] No URL in command — attempting mDNS OTA server discovery...\n");
         if (!discoverOTAServer(url)) {
             LOG_E("[OTA] ERROR: No URL in command and no OTA server found via mDNS\n");
             return false;
         }
-#else
-        LOG_E("[OTA] ERROR: No URL in OTA command\n");
-        return false;
-#endif
     }
 
     String version = command["version"].is<String>() ? command["version"].as<String>() : "unknown";

@@ -1,17 +1,12 @@
 /**
  * @file network.h
- * @brief Dual-stack network initialisation — W5500 SPI Ethernet (ESP32-S3) or
- *        RMII Ethernet (ESP32-P4) with DHCP/AutoIP fallback, WiFi station, and
- *        mDNS service discovery.
+ * @brief Dual-stack network initialisation — ESP32-P4 RMII Ethernet (EMAC +
+ *        IP101) with DHCP/AutoIP fallback, WiFi station via the esp-hosted C6,
+ *        and mDNS service discovery (ESPmDNS responder and query client).
  *
- * Build-time selection:
- *  - `ENABLE_ETHERNET=1` (default) enables Ethernet support.
- *  - `USE_RMII_ETHERNET=1` selects the ESP32-P4 EMAC + IP101 RMII path;
- *    `USE_RMII_ETHERNET=0` (default) selects the W5500 SPI path.
- *
- * On RMII builds, ESPmDNS provides both a responder and a query client.
- * On W5500 builds, MDNSEthernet acts as a responder only — the
- * `discoverMQTTBroker` / `discoverOTAServer` helpers are compiled out.
+ * W5500 SPI Ethernet (ESP32-S3) support was removed: the WIZnet Ethernet
+ * library it used cannot do MQTTS.
+ * See docs/ETHERNET_TLS_LIMITATION.md.
  */
 #ifndef NETWORK_H
 #define NETWORK_H
@@ -21,16 +16,8 @@
 #include <Preferences.h>
 #include "wifi_manager.h"
 
-#ifndef ENABLE_ETHERNET
-#define ENABLE_ETHERNET 1
-#endif
 
-#ifndef USE_RMII_ETHERNET
-#define USE_RMII_ETHERNET 0
-#endif
 
-#if ENABLE_ETHERNET
-#if USE_RMII_ETHERNET
 // Tab5: built-in RMII Ethernet via ESP32-P4 EMAC + IP101 PHY.
 // All RMII pin macros (ETH_RMII_CLK, ETH_RMII_TX0, etc.) are pre-defined
 // in ETH.h for ESP32-P4. Only PHY type/address and control pins needed here.
@@ -39,30 +26,6 @@
 #define RMII_MDIO     52    // SMI_MDIO
 #define RMII_PHY_RST  51    // PHY_RST
 #define RMII_PHY_ADDR  1    // IP101 default address
-#else
-// W5500 SPI Ethernet (Waveshare ESP32-S3-POE-ETH and similar).
-// Override any pin via build_flags in platformio.ini.
-#include <SPI.h>
-#include <Ethernet.h>
-#include "mdns_ethernet.h"
-
-#ifndef ETH_MOSI
-#define ETH_MOSI 11
-#endif
-#ifndef ETH_MISO
-#define ETH_MISO 12
-#endif
-#ifndef ETH_CLK
-#define ETH_CLK  13
-#endif
-#ifndef ETH_CS
-#define ETH_CS   14
-#endif
-#ifndef ETH_RST
-#define ETH_RST  9
-#endif
-#endif // USE_RMII_ETHERNET
-#endif // ENABLE_ETHERNET
 
 #if WIFI_HOSTED
 // ESP32-C6 esp-hosted co-processor over SDIO (4-bit). Defaults are pin plan
@@ -95,19 +58,18 @@
 
 // Network configuration
 const unsigned long DHCP_TIMEOUT = 5000; // 5 s: AutoIP-only sites want a quick fallback
-const unsigned long DHCP_PROBE_INTERVAL_MS = 30000; // RMII: DHCP server probe interval while on AutoIP
-const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
+const unsigned long DHCP_PROBE_INTERVAL_MS = 30000; // DHCP server probe interval while on AutoIP
 
 /**
  * @brief Initialises Ethernet and WiFi, starts mDNS, and waits for at least
  *        one network interface to obtain an IP address.
  *
  * Ethernet is attempted first.  If it succeeds, WiFi is started in station
- * mode using any stored credentials.  On W5500 builds, DHCP is tried for up
- * to `DHCP_TIMEOUT` ms before falling back to AutoIP.  On RMII builds the
- * same timeout applies; while on AutoIP, checkNetworkStatus() probes for a
- * DHCP server every `DHCP_PROBE_INTERVAL_MS` and switches when one answers.  mDNS is started with a
- * hostname derived from the device MAC address (e.g. "sensor-A0EA91DA").
+ * mode using any stored credentials.  DHCP is tried for up to `DHCP_TIMEOUT`
+ * ms before falling back to AutoIP; while on AutoIP, checkNetworkStatus()
+ * probes for a DHCP server every `DHCP_PROBE_INTERVAL_MS` and switches when
+ * one answers.  mDNS is started with a hostname derived from the device MAC
+ * address (e.g. "sensor-A0EA91DA").
  *
  * @param wifiMgr  Reference to the application WiFiManager instance, used to
  *                 retrieve stored SSID/password and manage the station
@@ -121,10 +83,8 @@ bool initNetwork(WiFiManager& wifiMgr);
 /**
  * @brief Maintains active network connections; call once per loop iteration.
  *
- * On W5500 builds, renews the DHCP lease when it is due and detects link-down
- * events.  On all builds, monitors the WiFi station connection and triggers
- * reconnection if the link has been lost.  The check interval is governed by
- * `LINK_CHECK_INTERVAL`.
+ * Monitors the WiFi station connection and triggers reconnection if it has
+ * been lost, and probes for a DHCP server while Ethernet is on AutoIP.
  */
 void checkNetworkStatus(void);
 
@@ -176,10 +136,8 @@ bool isWiFiConnected(void);
 /** @brief Returns `true` if either Ethernet or WiFi is connected. */
 bool isNetworkConnected(void);
 
-// mDNS service discovery (ESPmDNS — RMII Ethernet and WiFi paths only)
+// mDNS service discovery (ESPmDNS, Ethernet and WiFi)
 // Queries for well-known service types and returns host/port or URL.
-// Returns false immediately on W5500-only builds (MDNSEthernet is responder-only).
-#if USE_RMII_ETHERNET
 /**
  * @brief Discovers an MQTT broker via mDNS service queries.
  *
@@ -187,7 +145,7 @@ bool isNetworkConnected(void);
  * secure service is advertised.  The resolved address is the numeric IP
  * obtained from `MDNS.address(0)` — a hostname string is intentionally
  * avoided because `.local` resolution via `lwip_getaddrinfo` is unreliable
- * on RMII builds.  The caller should use the IP directly so that TLS
+ * on this stack.  The caller should use the IP directly so that TLS
  * certificate validation succeeds against the `IP:` SAN in the broker cert.
  *
  * @param[out] host  Set to the broker's dotted-decimal IP address string on
@@ -214,6 +172,5 @@ bool discoverMQTTBroker(String& host, uint16_t& port);
  *         `false` if no matching mDNS service record was found.
  */
 bool discoverOTAServer(String& url);
-#endif
 
 #endif // NETWORK_H
