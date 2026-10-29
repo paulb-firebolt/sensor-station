@@ -142,11 +142,13 @@ IPAddress getWiFiIPAddress(void);
 bool isEthernetConnected(void);
 
 /**
- * @brief Returns `true` if the Ethernet cable has link, whether or not DHCP gave
- *        an address. With AutoIP the device is still reachable over Ethernet
- *        (link-local + mDNS), so this decides whether the provisioning AP is needed.
+ * @brief Returns `true` only if Ethernet has a DHCP lease, i.e. a real data path.
+ *
+ * Link alone doesn't count: Ethernet may be PoE power only (link up, no DHCP,
+ * AutoIP 169.254.x.x). WiFi is the primary data path and Ethernet the fallback,
+ * so this decides whether the provisioning AP is needed.
  */
-bool isEthernetLinkUp(void);
+bool isEthernetOnNetwork(void);
 
 /** @brief Returns `true` if the WiFi station is associated and has an IP address. */
 bool isWiFiConnected(void);

@@ -478,9 +478,10 @@ Main firmware behaviour on the bench:
   device carries on Ethernet-only.
 - **C6 fitted but faulty:** the esp-hosted libraries restart the P4. After two
   such restarts the firmware leaves WiFi off for that boot.
-- **Provisioning AP:** with no WiFi credentials, the `sensor-setup` AP only
-  starts when there is **no Ethernet link**. A link without DHCP (AutoIP)
-  doesn't start it.
+- **Provisioning AP:** with no WiFi credentials, the `sensor-setup` AP starts
+  unless Ethernet has a DHCP lease. Link alone doesn't count, because Ethernet
+  may carry PoE power only. WiFi is the primary data path and Ethernet the
+  fallback.
 
 ---
 

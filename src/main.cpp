@@ -368,10 +368,10 @@ void setup() {
 #else
     bool needsAP = !ethernetOnly && !wifiManager.hasCredentials();
 #if ETHERNET_FIRST_SETUP
-    // WiFi is configured from the web UI over Ethernet; the AP is only a
-    // fallback when there is no Ethernet link. Link without DHCP (AutoIP)
-    // still counts: the device is reachable on its link-local address.
-    needsAP = needsAP && !isEthernetLinkUp();
+    // WiFi can be configured from the web UI when Ethernet carries data. Ethernet
+    // may be PoE power only (link up, no DHCP), so only a DHCP lease suppresses
+    // the AP; otherwise an unprovisioned unit would be unreachable.
+    needsAP = needsAP && !isEthernetOnNetwork();
 #endif
     if (needsAP) {
         LOG_I("\n=== Starting Provisioning Mode ===\n");

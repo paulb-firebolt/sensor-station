@@ -270,11 +270,11 @@ bool isEthernetConnected(void) {
 #endif
 }
 
-bool isEthernetLinkUp(void) {
+bool isEthernetOnNetwork(void) {
 #if ENABLE_ETHERNET && USE_RMII_ETHERNET
-    return ethernetInitialized && ETH.linkUp();
+    return ethernetInitialized && ETH.linkUp() && ETH.hasIP() && !usingAutoIP;
 #elif ENABLE_ETHERNET
-    return ethernetInitialized && (Ethernet.linkStatus() == LinkON);
+    return ethernetInitialized && (Ethernet.linkStatus() == LinkON) && usingDHCP;
 #else
     return false;
 #endif

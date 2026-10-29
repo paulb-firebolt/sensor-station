@@ -1,7 +1,7 @@
 ---
 title: ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-10-29T16:00:00Z
+lastModified: 2026-10-29T18:00:00Z
 ---
 
 Plan for adding an external ESP32-C6 to the M5Stack Unit PoE P4 so the P4 can
@@ -237,13 +237,20 @@ reused.
   that a missing C6 plus stored credentials plus a working Ethernet link
   **doesn't** trigger a reboot loop.
 
-### 3. Network interface policy (Ethernet primary, WiFi secondary)
+### 3. Network interface policy (WiFi primary, Ethernet fallback)
+
+**WiFi is the primary data path and Ethernet is the fallback** (decided
+2026-10-29). Ethernet may carry PoE power only: the link is up, but there is no
+DHCP and no route. The existing "Ethernet-only" setting is the explicit opt-in
+for sites where Ethernet carries the data. Only a DHCP lease counts as an
+Ethernet data path. Link and AutoIP alone don't.
 
 - Register WiFi STA events next to `onEthEvent` (`network.cpp:55-90`):
   `ARDUINO_EVENT_WIFI_STA_GOT_IP` / `_DISCONNECTED`.
-- Make **Ethernet the default route** whenever it has an IP
-  (`Network.setDefaultInterface(ETH)`), switch to WiFi on
-  `ARDUINO_EVENT_ETH_DISCONNECTED`, and switch back on `ETH_GOT_IP`.
+- Make **WiFi the default route** whenever it has an IP
+  (`Network.setDefaultInterface(WiFi.STA)`). Fall back to Ethernet only when
+  WiFi is down **and** Ethernet has a DHCP lease, and switch back on
+  `WIFI_STA_GOT_IP`. In Ethernet-only mode, Ethernet is the default route.
 - **MQTT must reconnect when the default interface changes.** The TLS socket
   stays bound to the old netif and would otherwise sit half-open until
   keepalive times out. `mqtt_manager.cpp:112,152,326` already checks
@@ -322,8 +329,9 @@ What changed from this plan:
   `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y`, and that can't be
   overridden from Arduino. `WiFiManager::radioUp()` is a circuit breaker: after
   two restarts during bring-up it leaves WiFi off for that boot.
-- **The AP fallback uses Ethernet link, not DHCP.** With AutoIP the device is
-  still reachable, so no AP starts.
+- **The provisioning AP starts unless Ethernet has a DHCP lease.** On a PoE
+  power-only install the link is up but there's no data path, so link alone
+  must not suppress the AP. `isEthernetOnNetwork()` checks for a lease.
 - **The first WiFi ping round-trip is about 1 s.** This is probably WiFi modem
   sleep. It hasn't been tuned yet.
 
