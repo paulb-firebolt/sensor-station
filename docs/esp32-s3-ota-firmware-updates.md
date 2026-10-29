@@ -1,12 +1,12 @@
 ---
 title: ESP32 OTA Firmware Update System
 created: 2026-03-17T19:09:00Z
-lastModified: 2026-03-17T19:09:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
 
 **Project:** Thermal Occupancy Counter with Ethernet + WiFi
 
-**Devices:** ESP32-S3 (Waveshare POE-ETH) · ESP32-P4 (M5Stack Unit PoE P4)
+**Device:** ESP32-P4 (M5Stack Unit PoE P4). The ESP32-S3 + W5500 target this guide also covered was removed on 2026-10-29; see [Ethernet TLS — W5500 Limitation](/ETHERNET_TLS_LIMITATION).
 
 **Date:** March 2026
 
@@ -60,7 +60,7 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
                    │
                    ▼
 ┌──────────────────────────────────────────┐
-│  ESP32-S3 Device                         │
+│  ESP32-P4 Device                         │
 │  ┌─────────────────────────────────────┐ │
 │  │ MQTT Manager (subscribed)           │ │
 │  │ - Receives OTA command JSON         │ │
@@ -94,22 +94,6 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 ```
 
 ### Partition Layout
-
-**ESP32-S3** (default partition table, ~1.25 MB OTA slots):
-
-```text
-┌──────────────────────────────────────────┐
-│ ESP32-S3 Flash Memory (4 MB)             │
-├──────────────────────────────────────────┤
-│ NVS (WiFi, MQTT, OTA config)  0x9000     │
-├──────────────────────────────────────────┤
-│ OTA Data (bootloader state)   0xe000     │
-├──────────────────────────────────────────┤
-│ app0 (OTA_0) - Running firmware ~1.25 MB │
-├──────────────────────────────────────────┤
-│ app1 (OTA_1) - Download target ~1.25 MB  │
-└──────────────────────────────────────────┘
-```
 
 **ESP32-P4** uses `default_16MB.csv` (6.25 MB OTA slots — required for larger P4 firmware):
 
@@ -213,8 +197,6 @@ Selection is automatic based on URL scheme (`http://` vs `https://`).
 
 ### Step 1: Partition Table
 
-**ESP32-S3**: No action needed — the default partition table has two OTA slots.
-
 **ESP32-P4 (M5Stack Unit PoE P4)**: Must set `board_build.partitions = default_16MB.csv`.
 The ESP32-P4 firmware is larger than the default 1.25 MB OTA slot; without this you get
 a "firmware too large" error at flash time.
@@ -222,18 +204,6 @@ a "firmware too large" error at flash time.
 ### Step 2: PlatformIO Configuration
 
 ```ini
-[env:esp32-s3-devkitc-1]
-platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
-board = esp32-s3-devkitc-1
-framework = arduino
-build_flags =
-    -DARDUINO_USB_CDC_ON_BOOT=1
-    -DENABLE_ETHERNET=1
-lib_deps =
-    bblanchon/ArduinoJson @ ^7.0.0
-    knolleary/PubSubClient @ ^2.8.0
-    arduino-libraries/Ethernet @ ^2.0.0
-
 [env:m5tab5-esp32p4]
 platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.37/platform-espressif32.zip
 board = m5stack-tab5-p4
@@ -241,9 +211,8 @@ framework = arduino
 board_build.partitions = default_16MB.csv   # ← required for P4
 build_flags =
     -DCONFIG_IDF_TARGET_ESP32P4=1
-    -DENABLE_ETHERNET=1
-    -DUSE_RMII_ETHERNET=1
-    -DWIFI_DISABLED=1
+    -DARDUINO_M5TAB5=1
+    ; ...plus the WiFi/C6 and feature flags; see platformio.ini
 lib_deps =
     bblanchon/ArduinoJson @ ^7.0.0
     knolleary/PubSubClient @ ^2.8.0
@@ -291,18 +260,18 @@ void setup() {
 ### Build Firmware Binary
 
 ```bash
-# Build (creates .pio/build/esp32-s3-devkitc-1/firmware.bin)
-platformio run -e esp32-s3-devkitc-1
+# Build (creates .pio/build/m5tab5-esp32p4/firmware.bin)
+platformio run -e m5tab5-esp32p4
 
 # Or with verbose output
-platformio run -e esp32-s3-devkitc-1 -v
+platformio run -e m5tab5-esp32p4 -v
 ```
 
 ### Host on Web Server
 
 ```bash
 # Copy to web-accessible location
-cp .pio/build/esp32-s3-devkitc-1/firmware.bin /var/www/html/firmware_0.0.2.bin
+cp .pio/build/m5tab5-esp32p4/firmware.bin /var/www/html/firmware_0.0.2.bin
 
 # Verify accessibility
 curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
@@ -421,7 +390,7 @@ Manually switches to the previous firmware partition (same logic as auto-rollbac
 Only works if the alternate OTA partition contains a valid firmware image (magic byte 0xE9 present)
 — i.e. at least one successful OTA update has been performed since USB flash.
 
-### Command 5: Find Me (P4 only)
+### Command 5: Find Me
 
 ```bash
 mosquitto_pub \
@@ -449,7 +418,7 @@ The same effect can be triggered locally via the **Find Me** button on the devic
 ```bash
 # 1. Edit code
 # 2. Build and upload via USB
-platformio run -e esp32-s3-devkitc-1 -t upload
+platformio run -e m5tab5-esp32p4 -t upload
 
 # 3. Device boots with new firmware immediately
 ```
@@ -461,9 +430,7 @@ platformio run -e esp32-s3-devkitc-1 -t upload
 #    #define FIRMWARE_VERSION "0.1.0"
 
 # 2. Build
-pio run -e m5tab5-esp32p4          # ESP32-P4
-# or
-pio run -e esp32-s3-devkitc-1     # ESP32-S3
+pio run -e m5tab5-esp32p4
 
 # 3. Copy binary into the ota/ directory, named by device and version
 cp .pio/build/m5tab5-esp32p4/firmware.bin \
@@ -619,7 +586,7 @@ Ensures correct version is reported after reboot.
 
 ### Issue: Binary not created
 
-**Symptom**: `.pio/build/esp32-s3-devkitc-1/firmware.bin` doesn't exist
+**Symptom**: `.pio/build/m5tab5-esp32p4/firmware.bin` doesn't exist
 
 **Cause**: Build failed or wrong environment name
 
@@ -627,11 +594,11 @@ Ensures correct version is reported after reboot.
 
 ```bash
 # Check environment name matches platformio.ini
-platformio run -e esp32-s3-devkitc-1
+platformio run -e m5tab5-esp32p4
 
 # If still fails, clean and rebuild
-platformio run -e esp32-s3-devkitc-1 --target clean
-platformio run -e esp32-s3-devkitc-1 -v
+platformio run -e m5tab5-esp32p4 --target clean
+platformio run -e m5tab5-esp32p4 -v
 ```
 
 ### Issue: HTTP Download Fails

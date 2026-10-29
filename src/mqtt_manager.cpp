@@ -1,9 +1,6 @@
 #include "mqtt_manager.h"
 #include "log.h"
 #include "mbedtls/x509_crt.h"
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-#include <Ethernet.h>
-#endif
 
 // Log subject, issuer and SANs from a PEM certificate using mbedTLS
 static void logCertInfo(const char* label, const char* pem) {
@@ -80,16 +77,11 @@ void MQTTManager::begin(CertificateManager& certMgr, WiFiManager& wifiMgr) {
     }
 
     if (broker.length() == 0) {
-#if USE_RMII_ETHERNET
         LOG_I("[MQTT] No broker in NVS — attempting mDNS discovery...\n");
         if (!discoverMQTTBroker(broker, port)) {
             LOG_W("[MQTT] No broker found via mDNS — MQTT unavailable\n");
             return;
         }
-#else
-        LOG_I("[MQTT] No broker configured\n");
-        return;
-#endif
     }
 
     LOG_I("[MQTT] Configured broker: %s:%u\n", broker.c_str(), port);
@@ -182,7 +174,6 @@ bool MQTTManager::reconnect(void) {
         LOG_W("[MQTT] Connection failed, attempt #%d, state: %d\n", reconnectAttempts, mqttClient.state());
         connected = false;
 
-#if USE_RMII_ETHERNET
         // On first failure and every 6 attempts after, try mDNS to see if broker moved
         if (reconnectAttempts == 1 || reconnectAttempts % 6 == 0) {
             String discoveredHost;
@@ -198,7 +189,6 @@ bool MQTTManager::reconnect(void) {
                 }
             }
         }
-#endif
 
         return false;
     }

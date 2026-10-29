@@ -1,10 +1,18 @@
 ---
 title: WiFi Provisioning Implementation - Complete Guide
 created: 2025-12-15T14:18:00Z
-lastModified: 2026-10-29T16:00:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
 
 ## Overview
+
+> **History note (2026-10-29):** this guide records the original implementation
+> on the ESP32-S3 with W5500 Ethernet. That target was removed from the code
+> because its WIZnet `Ethernet` library cannot do MQTTS; see
+> [Ethernet TLS — W5500 Limitation](/ETHERNET_TLS_LIMITATION). The provisioning
+> design carried over to the ESP32-P4. The W5500-specific parts (the custom
+> Ethernet mDNS, the separate Ethernet web server on port 8080, DHCP via the
+> Ethernet library) no longer exist.
 
 This document covers the complete implementation of a dual-stack network system with WiFi provisioning for ESP32-S3 devices. The system provides a robust, production-ready solution for configuring WiFi credentials via web interface while maintaining Ethernet connectivity.
 
@@ -54,7 +62,7 @@ src/
 ├── network.h/cpp         # Dual-stack network initialization
 ├── wifi_manager.h/cpp    # WiFi connection & NVS storage
 ├── web_server.h/cpp      # Dual web server (Eth + WiFi)
-└── mdns_ethernet.h/cpp   # Custom mDNS for Ethernet
+└── mdns_ethernet.h/cpp   # Custom mDNS for Ethernet (W5500 only; removed 2026-10-29)
 ```
 
 ## Implementation Details
@@ -167,7 +175,7 @@ if (linkStatus == LinkON && lastLinkStatus == LinkOFF) {
 
 ### 5. Factory Reset Functionality
 
-**Implementation:** press the button 5 times within 4 seconds. That's GPIO 0 (BOOT) on the ESP32-S3 board and GPIO 45 (the side button) on the Unit PoE P4.
+**Implementation:** press the button 5 times within 4 seconds: GPIO 45, the side button on the Unit PoE P4.
 
 **Why presses, not a hold?**
 
@@ -519,7 +527,7 @@ The 200x performance improvement from identifying and fixing the DHCP blocking i
 - Network initialization: `src/network.cpp`
 - WiFi management: `src/wifi_manager.cpp`
 - Web server: `src/web_server.cpp`
-- mDNS implementation: `src/mdns_ethernet.cpp`
+- mDNS: ESPmDNS, started in `src/network.cpp` (the W5500-era `src/mdns_ethernet.cpp` was removed)
 
 ### Key Configuration Files
 
@@ -530,7 +538,6 @@ The 200x performance improvement from identifying and fixing the DHCP blocking i
 ### External Dependencies
 
 - ESP32 Arduino Core
-- Ethernet library (for W5500)
 - ArduinoJson (for API responses)
 - Preferences (for NVS)
 

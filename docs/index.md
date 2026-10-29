@@ -1,7 +1,7 @@
 ---
 title: Sensor MQTT People Counter Firmware
 created: 2026-03-16T15:48:00Z
-lastModified: 2026-03-19T00:00:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
 
 This documentation site explains what this project is trying to do, which hardware paths it currently supports, and where the detailed implementation notes fit.
@@ -32,23 +32,17 @@ which publishes them over MQTT. See [CC1312R RF Coordinator](development/cc1312r
 
 ## Current hardware directions
 
-### ESP32-S3 plus W5500
-
-This is the earlier implementation path in the repository.
-
-- SPI Ethernet via W5500
-- native WiFi on the ESP32-S3
-- most of the existing provisioning and MQTT notes were developed here
-
 ### ESP32-P4 plus RMII Ethernet plus ESP32-C6
 
-This is the newer path represented by the `m5tab5-esp32p4` PlatformIO environment.
+The only firmware target: the `m5tab5-esp32p4` PlatformIO environment, on the M5Stack Unit PoE P4.
 
-- RMII Ethernet on the ESP32-P4
-- WiFi delegated to an ESP32-C6 running `esp-hosted`
-- current work is focused on the M5Stack Unit PoE P4
+- RMII Ethernet on the ESP32-P4, powered by PoE
+- WiFi delegated to an ESP32-C6 running `esp-hosted` over SDIO
+- WiFi is the primary data path and Ethernet the fallback; see [ESP32-C6 WiFi Co-processor](development/esp32-c6-wifi-coprocessor-plan)
 
-At the moment, Ethernet is the working networking path on the P4 target. WiFi remains blocked until the ESP32-C6 firmware and flashing path are fully nailed down.
+### Abandoned: ESP32-S3 plus W5500
+
+The earlier ESP32-S3 + W5500 target was removed from the code on 2026-10-29, because the WIZnet `Ethernet` library it used cannot do MQTTS. Read [Ethernet TLS — W5500 Limitation](ETHERNET_TLS_LIMITATION) before revisiting it. Many older provisioning and MQTT notes were written for the S3 and still describe it.
 
 ## How to use these docs
 

@@ -54,7 +54,7 @@ public:
      *
      * Recognised fields: @c action (@c "ota", @c "rollback", @c "status"),
      * @c url, @c version, @c sha256, and @c force.  Calls @c updateFromURL()
-     * after extracting the relevant fields.  On RMII builds, if @c url is
+     * after extracting the relevant fields.  If @c url is
      * absent the method attempts mDNS discovery of the @c _ota._tcp service
      * to determine the URL automatically.
      *

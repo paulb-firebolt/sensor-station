@@ -1,9 +1,7 @@
 #include "network.h"
 #include "log.h"
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
 #include <lwip/sockets.h>
 #include <esp_random.h>
-#endif
 #if WIFI_HOSTED
 extern "C" {
 #include "esp_hosted_transport_config.h"  // C header without extern "C" guards
@@ -15,14 +13,7 @@ static byte mac[6];
 static String hostname;
 static bool ethernetInitialized = false;
 static bool wifiInitialized = false;
-static unsigned long lastLinkCheck = 0;
 static WiFiManager* wifiManagerPtr = nullptr;
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-static MDNSEthernet mdnsEth;
-static bool usingDHCP = false;  // Track if we got DHCP or using AutoIP
-static EthernetLinkStatus lastLinkStatus = Unknown;  // Track link state changes
-#endif
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
 static bool usingAutoIP = false;   // true while on 169.254.x.x
 static unsigned long lastDhcpProbe = 0;   // last DHCPDISCOVER probe sent while on AutoIP
 static unsigned long dhcpRetryStart = 0;  // non-zero while switching from AutoIP to DHCP
@@ -128,7 +119,6 @@ static bool dhcpOfferReceived(void) {
     }
     return false;
 }
-#endif
 
 // Generate MAC address from ESP32 chip ID
 void generateMAC(void) {
@@ -162,7 +152,6 @@ String generateHostname(void) {
     return String(hostnameStr);
 }
 
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
 // Event handler for RMII Ethernet link/IP changes.
 // LwIP fires these automatically on cable plug/unplug and DHCP completion.
 static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
@@ -307,57 +296,10 @@ bool discoverOTAServer(String& url) {
     return true;
 }
 
-#elif ENABLE_ETHERNET
-// Hardware reset for W5500
-void resetW5500(void) {
-    LOG_I("Resetting W5500...");
-    pinMode(ETH_RST, OUTPUT);
-    digitalWrite(ETH_RST, LOW);
-    delay(10);
-    digitalWrite(ETH_RST, HIGH);
-    delay(100);
-}
-
-// Configure AutoIP (Link-Local addressing)
-void configureAutoIP(void) {
-    LOG_W("DHCP failed. Configuring AutoIP (Link-Local)...");
-
-    // Generate link-local IP: 169.254.x.x
-    // Use last two bytes of MAC for uniqueness
-    IPAddress linkLocalIP(169, 254, mac[4], mac[5]);
-    IPAddress subnet(255, 255, 0, 0);
-    IPAddress gateway(169, 254, 0, 1); // Not really used in link-local
-    IPAddress dns(8, 8, 8, 8); // Google DNS as fallback
-
-    Ethernet.begin(mac, linkLocalIP, dns, gateway, subnet);
-
-    LOG_W("AutoIP configured: %s", linkLocalIP.toString().c_str());
-}
-
-// Attempt DHCP configuration (returns true if successful)
-bool attemptDHCP(void) {
-    LOG_I("Attempting DHCP...");
-
-    if (Ethernet.begin(mac, DHCP_TIMEOUT) == 0) {
-        LOG_W("DHCP failed!");
-        configureAutoIP();
-        return false;  // Using AutoIP
-    }
-
-    LOG_I("DHCP successful! IP: %s", Ethernet.localIP().toString().c_str());
-    return true;  // Got DHCP lease
-}
-#endif // ENABLE_ETHERNET
 
 // Get Ethernet IP address
 IPAddress getIPAddress(void) {
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
     return ETH.localIP();
-#elif ENABLE_ETHERNET
-    return Ethernet.localIP();
-#else
-    return IPAddress(0, 0, 0, 0);
-#endif
 }
 
 // Get WiFi IP address
@@ -370,34 +312,20 @@ IPAddress getWiFiIPAddress(void) {
 
 // Check if Ethernet is connected
 bool isEthernetConnected(void) {
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
     return ethernetInitialized && ETH.linkUp() && ETH.hasIP();
-#elif ENABLE_ETHERNET
-    return ethernetInitialized && (Ethernet.linkStatus() == LinkON);
-#else
-    return false;
-#endif
 }
 
 bool isEthernetOnNetwork(void) {
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
     return ethernetInitialized && ETH.linkUp() && ETH.hasIP() && !usingAutoIP;
-#elif ENABLE_ETHERNET
-    return ethernetInitialized && (Ethernet.linkStatus() == LinkON) && usingDHCP;
-#else
-    return false;
-#endif
 }
 
 // The default netif, or nullptr when there is no data path. lwIP still makes
 // Ethernet the default netif on AutoIP, but AutoIP has no gateway.
 static NetworkInterface* dataRoute(void) {
     NetworkInterface* route = Network.getDefaultInterface();
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
     if (route == &ETH && !isEthernetOnNetwork()) {
         return nullptr;
     }
-#endif
     return route;
 }
 
@@ -428,55 +356,6 @@ bool isNetworkConnected(void) {
     return isEthernetConnected() || isWiFiConnected();
 }
 
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-// Initialize W5500 SPI Ethernet
-bool initEthernet(void) {
-    LOG_I("\n=== Ethernet Initialization (W5500) ===");
-
-    // Configure SPI pins for W5500
-    SPI.begin(ETH_CLK, ETH_MISO, ETH_MOSI, ETH_CS);
-
-    // Hardware reset W5500
-    resetW5500();
-
-    // Set CS pin
-    Ethernet.init(ETH_CS);
-
-    // Check for link before attempting DHCP
-    if (Ethernet.linkStatus() == LinkOFF) {
-        LOG_E("ERROR: Ethernet cable not connected!");
-        return false;
-    }
-
-    // Attempt DHCP (with AutoIP fallback)
-    usingDHCP = attemptDHCP();
-
-    LOG_I("Link: UP | IP: %s", Ethernet.localIP().toString().c_str());
-    LOG_I("Subnet: %s", Ethernet.subnetMask().toString().c_str());
-    LOG_I("Gateway: %s", Ethernet.gatewayIP().toString().c_str());
-    LOG_I("DNS: %s", Ethernet.dnsServerIP().toString().c_str());
-
-    // Initialize mDNS over Ethernet
-    LOG_I("Starting mDNS over Ethernet...");
-    if (mdnsEth.begin(hostname.c_str(), Ethernet.localIP())) {
-        LOG_I("mDNS responder started: %s.local", hostname.c_str());
-        LOG_I("Advertising IP: %s", Ethernet.localIP().toString().c_str());
-
-        // Add HTTP service for discovery on port 80
-        mdnsEth.addService("_http", "_tcp", 80);
-        LOG_I("Service registered: _http._tcp on port 80");
-        LOG_I("Device discoverable via Avahi/Zeroconf");
-    } else {
-        LOG_W("WARNING: Ethernet mDNS failed to start");
-        LOG_I("Device is still accessible via IP address");
-    }
-
-    ethernetInitialized = true;
-    LOG_I("=== Ethernet Ready ===\n");
-
-    return true;
-}
-#endif // ENABLE_ETHERNET && !USE_RMII_ETHERNET
 
 // Initialize WiFi with credentials
 bool initWiFi(WiFiManager& wifiMgr) {
@@ -572,16 +451,11 @@ bool initNetwork(WiFiManager& wifiMgr) {
     LOG_I("Hostname: %s.local\n", hostname.c_str());
 
     // Initialize Ethernet first
-#if ENABLE_ETHERNET
     bool ethSuccess = initEthernet();
     if (!ethSuccess) {
         LOG_W("WARNING: Ethernet initialization failed");
         LOG_W("Continuing with WiFi only...\n");
     }
-#else
-    bool ethSuccess = false;
-    LOG_I("[Network] Ethernet disabled (ENABLE_ETHERNET=0)");
-#endif
 
     // Initialize WiFi if credentials exist
 #if !HAS_WIFI
@@ -611,11 +485,7 @@ bool initNetwork(WiFiManager& wifiMgr) {
 
     LOG_I("========================================");
     LOG_I("Network Summary:");
-#if ENABLE_ETHERNET
     LOG_I("  Ethernet: %s", ethSuccess ? "Connected" : "Unavailable");
-#else
-    LOG_I("  Ethernet: Disabled");
-#endif
 #if !HAS_WIFI
     LOG_I("  WiFi: Disabled");
 #else
@@ -640,19 +510,12 @@ bool initNetwork(WiFiManager& wifiMgr) {
 void checkNetworkStatus(void) {
     unsigned long currentMillis = millis();
 
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-    // Update Ethernet mDNS (W5500 only — RMII uses ESPmDNS which updates itself)
-    if (ethernetInitialized) {
-        mdnsEth.update();
-    }
-#endif
 
     // Update WiFi mDNS (ESP mDNS handles updates automatically, but we can check connection)
     if (wifiInitialized && wifiManagerPtr) {
         wifiManagerPtr->checkConnection();
     }
 
-#if ENABLE_ETHERNET && USE_RMII_ETHERNET
     // While on AutoIP, probe for a DHCP server that started after us (e.g. after
     // a power cut); otherwise it would be ignored until a cable replug. Leave
     // AutoIP only once a server answers.
@@ -672,51 +535,5 @@ void checkNetworkStatus(void) {
         dhcpRetryStart = 0;
         applyAutoIP();
     }
-#endif
 
-#if ENABLE_ETHERNET && !USE_RMII_ETHERNET
-    // W5500: monitor link status and maintain DHCP lease
-    if (currentMillis - lastLinkCheck >= LINK_CHECK_INTERVAL) {
-        lastLinkCheck = currentMillis;
-
-        // Check Ethernet status
-        EthernetLinkStatus linkStatus = Ethernet.linkStatus();
-
-        // Detect link state change
-        if (linkStatus != lastLinkStatus) {
-            lastLinkStatus = linkStatus;
-
-            if (linkStatus == LinkON) {
-                LOG_I("Ethernet: Link UP - Retrying DHCP");
-
-                // Retry DHCP on link-up (cable reconnected, switch powered on, etc.)
-                usingDHCP = attemptDHCP();
-                ethernetInitialized = true;
-
-                // Update mDNS with new IP
-                LOG_I("Updating mDNS with new IP...");
-                mdnsEth.begin(hostname.c_str(), Ethernet.localIP());
-                mdnsEth.addService("_http", "_tcp", 80);
-
-                LOG_I("Ethernet ready with IP: %s", Ethernet.localIP().toString().c_str());
-            } else if (linkStatus == LinkOFF) {
-                LOG_I("Ethernet: Link DOWN");
-                ethernetInitialized = false;
-                usingDHCP = false;
-            }
-        }
-
-        // Maintain DHCP lease ONLY if we're using DHCP (skip if using AutoIP)
-        if (ethernetInitialized && linkStatus == LinkON && usingDHCP) {
-            int result = Ethernet.maintain();
-
-            if (result == 1 || result == 3) {
-                LOG_I("DHCP: Renewing lease...");
-            } else if (result == 2 || result == 4) {
-                LOG_I("DHCP: Lease renewed");
-                LOG_I("New IP: %s", Ethernet.localIP().toString().c_str());
-            }
-        }
-    }
-#endif // ENABLE_ETHERNET && !USE_RMII_ETHERNET
 }

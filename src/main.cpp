@@ -20,11 +20,7 @@
 // GPIO pin for factory reset button.
 // Override via build_flags if needed (e.g. -DFACTORY_RESET_PIN=35).
 #ifndef FACTORY_RESET_PIN
-#if defined(ARDUINO_M5TAB5)
 #define FACTORY_RESET_PIN 45  // USR button on M5Stack Unit PoE P4 (GPIO_NUM_45)
-#else
-#define FACTORY_RESET_PIN 0  // Boot button on Waveshare ESP32-S3-POE-ETH
-#endif
 #endif
 // Factory reset = FACTORY_RESET_PRESSES presses within FACTORY_RESET_WINDOW_MS.
 // Not a long hold: on the Unit PoE P4 a 3 s hold of the side button makes the
@@ -70,7 +66,6 @@ LD2450Sensor ld2450(Serial1, mqttManager);
 CC1312Manager cc1312(mqttManager);
 #endif
 
-#if defined(ARDUINO_M5TAB5)
 // RGB LED — common anode, GPIO R=17, G=15, B=16
 // Common anode: duty 0 = full brightness, duty 255 = off
 #define LED_R_PIN 17
@@ -135,7 +130,6 @@ static void ledHue(uint8_t hue) {
     }
     ledSet(r / 4, g / 4, b / 4);  // 25% brightness
 }
-#endif  // ARDUINO_M5TAB5
 
 #if WIFI_HOSTED
 // Fail the build if a C6 pin collides with another peripheral, rather than
@@ -150,9 +144,7 @@ constexpr int kReservedPins[] = {
 #if ENABLE_LD2450
     LD2450_RX_PIN, LD2450_TX_PIN,
 #endif
-#if defined(ARDUINO_M5TAB5)
     LED_R_PIN, LED_G_PIN, LED_B_PIN,
-#endif
     FACTORY_RESET_PIN};
 
 constexpr bool c6PinsCollide() {
@@ -170,7 +162,6 @@ static_assert(!c6PinsCollide(), "C6_* pin collides with a CC1312, LD2450, LED or
 #endif  // WIFI_HOSTED
 
 // Find-me state (LED rainbow for 15 seconds)
-#if defined(ARDUINO_M5TAB5)
 static bool findMeActive = false;
 static unsigned long findMeStart = 0;
 static const unsigned long FIND_ME_DURATION = 15000;
@@ -180,7 +171,6 @@ void triggerFindMe(void) {
     findMeStart = millis();
     LOG_I("[FindMe] Rainbow started (15s)\n");
 }
-#endif
 
 // Factory reset press counting. Done in an ISR because loop() can block for
 // seconds (MQTT/TLS connects) and would miss short presses.
@@ -296,11 +286,7 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
             mqttManager.publish("ota_status", status);
         } else if (action == "findme") {
             LOG_I("[MQTT] Find-me command detected!\n");
-#if defined(ARDUINO_M5TAB5)
             triggerFindMe();
-#else
-            LOG_I("[FindMe] No LED on this board\n");
-#endif
         }
 #if ENABLE_CC1312
         else if (action == "accept_node" || action == "remove_node" || action == "discovery_on" ||
@@ -314,10 +300,8 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 }
 
 void setup() {
-#if defined(ARDUINO_M5TAB5)
     ledInit();
     ledSet(0, 0, 32);  // dim blue — starting up
-#endif
 
     // Initialize serial for debugging
     Serial.begin(115200);
@@ -413,9 +397,7 @@ void setup() {
     webServer.setCC1312Manager(&cc1312);
 #endif
 
-#if defined(ARDUINO_M5TAB5)
     webServer.setFindMeCallback(triggerFindMe);
-#endif
 
     webServer.begin();
 
@@ -620,7 +602,6 @@ void loop() {
 
     perfMetrics.loopEnd();
 
-#if defined(ARDUINO_M5TAB5)
     {
         static unsigned long lastLedUpdate = 0;
         unsigned long now = millis();
@@ -645,7 +626,6 @@ void loop() {
             }
         }
     }
-#endif
 
     delay(10);  // Small delay to prevent watchdog issues
 }

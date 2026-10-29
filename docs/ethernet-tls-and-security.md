@@ -1,8 +1,12 @@
 ---
 title: Ethernet TLS and Security — Implementation Notes
 created: 2025-12-15T15:31:00Z
-lastModified: 2026-03-17T14:00:00Z
+lastModified: 2026-10-29T21:00:00Z
 ---
+
+> **2026-10-29:** the ESP32-S3 and W5500 target was removed from the code, because
+> the WIZnet `Ethernet` library it used cannot do MQTTS. See [Ethernet TLS — W5500 Limitation](/ETHERNET_TLS_LIMITATION).
+> The ESP32-S3 rows below are historical; the ESP32-P4 is the only target.
 
 ## Status (as of 2026-03-17)
 
