@@ -1,7 +1,7 @@
 ---
 title: v3 Requirements Change Register
 created: 2026-09-07T11:44:00Z
-lastModified: 2026-10-02T00:00:00Z
+lastModified: 2026-10-29T23:00:00Z
 ---
 
 JJ's v3 requirement documents now live in Confluence and are the source of truth:
@@ -36,7 +36,7 @@ copying the requirement text.
 | ID | Page | Requirement | Type | Proposed change | Reasoning and evidence | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | CR-01 | Base | Baseline, PLT-1, PLT-2, A.2 | Correction | The host↔CC1312 data link is SPI, not UART. The CC1312 reflash transport is still to be decided: a UART alongside SPI, or SPI if the ROM bootloader supports it. | Both ends of the PoC use SPI (conflict 1 below; [CC1312R SPI interaction](development/cc1312r-spi-interaction.mdx)). No reflash path exists on the SPI pairing yet. | applied (base v2) |
-| CR-02 | Base | PLT-1, A.2, A.7 item 1 | Correction | Rule out W5500. The architecture options become classic ESP32 + LAN8720, or ESP32-P4 + ESP32-C6. | MQTTS is impossible over W5500 with its driver ([Ethernet TLS limitation](ETHERNET_TLS_LIMITATION.md)). P4 RMII Ethernet with TLS is proven. See the draft comment text below and [hardware design brief](hardware-design-brief.mdx#open-questions) question 1. | applied (base v2) |
+| CR-02 | Base | PLT-1, A.2, A.7 item 1 | Correction | **Superseded 2026-10-29, see [section 3](#3-tls--sec-1--resolved-by-board-selection-not-a-current-conflict).** Rule out W5500. The architecture options become classic ESP32 + LAN8720, or ESP32-P4 + ESP32-C6. | MQTTS is impossible over W5500 with its driver ([Ethernet TLS limitation](ETHERNET_TLS_LIMITATION.md)). P4 RMII Ethernet with TLS is proven. See the draft comment text below and [hardware design brief](hardware-design-brief.mdx#open-questions) question 1. | applied (base v2) |
 | CR-03 | Base | NET-1 | Correction | Drop "existing … cellular variants". Cellular is an optional, not-yet-tested daughterboard. | No cellular units have been used since the acquisition. [Brief: cellular option](hardware-design-brief.mdx#cellular-option). | applied (base v2) |
 | CR-04 | Base | RAD-6 | Correction | The 96-point upload cap and heap pressure are ESP8266-era limits. Re-derive capacity from the new host's memory. | See the draft comment text below. | applied (base v2) |
 | CR-05 | Base | SEC-1 | Correction | Add the PoC evidence to the rationale: MQTT over TLS with mutual TLS is proven. Leave the "recommend elevating to Must" flag as it is; the page flags raised priorities deliberately, and A.7 item 2 still asks commercial to confirm. | TLS confirmed end to end on 2026-03-17 (conflict 3 below). | applied (base v2) |
@@ -101,6 +101,17 @@ This may be a deliberate, temporary bring-up choice — SLR's range/robustness i
 **Recommendation:** Explicitly label the SLR PHY in `bidirectional-rf-migration.md` as a bring-up-only choice, and confirm the plan (and milestone) for switching to the ~50 kbps target PHY before FW-2 compliance is assumed.
 
 ### 3. TLS / SEC-1 — resolved by board selection, not a current conflict
+
+> **Correction (2026-10-29):** "MQTTS over W5500 is architecturally impossible"
+> holds only for the WIZnet `Ethernet` library, which runs TCP/IP inside the chip.
+> The same W5500 in MAC-raw mode under lwIP, via Arduino-ESP32's `ETH` library,
+> held a mutual-TLS MQTT session over Ethernet on the bench (ESP32-S3,
+> `src/samples/w5500_tls_test.cpp`). So CR-02's "rule out W5500" is wrong as
+> worded. The real requirement is the one in the draft comment below: Ethernet
+> must run through lwIP/mbedTLS, which an SPI MAC in MAC-raw mode satisfies. That
+> gives a third candidate architecture: an ESP32-S3 or ESP32-C6 with a W5500 in
+> MAC-raw mode, on a single chip with no co-processor. **The requirements author
+> needs this correction**, because CR-02 was applied to the base requirements.
 
 Earlier drafts of this review flagged W5500 (ESP32-S3) TLS as a conflict with **SEC-1 (Must)**. That is no longer the live situation: **the W5500/ESP32-S3 path is not the board being carried forward** — the project has moved to the M5Stack Unit PoE P4 (RMII Ethernet), and MQTTS is confirmed operational there.
 
