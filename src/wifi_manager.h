@@ -155,11 +155,29 @@ public:
     /** @brief Return the raw @c wl_status_t connection status from the WiFi driver. */
     wl_status_t getStatus(void);
 
+    /**
+     * @brief Bring the radio up in @p mode. Every path that starts WiFi must use this.
+     *
+     * On esp-hosted builds this is a circuit breaker: the prebuilt libraries restart
+     * the host when the SDIO transport fails (CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE),
+     * so a present-but-faulty C6 would reboot-loop the device. A marker that survives
+     * a software reset detects that; after @c HOSTED_MAX_FAILED_BOOTS such boots the
+     * radio stays off until a successful bring-up or a power cycle, and the device
+     * runs Ethernet-only.
+     *
+     * @return @c true if the radio is up in @p mode.
+     */
+    bool radioUp(wifi_mode_t mode);
+
+    /** @brief Return @c true if the circuit breaker has disabled the radio for this boot. */
+    bool isRadioDisabled(void) const { return radioDisabled; }
+
 private:
     Preferences prefs;
     bool apMode;
     unsigned long lastConnectionCheck;
     String currentSSID;
+    bool radioDisabled = false;
 
     void reconnectStation(void);
 };

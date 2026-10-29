@@ -141,6 +141,13 @@ IPAddress getWiFiIPAddress(void);
 /** @brief Returns `true` if the Ethernet link is up and an IP address is assigned. */
 bool isEthernetConnected(void);
 
+/**
+ * @brief Returns `true` if the Ethernet cable has link, whether or not DHCP gave
+ *        an address. With AutoIP the device is still reachable over Ethernet
+ *        (link-local + mDNS), so this decides whether the provisioning AP is needed.
+ */
+bool isEthernetLinkUp(void);
+
 /** @brief Returns `true` if the WiFi station is associated and has an IP address. */
 bool isWiFiConnected(void);
 

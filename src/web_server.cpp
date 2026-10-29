@@ -816,6 +816,11 @@ void DeviceWebServer::handleScan(void) {
     if (!wifiManager.isAPActive() && !requireAuth()) {
         return;
     }
+    // scanNetworks() would bring the radio up itself, bypassing the circuit breaker
+    if (!wifiManager.isAPActive() && !wifiManager.radioUp(WIFI_STA)) {
+        webServer.send(503, "text/plain", "WiFi radio unavailable");
+        return;
+    }
     LOG_I("[API] Scanning WiFi networks...\n");
 
     int n = WiFi.scanNetworks();

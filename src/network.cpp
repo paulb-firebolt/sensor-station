@@ -265,6 +265,16 @@ bool isEthernetConnected(void) {
 #endif
 }
 
+bool isEthernetLinkUp(void) {
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    return ethernetInitialized && ETH.linkUp();
+#elif ENABLE_ETHERNET
+    return ethernetInitialized && (Ethernet.linkStatus() == LinkON);
+#else
+    return false;
+#endif
+}
+
 // Check if WiFi is connected
 bool isWiFiConnected(void) {
     return wifiInitialized && wifiManagerPtr && wifiManagerPtr->isConnectedStation();
