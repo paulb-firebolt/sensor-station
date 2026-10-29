@@ -1,5 +1,9 @@
 #include "network.h"
 #include "log.h"
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+#include <lwip/sockets.h>
+#include <esp_random.h>
+#endif
 #if WIFI_HOSTED
 extern "C" {
 #include "esp_hosted_transport_config.h"  // C header without extern "C" guards
@@ -20,6 +24,110 @@ static EthernetLinkStatus lastLinkStatus = Unknown;  // Track link state changes
 #endif
 #if ENABLE_ETHERNET && USE_RMII_ETHERNET
 static bool usingAutoIP = false;   // true while on 169.254.x.x
+static unsigned long lastDhcpProbe = 0;   // last DHCPDISCOVER probe sent while on AutoIP
+static unsigned long dhcpRetryStart = 0;  // non-zero while switching from AutoIP to DHCP
+static int dhcpProbeSock = -1;  // UDP, sends the DISCOVER
+static int dhcpReplySock = -1;  // raw UDP, sees the reply to port 68
+static uint32_t dhcpProbeXid = 0;
+
+// Link-local fallback when DHCP gets no answer. ETH.config() with a static
+// address stops the DHCP client; the probe below finds a server that appears later.
+static void applyAutoIP(void) {
+    IPAddress autoIP(169, 254, mac[4], mac[5]);
+    ETH.config(autoIP, IPAddress(0, 0, 0, 0), IPAddress(255, 255, 0, 0));
+    usingAutoIP = true;
+    lastDhcpProbe = millis();
+    LOG_W("[ETH] DHCP timed out — AutoIP configured: %s", autoIP.toString().c_str());
+}
+
+static void closeDhcpProbe(void) {
+    if (dhcpProbeSock >= 0) {
+        close(dhcpProbeSock);
+        dhcpProbeSock = -1;
+    }
+    if (dhcpReplySock >= 0) {
+        close(dhcpReplySock);
+        dhcpReplySock = -1;
+    }
+}
+
+// A non-blocking socket of @p type bound to the Ethernet netif. UDP sockets are
+// also broadcast-enabled (lwIP rejects SO_BROADCAST on raw sockets).
+static int openEthSocket(int type, int protocol) {
+    int sock = socket(AF_INET, type, protocol);
+    if (sock < 0) {
+        return -1;
+    }
+    int on = 1;
+    struct ifreq ifr = {};
+    if (esp_netif_get_netif_impl_name(ETH.netif(), ifr.ifr_name) != ESP_OK ||
+        (type == SOCK_DGRAM && setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on)) < 0) ||
+        setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0 ||
+        fcntl(sock, F_SETFL, O_NONBLOCK) < 0) {
+        close(sock);
+        return -1;
+    }
+    return sock;
+}
+
+// Broadcast a DHCPDISCOVER on Ethernet only, from our own socket, so the AutoIP
+// address stays up. Only an answer (dhcpOfferReceived) makes us leave AutoIP,
+// so AutoIP-only sites never see the address drop.
+static void sendDhcpProbe(void) {
+    // Port 68 belongs to lwIP's DHCP client (shared with WiFi STA) and can't be
+    // bound, so send from an ephemeral port and catch the reply with a raw socket,
+    // which lwIP hands every incoming UDP packet before normal delivery.
+    if (dhcpProbeSock < 0 || dhcpReplySock < 0) {
+        closeDhcpProbe();
+        dhcpProbeSock = openEthSocket(SOCK_DGRAM, IPPROTO_UDP);
+        dhcpReplySock = openEthSocket(SOCK_RAW, IPPROTO_UDP);
+        if (dhcpProbeSock < 0 || dhcpReplySock < 0) {
+            LOG_W("[ETH] DHCP probe socket setup failed (errno %d)", errno);
+            closeDhcpProbe();
+            return;
+        }
+    }
+
+    uint8_t pkt[300] = {};
+    pkt[0] = 1;     // BOOTREQUEST
+    pkt[1] = 1;     // htype: Ethernet
+    pkt[2] = 6;     // hlen
+    dhcpProbeXid = esp_random();
+    memcpy(&pkt[4], &dhcpProbeXid, 4);
+    pkt[10] = 0x80; // broadcast flag: no unicast reply to an address we don't hold
+    memcpy(&pkt[28], mac, 6);  // chaddr
+    static const uint8_t opts[] = {99, 130, 83, 99,  // magic cookie
+                                   53, 1, 1,         // DHCPDISCOVER
+                                   255};
+    memcpy(&pkt[236], opts, sizeof(opts));
+
+    struct sockaddr_in dst = {};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(67);
+    dst.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    if (sendto(dhcpProbeSock, pkt, sizeof(pkt), 0, (struct sockaddr*)&dst, sizeof(dst)) < 0) {
+        LOG_W("[ETH] DHCP probe send failed (errno %d)", errno);
+    }
+}
+
+// True if a BOOTREPLY to our latest probe has arrived (i.e. a DHCP server exists).
+static bool dhcpOfferReceived(void) {
+    if (dhcpReplySock < 0) {
+        return false;
+    }
+    uint8_t buf[600];  // IPv4 header + UDP header + BOOTP
+    int n;
+    while ((n = recv(dhcpReplySock, buf, sizeof(buf), 0)) > 0) {
+        int ihl = (buf[0] & 0x0f) * 4;
+        const uint8_t* udp = buf + ihl;
+        const uint8_t* bootp = udp + 8;
+        if (n >= ihl + 8 + 240 && udp[0] == 0 && udp[1] == 67 &&  // from server port 67
+            bootp[0] == 2 && memcmp(&bootp[4], &dhcpProbeXid, 4) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 #endif
 
 // Generate MAC address from ESP32 chip ID
@@ -63,8 +171,13 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
             LOG_I("[ETH] Link UP — waiting for DHCP...");
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
+            // applyAutoIP()'s static config fires this too; it is not a lease.
+            if (ETH.localIP()[0] == 169 && ETH.localIP()[1] == 254) {
+                break;
+            }
             LOG_I("[ETH] IP assigned: %s", ETH.localIP().toString().c_str());
             usingAutoIP = false;
+            dhcpRetryStart = 0;
             ethernetInitialized = true;
             // Re-announce mDNS on the new IP
             if (hostname.length() > 0) {
@@ -75,6 +188,8 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
         case ARDUINO_EVENT_ETH_DISCONNECTED:
             LOG_I("[ETH] Link DOWN");
             ethernetInitialized = false;
+            dhcpRetryStart = 0;
+            closeDhcpProbe();
             if (usingAutoIP) {
                 ETH.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
                 usingAutoIP = false;
@@ -116,14 +231,8 @@ bool initEthernet(void) {
     LOG_I("\n");
 
     if (!ETH.hasIP()) {
-        IPAddress autoIP(169, 254, mac[4], mac[5]);
-        IPAddress autoSubnet(255, 255, 0, 0);
-        IPAddress autoGW(0, 0, 0, 0);
-        ETH.config(autoIP, autoGW, autoSubnet);
-        usingAutoIP = true;
+        applyAutoIP();
         ethernetInitialized = true;
-
-        LOG_W("[ETH] DHCP timed out — AutoIP configured: %s", autoIP.toString().c_str());
 
         if (hostname.length() > 0) {
             MDNS.begin(hostname.c_str());
@@ -280,14 +389,26 @@ bool isEthernetOnNetwork(void) {
 #endif
 }
 
-const char* getDefaultRouteName(void) {
+// The default netif, or nullptr when there is no data path. lwIP still makes
+// Ethernet the default netif on AutoIP, but AutoIP has no gateway.
+static NetworkInterface* dataRoute(void) {
     NetworkInterface* route = Network.getDefaultInterface();
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    if (route == &ETH && !isEthernetOnNetwork()) {
+        return nullptr;
+    }
+#endif
+    return route;
+}
+
+const char* getDefaultRouteName(void) {
+    NetworkInterface* route = dataRoute();
     return route ? route->desc() : "none";
 }
 
 bool defaultRouteChanged(void) {
     static NetworkInterface* lastRoute = nullptr;
-    NetworkInterface* route = Network.getDefaultInterface();
+    NetworkInterface* route = dataRoute();
     if (route == lastRoute) {
         return false;
     }
@@ -530,6 +651,28 @@ void checkNetworkStatus(void) {
     if (wifiInitialized && wifiManagerPtr) {
         wifiManagerPtr->checkConnection();
     }
+
+#if ENABLE_ETHERNET && USE_RMII_ETHERNET
+    // While on AutoIP, probe for a DHCP server that started after us (e.g. after
+    // a power cut); otherwise it would be ignored until a cable replug. Leave
+    // AutoIP only once a server answers.
+    if (usingAutoIP && ETH.linkUp()) {
+        if (dhcpOfferReceived()) {
+            LOG_I("[ETH] DHCP server found - leaving AutoIP");
+            closeDhcpProbe();  // free port 68 for lwIP's DHCP client
+            ETH.config(IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0), IPAddress(0, 0, 0, 0));
+            usingAutoIP = false;
+            dhcpRetryStart = currentMillis;
+        } else if (currentMillis - lastDhcpProbe >= DHCP_PROBE_INTERVAL_MS) {
+            lastDhcpProbe = currentMillis;
+            sendDhcpProbe();
+        }
+    } else if (dhcpRetryStart && currentMillis - dhcpRetryStart >= DHCP_TIMEOUT) {
+        // No ARDUINO_EVENT_ETH_GOT_IP (which clears dhcpRetryStart): back to AutoIP.
+        dhcpRetryStart = 0;
+        applyAutoIP();
+    }
+#endif
 
 #if ENABLE_ETHERNET && !USE_RMII_ETHERNET
     // W5500: monitor link status and maintain DHCP lease

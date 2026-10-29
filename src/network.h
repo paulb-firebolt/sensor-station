@@ -94,7 +94,8 @@
 #endif // WIFI_HOSTED
 
 // Network configuration
-const unsigned long DHCP_TIMEOUT = 10000; // 10 seconds
+const unsigned long DHCP_TIMEOUT = 5000; // 5 s: AutoIP-only sites want a quick fallback
+const unsigned long DHCP_PROBE_INTERVAL_MS = 30000; // RMII: DHCP server probe interval while on AutoIP
 const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
 
 /**
@@ -104,7 +105,8 @@ const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
  * Ethernet is attempted first.  If it succeeds, WiFi is started in station
  * mode using any stored credentials.  On W5500 builds, DHCP is tried for up
  * to `DHCP_TIMEOUT` ms before falling back to AutoIP.  On RMII builds the
- * ESP-IDF LwIP stack handles DHCP automatically.  mDNS is started with a
+ * same timeout applies; while on AutoIP, checkNetworkStatus() probes for a
+ * DHCP server every `DHCP_PROBE_INTERVAL_MS` and switches when one answers.  mDNS is started with a
  * hostname derived from the device MAC address (e.g. "sensor-A0EA91DA").
  *
  * @param wifiMgr  Reference to the application WiFiManager instance, used to

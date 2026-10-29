@@ -1,7 +1,7 @@
 ---
 title: ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-10-29T18:00:00Z
+lastModified: 2026-10-29T20:00:00Z
 ---
 
 Plan for adding an external ESP32-C6 to the M5Stack Unit PoE P4 so the P4 can
@@ -266,6 +266,34 @@ Ethernet data path. Link and AutoIP alone don't.
   convention. On the P4, report the _active default_ interface and include both
   interfaces' state.
 
+**Done (2026-10-29).** What was built differs from the plan above in places:
+
+- **No `setDefaultInterface()` call.** ESP-IDF's route priority (STA 100 >
+  ETH 50) already makes WiFi the default netif whenever it has an IP.
+  `defaultRouteChanged()` (`network.cpp`) logs `[NET] Default route: a -> b`.
+  Ethernet on AutoIP reports as `none`, because AutoIP has no gateway.
+- **MQTT** calls `MQTTManager::reconnectNow()` from `loop()` whenever the
+  route changes.
+- **Status JSON** adds `network.route` (`sta`, `eth0` or `none`) and
+  `network.ethernet_lease`.
+- **WiFi retry.** WiFi keeps retrying when the network is missing at boot.
+  Retries are non-blocking `WiFi.begin()` calls every 30 s, so Ethernet traffic
+  keeps flowing while WiFi is down.
+- **AutoIP.** Ethernet falls back to AutoIP after 5 s without DHCP. While on
+  AutoIP, it sends a DHCPDISCOVER probe on Ethernet every 30 s from a separate
+  socket, so the AutoIP address never drops. It switches to DHCP only once a
+  server answers. This handles a DHCP server that starts after the unit, for
+  example after a power cut, and leaves AutoIP-only sites undisturbed.
+- **Bench results.**
+  - Hotspot off: `sta -> eth0`, with HTTP over Ethernet at 10/10. Hotspot back
+    on: `eth0 -> sta` within seconds.
+  - AutoIP stayed up for 70 of 70 ARP probes while DHCP probes ran. Starting
+    dnsmasq gave a lease at the next probe.
+  - MQTT reconnect on a route change is not tested on the bench: the broker is
+    reachable only from the home LAN.
+- **Not done:** mDNS consolidation. `onEthEvent` still re-registers
+  `_http._tcp` on each lease and logs a harmless "Service already exists".
+
 ### 4. Device identity
 
 No change. The hostname and device ID come from the Ethernet MAC
@@ -337,7 +365,7 @@ What changed from this plan:
 
 ## Suggested order of work
 
-Steps 1–4 are done (2026-10-29). Next is step 5.
+Steps 1–5 are done (2026-10-29). Next is step 6.
 
 1. Measure the grey-pin I/O voltage and choose Option A or B.
 2. Flash the esp-hosted slave 2.11.x onto the C6. Wire it with pull-ups.
@@ -346,8 +374,8 @@ Steps 1–4 are done (2026-10-29). Next is step 5.
    slave version. This proves the link before any main-firmware changes.
 4. Flag split (change 1) plus hosted bring-up (change 2). Check that the
    Ethernet-only behaviour is unchanged when the C6 is unplugged.
-5. Interface policy and MQTT reconnect (change 3). Test by pulling the Ethernet
-   cable with MQTT connected, then plugging it back in.
+5. Interface policy and MQTT reconnect (change 3). Tested by switching the WiFi
+   access point off and on with Ethernet on a DHCP lease.
 6. Web UI WiFi section, status JSON, then docs.
 7. C6 OTA over MQTT (change 5).
 
