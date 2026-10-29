@@ -124,9 +124,13 @@ void MQTTManager::update(void) {
     } else {
         connected = false;
 
-        // Try to reconnect
+        // Try to reconnect, backing off while the broker stays unreachable:
+        // each attempt blocks loop() (and the web server) for up to the connect timeout
         unsigned long now = millis();
-        if (now - lastReconnectAttempt > MQTT_RECONNECT_INTERVAL) {
+        unsigned long interval = min(MQTT_RECONNECT_INTERVAL
+                                         << min(reconnectAttempts, MQTT_RECONNECT_BACKOFF_STEPS),
+                                     MQTT_RECONNECT_MAX_INTERVAL);
+        if (now - lastReconnectAttempt > interval) {
             lastReconnectAttempt = now;
             LOG_W("[MQTT] Attempting to reconnect...\n");
             reconnect();
@@ -268,8 +272,9 @@ bool MQTTManager::saveConfig(bool en, const String& brk, uint16_t prt, const Str
         mqttClient.setServer(broker.c_str(), port);
     }
 
-    // Reset reconnect timer so update() triggers a connection attempt immediately
+    // Reset reconnect timer and backoff so update() triggers a connection attempt immediately
     lastReconnectAttempt = 0;
+    reconnectAttempts = 0;
     connected = false;
 
     return true;
@@ -383,7 +388,10 @@ void MQTTManager::setupTLS(void) {
     secureClient.setCACert(ca);
     secureClient.setCertificate(cert);
     secureClient.setPrivateKey(key);
-    secureClient.setTimeout(5);  // 5s connect timeout — keeps web server responsive on failure
+    // setTimeout() is the Stream read timeout (ms), not the connect timeout: with
+    // it, an unreachable broker blocked loop() for the full 30 s TCP default.
+    secureClient.setConnectionTimeout(MQTT_TCP_CONNECT_TIMEOUT_MS);
+    secureClient.setHandshakeTimeout(MQTT_TLS_HANDSHAKE_TIMEOUT_S);
 
     LOG_D("[MQTT] TLS certificates configured\n");
 }
@@ -392,6 +400,7 @@ void MQTTManager::refreshCerts(void) {
     setupTLS();
     // Force reconnect on next loop so new certs are used immediately
     lastReconnectAttempt = 0;
+    reconnectAttempts = 0;
     if (mqttClient.connected()) {
         mqttClient.disconnect();
     }

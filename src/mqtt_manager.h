@@ -31,7 +31,12 @@ const char* const MQTT_TOPIC_KEY = "topic";
 
 // Default configuration
 const uint16_t MQTT_DEFAULT_PORT = 8883;
-const unsigned long MQTT_RECONNECT_INTERVAL = 10000;  // 10 seconds
+const unsigned long MQTT_RECONNECT_INTERVAL = 10000;  // 10 seconds, doubled per failure
+const unsigned long MQTT_RECONNECT_MAX_INTERVAL = 300000;  // backoff cap: 5 minutes
+const unsigned int MQTT_RECONNECT_BACKOFF_STEPS = 5;      // 10 s << 5 = 320 s, capped
+// Connect attempts block loop() (and with it the web server), so keep them short.
+const uint32_t MQTT_TCP_CONNECT_TIMEOUT_MS = 5000;
+const unsigned long MQTT_TLS_HANDSHAKE_TIMEOUT_S = 10;
 const unsigned long MQTT_PUBLISH_INTERVAL = 30000;    // 30 seconds
 
 /**
