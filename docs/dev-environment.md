@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-lastModified: 2026-10-21T15:30:00Z
+lastModified: 2026-10-29T16:00:00Z
 ---
 
 How to run a local DHCP server and MQTT broker for development and testing
@@ -381,27 +381,106 @@ pio run -e m5tab5-esp32p4 -t upload && pio device monitor -e m5tab5-esp32p4
 
 ## ESP32-C6 WiFi Link Test (P4 + esp-hosted)
 
-The P4 gets WiFi from an external ESP32-C6 over SDIO. Wiring and pins are in
-[ESP32-C6 WiFi Co-processor](/development/esp32-c6-wifi-coprocessor-plan).
-Prove the link with the `m5tab5-c6-hosted-test` env before testing the main
-firmware.
+The P4 gets WiFi from an external ESP32-C6 over SDIO. The pin plan and design
+are in [ESP32-C6 WiFi Co-processor](/development/esp32-c6-wifi-coprocessor-plan).
+This section is the bench recipe that was proven on 2026-10-29: a Waveshare
+ESP32-C6-DEV-KIT-N8 on a breadboard, jumper-wired to the Unit PoE P4.
 
-1. Flash the C6 once over its own USB with the esp-hosted slave firmware
-   (2.11.6, built from `~/Documents/sensor-station-c6-hosted`; see its README).
-2. Wire the C6 to the P4 with the power off, including the 10 kΩ pull-ups.
-3. Flash and run the link test. WiFi credentials come from the environment
-   and never go into the repo:
+### Wiring
 
-   ```bash
-   C6_TEST_SSID='<ssid>' C6_TEST_PASS='<password>' \
-     pio run -e m5tab5-c6-hosted-test -t upload && pio device monitor -e m5tab5-c6-hosted-test
-   ```
+| Signal | P4 | C6 (fixed in silicon) | 10 kΩ pull-up to the C6's 3V3 |
+| --- | --- | --- | --- |
+| CLK | G43 | IO19 | no |
+| CMD | G44 | IO18 | yes |
+| D0 | G39 | IO20 | yes |
+| D1 | G40 | IO21 | yes |
+| D2 | G41 | IO22 | yes |
+| D3 | G42 | IO23 | yes |
+| Reset | G13 | RST (EN) | no (on the board) |
+| GND | GND | GND | — |
 
-A good run prints `esp-hosted link UP`, the host and slave versions (both
-`2.11.6`), a scan list, and an IP. `sdmmc_card_init failed` repeating, then
-`esp-hosted init FAILED`, means the C6 isn't answering. Check the wiring and
-pull-ups first, then the C6 firmware. With no C6 fitted, the main firmware
-runs Ethernet-only after about 9 s of failed link attempts at boot.
+- **CLK is IO19 and CMD is IO18.** They sit next to each other on the C6
+  header and are easy to swap. Swapped, card init fails outright.
+- **Each line gets its own resistor.** Put one leg in the free breadboard hole
+  of the pin's column and the other in a + rail fed only from the C6's 3V3.
+  Check the colour bands: 10 kΩ is brown-black-**orange**. Brown-black-brown is
+  100 Ω, which would overload the GPIOs.
+- **Don't link the two boards' 3V3.** Power the C6 from its own USB and share
+  GND only.
+- **Keep IO9 (BOOT) and IO15 free.** They are strapping pins next to the SDIO
+  run.
+
+![C6 SDIO jumpers on the header](images/c6-pins-2.jpeg)
+
+![Pull-up resistors from IO18 and IO20–23 to the 3V3 rail](images/c6-10k.jpeg)
+
+### Flash the C6
+
+The C6 runs the esp-hosted slave firmware (2.11.6, built from
+`~/Documents/sensor-station-c6-hosted`; see its README). On this board:
+
+1. **Park the P4 first.** Once its firmware has tried to bring the C6 up, it
+   pulses G13 and keeps resetting the C6, so esptool can't connect:
+   `esptool --chip esp32p4 -p <P4 port> --after no-reset chip-id`
+2. **Flash through the CH343 port** (`usb-1a86_USB_Single_Serial_…`), not the
+   C6's own USB-JTAG port. Its auto-reset is unreliable on this board.
+3. If that still fails: hold **BOOT**, plug in the C6's USB, release BOOT,
+   then flash with `--before no-reset`.
+
+### Run the link test
+
+The `m5tab5-c6-hosted-test` env proves the link before the main firmware
+depends on it. WiFi credentials come from the environment and never go into
+the repo, and values with spaces are fine:
+
+```bash
+C6_TEST_SSID='<ssid>' C6_TEST_PASS='<password>' \
+  pio run -e m5tab5-c6-hosted-test -t upload && pio device monitor -e m5tab5-c6-hosted-test
+```
+
+A good run prints:
+
+```text
+Pins: CLK=43 CMD=44 D0=39 D1=40 D2=41 D3=42 RST=13, SDIO 5000 kHz 1-bit
+esp-hosted link UP
+esp-hosted host:  2.11.6
+esp-hosted slave: 2.11.6
+Connected: IP 192.168.0.x, RSSI -50 dBm, C6 MAC …
+```
+
+The first scan straight after bring-up can return `-2` (failed). The connect
+is the real test.
+
+### SDIO speed on the bench
+
+Jumper wiring only works at **1-bit, about 5 MHz**. Espressif says 4-bit
+needs a PCB. Both P4 envs set this with `-DC6_SDIO_CLOCK_KHZ=5000
+-DC6_SDIO_BUS_WIDTH=1` (applied by `src/hosted_sdio_config.cpp`). On a PCB,
+remove those two flags to get the 40 MHz 4-bit default.
+
+The C6 firmware is built with `CONFIG_ESP_SDIO_NSEND_PSAMPLE=y`, so it sends
+on the falling edge. With the default (`PSEND_PSAMPLE`), reads failed with CRC
+errors at every clock.
+
+### Troubleshooting
+
+| Symptom on the P4 | Meaning | Fix |
+| --- | --- | --- |
+| `sdmmc_card_init failed`, repeating | The C6 doesn't answer at all | CLK/CMD order, power, C6 firmware flashed? |
+| `failed to read registers`, then `SW_CPU_RESET` | Init works but full-speed transfers don't | Pull-ups, then 1-bit and a lower clock |
+| `0x109` (CRC) at every clock speed | Clock-edge timing, not noise | C6 built with `NSEND_PSAMPLE`; 1-bit on jumpers |
+| `Failed to send data: 265` on writes, 4-bit only | 4-bit on jumpers | Use 1-bit |
+| `WiFi disabled until power cycle` | The circuit breaker tripped after 2 restarts during bring-up | Fix the link, then power-cycle the P4 |
+
+Main firmware behaviour on the bench:
+
+- **No C6 fitted:** link bring-up fails cleanly after about 9 s, and the
+  device carries on Ethernet-only.
+- **C6 fitted but faulty:** the esp-hosted libraries restart the P4. After two
+  such restarts the firmware leaves WiFi off for that boot.
+- **Provisioning AP:** with no WiFi credentials, the `sensor-setup` AP only
+  starts when there is **no Ethernet link**. A link without DHCP (AutoIP)
+  doesn't start it.
 
 ---
 

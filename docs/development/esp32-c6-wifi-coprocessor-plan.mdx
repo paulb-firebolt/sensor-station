@@ -1,7 +1,7 @@
 ---
 title: ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-09-28T00:00:00Z
+lastModified: 2026-10-29T16:00:00Z
 ---
 
 Plan for adding an external ESP32-C6 to the M5Stack Unit PoE P4 so the P4 can
@@ -50,9 +50,10 @@ Consequences of the prebuilt config:
 - **SPI transport is not available** without a custom `sdkconfig` build
   (pioarduino hybrid compile). The SPI bench plan in `v3-requirements-gap-review.md`
   is superseded for the Arduino build. Use SDIO.
-- **Bus width (4-bit) and clock (40 MHz) are fixed** at build time. Arduino's
-  `hostedInit()` does not expose them, so jumper wiring has to be good enough
-  for 40 MHz 4-bit SDIO.
+- **Bus width (4-bit) and clock (40 MHz) are the library default.** Arduino's
+  `hostedInit()` always takes it, but `src/hosted_sdio_config.cpp` overrides it
+  by linking with `-Wl,--wrap=esp_hosted_get_default_sdio_config`. The bench
+  needs 1-bit at 5 MHz (see [bench bring-up](#bench-bring-up-2026-10-29)).
 
 ---
 
@@ -301,7 +302,34 @@ isn't confused with the device ID.
 
 ---
 
+## Bench bring-up (2026-10-29)
+
+The link works on the bench. A Waveshare ESP32-C6-DEV-KIT-N8 is jumper-wired
+to the Unit PoE P4 on Option A pins. The P4 joined WiFi through the C6 and
+answered ping. The bench recipe and troubleshooting table are in
+[Local Development Environment](/dev-environment).
+
+What changed from this plan:
+
+- **1-bit at 5 MHz, not 4-bit at 40 MHz.** On jumpers, 4-bit failed on writes
+  even at 5 MHz. Espressif's esp-hosted docs say the same: 4-bit needs a PCB,
+  and jumpers are for 1-bit only (equal length, ≤ 5 cm). Both P4 envs set
+  `C6_SDIO_CLOCK_KHZ=5000` and `C6_SDIO_BUS_WIDTH=1`. A PCB build drops them.
+- **The C6 sends on the falling edge** (`CONFIG_ESP_SDIO_NSEND_PSAMPLE=y`). The
+  default, `PSEND_PSAMPLE`, gave CRC errors at every clock speed.
+- **Pull-ups:** 10 kΩ worked. Espressif recommends 51 kΩ; either is fine.
+- **A faulty C6 restarts the P4.** The prebuilt libraries set
+  `CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=y`, and that can't be
+  overridden from Arduino. `WiFiManager::radioUp()` is a circuit breaker: after
+  two restarts during bring-up it leaves WiFi off for that boot.
+- **The AP fallback uses Ethernet link, not DHCP.** With AutoIP the device is
+  still reachable, so no AP starts.
+- **The first WiFi ping round-trip is about 1 s.** This is probably WiFi modem
+  sleep. It hasn't been tuned yet.
+
 ## Suggested order of work
+
+Steps 1–4 are done (2026-10-29). Next is step 5.
 
 1. Measure the grey-pin I/O voltage and choose Option A or B.
 2. Flash the esp-hosted slave 2.11.x onto the C6. Wire it with pull-ups.
@@ -317,9 +345,10 @@ isn't confused with the device ID.
 
 ## Open questions
 
-- What I/O voltage do the grey header pins run at? This decides A or B.
-- Which C6 part will be used: a DevKit on jumpers for the bench, and a module on
-  the v3 board?
+- ~~What I/O voltage do the grey header pins run at?~~ 3.3 V (2026-10-21), so
+  Option A.
+- Which C6 part will be used? The bench uses a Waveshare ESP32-C6-DEV-KIT-N8.
+  The v3 board part is still open, and it needs a PCB for 4-bit 40 MHz SDIO.
 - Can the Unit's 3V3 rail supply the C6 plus the CC1312 LaunchPad?
 - When both interfaces are up, should WiFi be a hot standby (connected all the
   time) or only brought up when Ethernet is lost?
