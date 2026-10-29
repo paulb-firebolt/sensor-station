@@ -150,6 +150,24 @@ bool isEthernetConnected(void);
  */
 bool isEthernetOnNetwork(void);
 
+/**
+ * @brief Interface carrying the default route: `"sta"` (WiFi), `"eth"`, or `"none"`.
+ *
+ * Route selection is left to ESP-IDF's automatic choice by route priority
+ * (WiFi STA 100 > Ethernet 50), which gives the required policy: WiFi is the
+ * primary data path, Ethernet the fallback. Never call `setDefault()`: it pins
+ * one interface and disables that automatic failover.
+ */
+const char* getDefaultRouteName(void);
+
+/**
+ * @brief Returns `true` once each time the default-route interface changes.
+ *
+ * Poll from `loop()`. Sockets stay bound to the interface they were opened on,
+ * so connections (MQTT) must be re-established when this fires.
+ */
+bool defaultRouteChanged(void);
+
 /** @brief Returns `true` if the WiFi station is associated and has an IP address. */
 bool isWiFiConnected(void);
 

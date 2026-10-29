@@ -482,6 +482,12 @@ void loop() {
     // Check network status periodically
     checkNetworkStatus();
 
+    // WiFi <-> Ethernet failover moves the default route; MQTT's socket is bound
+    // to the old interface, so reconnect it on the new one
+    if (defaultRouteChanged()) {
+        mqttManager.reconnectNow();
+    }
+
     // Handle web server requests
     webServer.handleClient();
 
@@ -564,6 +570,10 @@ void loop() {
                 } else {
                     doc["network"]["type"] = "disconnected";
                 }
+                // Interface actually carrying traffic, and whether Ethernet has a data
+                // path (it may be PoE power only: link up, no DHCP)
+                doc["network"]["route"] = getDefaultRouteName();
+                doc["network"]["ethernet_lease"] = isEthernetOnNetwork();
 
                 // MQTT connection state
                 doc["mqtt"]["connected"] = mqttManager.isConnected();

@@ -280,6 +280,23 @@ bool isEthernetOnNetwork(void) {
 #endif
 }
 
+const char* getDefaultRouteName(void) {
+    NetworkInterface* route = Network.getDefaultInterface();
+    return route ? route->desc() : "none";
+}
+
+bool defaultRouteChanged(void) {
+    static NetworkInterface* lastRoute = nullptr;
+    NetworkInterface* route = Network.getDefaultInterface();
+    if (route == lastRoute) {
+        return false;
+    }
+    LOG_I("[NET] Default route: %s -> %s", lastRoute ? lastRoute->desc() : "none",
+          route ? route->desc() : "none");
+    lastRoute = route;
+    return true;
+}
+
 // Check if WiFi is connected
 bool isWiFiConnected(void) {
     return wifiInitialized && wifiManagerPtr && wifiManagerPtr->isConnectedStation();
