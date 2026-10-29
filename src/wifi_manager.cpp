@@ -54,8 +54,8 @@ bool WiFiManager::radioUp(wifi_mode_t mode) {
     if (radioDisabled) {
         return false;
     }
-#if WIFI_HOSTED
     bool staWasOn = (WiFi.getMode() & WIFI_MODE_STA) != 0;
+#if WIFI_HOSTED
     hostedBringupMarker = HOSTED_BRINGUP_MAGIC;
 #endif
     bool ok = WiFi.mode(mode);
@@ -64,18 +64,20 @@ bool WiFiManager::radioUp(wifi_mode_t mode) {
     if (ok) {
         hostedFailedBoots = 0;
     }
-    // The C6 keeps its own STA config in flash (a new board ships with a factory
-    // test SSID) and auto-reconnect keeps retrying it, which blocks every scan.
-    // Our credentials live in our NVS and are passed to WiFi.begin(), so clear
-    // the C6's copy whenever STA comes up. Only when newly enabled: clearing a
-    // running STA would drop a live connection.
+#endif
     if (ok && !staWasOn && (mode & WIFI_MODE_STA)) {
+#if WIFI_HOSTED
+        // The C6 keeps its own STA config in flash (a new board ships with a factory
+        // test SSID) and auto-reconnect keeps retrying it, which blocks every scan.
+        // Our credentials live in our NVS and are passed to WiFi.begin(), so clear
+        // the C6's copy whenever STA comes up. Only when newly enabled: clearing a
+        // running STA would drop a live connection.
         WiFi.STA.disconnect(true);
+#endif
         // Modem sleep held packets until the next beacon: ~0.2-0.8 s ping, multi-second
         // HTTP. The device is PoE/mains powered, so latency matters more than power.
         WiFi.setSleep(false);
     }
-#endif
     return ok;
 }
 

@@ -20,7 +20,11 @@
 // GPIO pin for factory reset button.
 // Override via build_flags if needed (e.g. -DFACTORY_RESET_PIN=35).
 #ifndef FACTORY_RESET_PIN
+#if CONFIG_IDF_TARGET_ESP32S3
+#define FACTORY_RESET_PIN 0   // BOOT button on Waveshare ESP32-S3-POE-ETH
+#else
 #define FACTORY_RESET_PIN 45  // USR button on M5Stack Unit PoE P4 (GPIO_NUM_45)
+#endif
 #endif
 // Factory reset = FACTORY_RESET_PRESSES presses within FACTORY_RESET_WINDOW_MS.
 // Not a long hold: on the Unit PoE P4 a 3 s hold of the side button makes the
@@ -66,6 +70,18 @@ LD2450Sensor ld2450(Serial1, mqttManager);
 CC1312Manager cc1312(mqttManager);
 #endif
 
+#if CONFIG_IDF_TARGET_ESP32S3
+// Waveshare ESP32-S3-POE-ETH: one WS2812 on GPIO21
+#define LED_RGB_PIN 21
+
+static void ledInit(void) {
+    rgbLedWrite(LED_RGB_PIN, 0, 0, 0);
+}
+
+static void ledSet(uint8_t r, uint8_t g, uint8_t b) {
+    rgbLedWrite(LED_RGB_PIN, r, g, b);
+}
+#else
 // RGB LED — common anode, GPIO R=17, G=15, B=16
 // Common anode: duty 0 = full brightness, duty 255 = off
 #define LED_R_PIN 17
@@ -89,6 +105,7 @@ static void ledSet(uint8_t r, uint8_t g, uint8_t b) {
     ledcWrite(LED_G_PIN, 255 - g);
     ledcWrite(LED_B_PIN, 255 - b);
 }
+#endif
 
 // Hue 0-255 → dim RGB for rainbow cycling
 static void ledHue(uint8_t hue) {

@@ -2,6 +2,7 @@
 #include "log.h"
 #include <lwip/sockets.h>
 #include <esp_random.h>
+#include <SPI.h>
 #if WIFI_HOSTED
 extern "C" {
 #include "esp_hosted_transport_config.h"  // C header without extern "C" guards
@@ -190,15 +191,23 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
     }
 }
 
-// Initialize RMII Ethernet via built-in ESP32-P4 EMAC + IP101 PHY.
+// Initialize Ethernet: P4 EMAC + IP101 over RMII, or S3 + W5500 (MAC-raw) over
+// SPI. Both run under lwIP via the ETH library, so everything above this is shared.
 // Registers event handler so reconnects and DHCP retries are automatic.
 bool initEthernet(void) {
-    LOG_I("\n=== RMII Ethernet Initialization (IP101 PHY) ===");
-
     // Register before ETH.begin() so we don't miss early events
     Network.onEvent(onEthEvent);
 
-    if (!ETH.begin(ETH_PHY_IP101, RMII_PHY_ADDR, RMII_MDC, RMII_MDIO, RMII_PHY_RST, EMAC_CLK_EXT_IN)) {
+#if CONFIG_IDF_TARGET_ESP32S3
+    LOG_I("\n=== Ethernet Initialization (W5500, SPI MAC-raw) ===");
+    SPI.begin(W5500_SCK, W5500_MISO, W5500_MOSI);
+    bool ethStarted = ETH.begin(ETH_PHY_W5500, W5500_PHY_ADDR, W5500_CS, W5500_INT, W5500_RST, SPI);
+#else
+    LOG_I("\n=== Ethernet Initialization (RMII, IP101 PHY) ===");
+    bool ethStarted =
+        ETH.begin(ETH_PHY_IP101, RMII_PHY_ADDR, RMII_MDC, RMII_MDIO, RMII_PHY_RST, EMAC_CLK_EXT_IN);
+#endif
+    if (!ethStarted) {
         LOG_E("ERROR: ETH.begin() failed!");
         return false;
     }
@@ -237,7 +246,7 @@ bool initEthernet(void) {
     LOG_I("Gateway: %s", ETH.gatewayIP().toString().c_str());
 
     ethernetInitialized = true;
-    LOG_I("=== RMII Ethernet Ready ===\n");
+    LOG_I("=== Ethernet Ready ===\n");
     return true;
 }
 
