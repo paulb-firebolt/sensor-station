@@ -51,7 +51,7 @@ public:
         // Task-specific metrics
         uint32_t thermal_frame_time_ms;  ///< Duration of the last thermal detector task slice (ms).
         uint32_t mqtt_publish_time_ms;   ///< Duration of the last MQTT publish task slice (ms).
-        uint32_t wifi_rssi;              ///< WiFi received signal strength in dBm (typically -100 to -30); 0 if not connected.
+        int32_t wifi_rssi;               ///< WiFi received signal strength in dBm (typically -100 to -30); 0 if not connected.
         uint8_t wifi_channel;            ///< WiFi channel number of the current AP association; 0 if not connected.
     };
 
