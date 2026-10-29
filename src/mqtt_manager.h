@@ -208,6 +208,14 @@ public:
      */
     void refreshCerts(void);
 
+    /**
+     * @brief Drops the connection and retries on the next update(), skipping backoff.
+     *
+     * Call when the default network route changes: the TLS socket stays bound to
+     * the old interface and would otherwise sit half-open until keepalive expires.
+     */
+    void reconnectNow(void);
+
 private:
     // Manager references
     CertificateManager* certManager;

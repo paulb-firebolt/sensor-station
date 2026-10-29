@@ -94,7 +94,8 @@
 #endif // WIFI_HOSTED
 
 // Network configuration
-const unsigned long DHCP_TIMEOUT = 10000; // 10 seconds
+const unsigned long DHCP_TIMEOUT = 5000; // 5 s: AutoIP-only sites want a quick fallback
+const unsigned long DHCP_PROBE_INTERVAL_MS = 30000; // RMII: DHCP server probe interval while on AutoIP
 const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
 
 /**
@@ -104,7 +105,8 @@ const unsigned long LINK_CHECK_INTERVAL = 5000; // 5 seconds
  * Ethernet is attempted first.  If it succeeds, WiFi is started in station
  * mode using any stored credentials.  On W5500 builds, DHCP is tried for up
  * to `DHCP_TIMEOUT` ms before falling back to AutoIP.  On RMII builds the
- * ESP-IDF LwIP stack handles DHCP automatically.  mDNS is started with a
+ * same timeout applies; while on AutoIP, checkNetworkStatus() probes for a
+ * DHCP server every `DHCP_PROBE_INTERVAL_MS` and switches when one answers.  mDNS is started with a
  * hostname derived from the device MAC address (e.g. "sensor-A0EA91DA").
  *
  * @param wifiMgr  Reference to the application WiFiManager instance, used to
@@ -149,6 +151,24 @@ bool isEthernetConnected(void);
  * so this decides whether the provisioning AP is needed.
  */
 bool isEthernetOnNetwork(void);
+
+/**
+ * @brief Interface carrying the default route: `"sta"` (WiFi), `"eth"`, or `"none"`.
+ *
+ * Route selection is left to ESP-IDF's automatic choice by route priority
+ * (WiFi STA 100 > Ethernet 50), which gives the required policy: WiFi is the
+ * primary data path, Ethernet the fallback. Never call `setDefault()`: it pins
+ * one interface and disables that automatic failover.
+ */
+const char* getDefaultRouteName(void);
+
+/**
+ * @brief Returns `true` once each time the default-route interface changes.
+ *
+ * Poll from `loop()`. Sockets stay bound to the interface they were opened on,
+ * so connections (MQTT) must be re-established when this fires.
+ */
+bool defaultRouteChanged(void);
 
 /** @brief Returns `true` if the WiFi station is associated and has an IP address. */
 bool isWiFiConnected(void);

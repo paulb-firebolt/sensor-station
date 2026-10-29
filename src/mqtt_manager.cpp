@@ -399,6 +399,10 @@ void MQTTManager::setupTLS(void) {
 void MQTTManager::refreshCerts(void) {
     setupTLS();
     // Force reconnect on next loop so new certs are used immediately
+    reconnectNow();
+}
+
+void MQTTManager::reconnectNow(void) {
     lastReconnectAttempt = 0;
     reconnectAttempts = 0;
     if (mqttClient.connected()) {

@@ -26,7 +26,12 @@
 #define FACTORY_RESET_PIN 0  // Boot button on Waveshare ESP32-S3-POE-ETH
 #endif
 #endif
-const unsigned long FACTORY_RESET_HOLD_TIME = 5000;  // 5 seconds
+// Factory reset = FACTORY_RESET_PRESSES presses within FACTORY_RESET_WINDOW_MS.
+// Not a long hold: on the Unit PoE P4 a 3 s hold of the side button makes the
+// board hardware restart the P4 into ROM download mode (green LED).
+const uint8_t FACTORY_RESET_PRESSES = 5;
+const unsigned long FACTORY_RESET_WINDOW_MS = 4000;
+const unsigned long FACTORY_RESET_DEBOUNCE_MS = 50;
 
 // Global objects
 WiFiManager wifiManager;
@@ -177,10 +182,26 @@ void triggerFindMe(void) {
 }
 #endif
 
-// Factory reset variables
-unsigned long resetButtonPressStart = 0;
-bool resetButtonPressed = false;
-bool factoryResetTriggered = false;
+// Factory reset press counting. Done in an ISR because loop() can block for
+// seconds (MQTT/TLS connects) and would miss short presses.
+static volatile uint8_t resetPressCount = 0;
+static volatile unsigned long resetFirstPressMs = 0;
+static volatile unsigned long resetLastEdgeMs = 0;
+
+// CHANGE edges: a press counts only on the first edge after the line has been
+// quiet for the debounce time and reads LOW, so release bounce never counts.
+static void onResetButtonEdge(void) {
+    unsigned long now = millis();
+    bool quiet = now - resetLastEdgeMs >= FACTORY_RESET_DEBOUNCE_MS;
+    resetLastEdgeMs = now;
+    if (!quiet || digitalRead(FACTORY_RESET_PIN) != LOW) return;
+    if (resetPressCount == 0 || now - resetFirstPressMs > FACTORY_RESET_WINDOW_MS) {
+        resetFirstPressMs = now;
+        resetPressCount = 1;
+    } else if (resetPressCount < FACTORY_RESET_PRESSES) {
+        resetPressCount++;
+    }
+}
 
 // MQTT publish timing
 unsigned long lastMQTTPublish = 0;
@@ -188,71 +209,58 @@ uint32_t lastReportedLoopPeak = 0;
 
 // Check for factory reset button press
 void checkFactoryReset(void) {
-    bool buttonPressed = (digitalRead(FACTORY_RESET_PIN) == LOW);
+    static uint8_t lastLoggedCount = 0;
+    uint8_t presses = resetPressCount;
 
-    if (buttonPressed && !resetButtonPressed) {
-        // Button just pressed
-        resetButtonPressed = true;
-        resetButtonPressStart = millis();
-        LOG_I("\n[Reset] Button pressed - hold for 5 seconds to factory reset\n");
-    } else if (!buttonPressed && resetButtonPressed) {
-        // Button released
-        resetButtonPressed = false;
-        unsigned long pressDuration = millis() - resetButtonPressStart;
-
-        if (pressDuration < FACTORY_RESET_HOLD_TIME) {
-            LOG_I("[Reset] Button released (short press)\n");
+    if (presses < FACTORY_RESET_PRESSES) {
+        if (presses != lastLoggedCount && presses > 0) {
+            LOG_I("[Reset] Button press %u/%u\n", presses, FACTORY_RESET_PRESSES);
         }
-    } else if (buttonPressed && resetButtonPressed && !factoryResetTriggered) {
-        // Button being held
-        unsigned long pressDuration = millis() - resetButtonPressStart;
-
-        if (pressDuration >= FACTORY_RESET_HOLD_TIME) {
-            // Factory reset triggered
-            factoryResetTriggered = true;
-            LOG_W("\n========================================\n");
-            LOG_W("FACTORY RESET TRIGGERED!\n");
-            LOG_W("========================================\n");
-            LOG_W("Performing complete factory reset...\n");
-            LOG_W("\n");
-
-            // Clear all NVS namespaces
-            LOG_I("[Reset] Clearing WiFi credentials...\n");
-            wifiManager.clearCredentials();
-
-            LOG_I("[Reset] Clearing network configuration...\n");
-            Preferences netPrefs;
-            if (netPrefs.begin("network_config", false)) {
-                netPrefs.clear();
-                netPrefs.end();
-            }
-
-            LOG_I("[Reset] Clearing admin password...\n");
-            Preferences authPrefs;
-            if (authPrefs.begin("auth", false)) {
-                authPrefs.clear();
-                authPrefs.end();
-            }
-
-            LOG_I("[Reset] Clearing MQTT configuration...\n");
-            Preferences mqttPrefs;
-            if (mqttPrefs.begin("mqtt_config", false)) {
-                mqttPrefs.clear();
-                mqttPrefs.end();
-            }
-
-            LOG_I("[Reset] Clearing certificates...\n");
-            certManager.clearCertificates();
-
-            LOG_I("\n");
-            LOG_I("All settings cleared successfully!\n");
-            LOG_I("Rebooting into provisioning mode...\n");
-            LOG_I("========================================\n\n");
-
-            delay(1000);
-            ESP.restart();
-        }
+        lastLoggedCount = presses;
+        return;
     }
+
+    LOG_W("\n========================================\n");
+    LOG_W("FACTORY RESET TRIGGERED!\n");
+    LOG_W("========================================\n");
+    LOG_W("Performing complete factory reset...\n");
+    LOG_W("\n");
+
+    // Clear all NVS namespaces
+    LOG_I("[Reset] Clearing WiFi credentials...\n");
+    wifiManager.clearCredentials();
+
+    LOG_I("[Reset] Clearing network configuration...\n");
+    Preferences netPrefs;
+    if (netPrefs.begin("network_config", false)) {
+        netPrefs.clear();
+        netPrefs.end();
+    }
+
+    LOG_I("[Reset] Clearing admin password...\n");
+    Preferences authPrefs;
+    if (authPrefs.begin("auth", false)) {
+        authPrefs.clear();
+        authPrefs.end();
+    }
+
+    LOG_I("[Reset] Clearing MQTT configuration...\n");
+    Preferences mqttPrefs;
+    if (mqttPrefs.begin("mqtt_config", false)) {
+        mqttPrefs.clear();
+        mqttPrefs.end();
+    }
+
+    LOG_I("[Reset] Clearing certificates...\n");
+    certManager.clearCertificates();
+
+    LOG_I("\n");
+    LOG_I("All settings cleared successfully!\n");
+    LOG_I("Rebooting into provisioning mode...\n");
+    LOG_I("========================================\n\n");
+
+    delay(1000);
+    ESP.restart();
 }
 
 void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
@@ -342,8 +350,10 @@ void setup() {
 
     // Setup factory reset button
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(FACTORY_RESET_PIN), onResetButtonEdge, CHANGE);
     LOG_I("Factory reset button: GPIO %d\n", FACTORY_RESET_PIN);
-    LOG_I("Hold for 5 seconds to clear WiFi credentials\n\n");
+    LOG_I("Press %u times within %lu s to clear all settings\n\n", FACTORY_RESET_PRESSES,
+          FACTORY_RESET_WINDOW_MS / 1000);
 
     // Initialize network (Ethernet + WiFi)
     if (!initNetwork(wifiManager)) {
@@ -482,6 +492,12 @@ void loop() {
     // Check network status periodically
     checkNetworkStatus();
 
+    // WiFi <-> Ethernet failover moves the default route; MQTT's socket is bound
+    // to the old interface, so reconnect it on the new one
+    if (defaultRouteChanged()) {
+        mqttManager.reconnectNow();
+    }
+
     // Handle web server requests
     webServer.handleClient();
 
@@ -564,6 +580,10 @@ void loop() {
                 } else {
                     doc["network"]["type"] = "disconnected";
                 }
+                // Interface actually carrying traffic, and whether Ethernet has a data
+                // path (it may be PoE power only: link up, no DHCP)
+                doc["network"]["route"] = getDefaultRouteName();
+                doc["network"]["ethernet_lease"] = isEthernetOnNetwork();
 
                 // MQTT connection state
                 doc["mqtt"]["connected"] = mqttManager.isConnected();

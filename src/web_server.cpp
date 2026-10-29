@@ -906,19 +906,17 @@ void DeviceWebServer::handleSave(void) {
         LOG_E("[WiFi] ERROR: Failed to save Ethernet-only preference\n");
     }
 
-    // Save admin password
+    // Save admin password. An empty field keeps the current one: only a
+    // factory reset clears it, so a WiFi-only change can't unprotect the device.
     Preferences authPrefs;
-    if (authPrefs.begin("auth", false)) {
-        if (adminPassword.length() > 0) {
+    if (adminPassword.length() > 0) {
+        if (authPrefs.begin("auth", false)) {
             authPrefs.putString("admin_password", adminPassword);
+            authPrefs.end();
             LOG_I("[WiFi] Admin password saved\n");
         } else {
-            authPrefs.remove("admin_password");
-            LOG_I("[WiFi] Admin password cleared\n");
+            LOG_E("[WiFi] ERROR: Failed to save admin password\n");
         }
-        authPrefs.end();
-    } else {
-        LOG_E("[WiFi] ERROR: Failed to save admin password\n");
     }
 
     // Send success page BEFORE reboot
@@ -1034,7 +1032,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
     <p class="subtitle">Configure WiFi network connection</p>
 
     <div class="info">
-      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
+      <strong>Note:</strong> To reset settings later, press the button 5 times within 4 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -1339,7 +1337,7 @@ String DeviceWebServer::generateStatusPage(void) {
       </div>
 
       <div class="info" style="margin-top:15px;">
-        <strong>Factory Reset:</strong> Hold the boot button for 5 seconds to clear all settings and restart.)HTML"
+        <strong>Factory Reset:</strong> Press the button 5 times within 4 seconds to clear all settings and restart. Do not hold it: a 3-second hold puts the device into firmware download mode.)HTML"
 #if HAS_WIFI && !ETHERNET_FIRST_SETUP  // factory reset only lands in the AP on WiFi-first builds
         R"HTML( The device will restart in setup mode at <strong>sensor-setup</strong> (password: 12345678).)HTML"
 #endif
@@ -1464,7 +1462,7 @@ String DeviceWebServer::generateEthernetProvisioningPage(void) {
     </div>
 
     <div class="info">
-      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
+      <strong>Note:</strong> To reset settings later, press the button 5 times within 4 seconds.
     </div>
 
     <form method="POST" action="/api/save">
@@ -1699,7 +1697,7 @@ String DeviceWebServer::generateDeviceSetupPage(void) {
     <p class="subtitle">Set an admin password to protect MQTT configuration.</p>
 
     <div class="info">
-      <strong>Note:</strong> To reset settings later, hold the boot button for 5 seconds.
+      <strong>Note:</strong> To reset settings later, press the button 5 times within 4 seconds.
     </div>
 
     <form method="POST" action="/api/setup">

@@ -1,7 +1,7 @@
 ---
 title: WiFi Provisioning Implementation - Complete Guide
 created: 2025-12-15T14:18:00Z
-lastModified: 2025-12-15T14:18:00Z
+lastModified: 2026-10-29T16:00:00Z
 ---
 
 ## Overview
@@ -167,15 +167,15 @@ if (linkStatus == LinkON && lastLinkStatus == LinkOFF) {
 
 ### 5. Factory Reset Functionality
 
-**Implementation:** GPIO 0 (boot button) held for 5 seconds
+**Implementation:** press the button 5 times within 4 seconds. That's GPIO 0 (BOOT) on the ESP32-S3 board and GPIO 45 (the side button) on the Unit PoE P4.
 
-**Why 5 seconds?**
+**Why presses, not a hold?**
 
-- Actual hold time: 5 seconds
-- Detection delay: up to 5 seconds (due to blocking operations in main loop)
-- User guidance: 5 seconds accounts for detection delay
+- The Unit PoE P4's board hardware restarts the P4 into ROM download mode when the side button is held for 3 seconds, and lights the green LED. A 5-second hold never reached the firmware reliably and left the device stuck in download mode until it was power-cycled.
+- Presses are counted in a GPIO interrupt, not polled in `loop()`, so they are caught even while the loop is blocked by a network operation. The old 5-second hold relied on polling for this.
+- A press counts only on the first edge after the line has been quiet for 50 ms, so contact bounce on release doesn't add presses.
 
-**Key Learning:** Button detection runs in main loop, which can be delayed by network operations. Documentation should reflect real-world timing, not just code timing.
+**Key Learning:** check what the board hardware does with a button before giving it a long-press function.
 
 ## Lessons Learned
 
@@ -281,10 +281,7 @@ Serial.println("[Module] === END REQUEST ===");
 **Example:** Factory reset button
 
 **Code:** 5-second hold time
-**Reality:** Up to 5 seconds to detect
-**Documentation:** "Hold for 5 seconds"
-
-**Why:** Main loop blocking delays button detection
+**Reality:** up to 5 seconds to detect, because loop blocking delayed polling. The guidance was "Hold for 5 seconds". This was later replaced by 5 presses counted in an interrupt (see Factory Reset Functionality above).
 
 **Takeaway:** Document user-facing behavior, not just code parameters. Test with real-world conditions. Buffer time recommendations to account for system latency.
 
