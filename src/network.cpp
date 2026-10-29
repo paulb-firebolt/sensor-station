@@ -1,5 +1,10 @@
 #include "network.h"
 #include "log.h"
+#if WIFI_HOSTED
+extern "C" {
+#include "esp_hosted_transport_config.h"  // C header without extern "C" guards
+}
+#endif
 
 // Global variables
 static byte mac[6];
@@ -350,6 +355,13 @@ bool initWiFi(WiFiManager& wifiMgr) {
         LOG_E("[WiFi] esp-hosted SDIO pin setup failed");
         return false;
     }
+#if defined(C6_SDIO_CLOCK_KHZ) || defined(C6_SDIO_BUS_WIDTH)
+    {
+        struct esp_hosted_sdio_config sdio = esp_hosted_get_default_sdio_config();
+        LOG_I("[WiFi] esp-hosted SDIO override: %lu kHz, %u-bit",
+              (unsigned long)sdio.clock_freq_khz, sdio.bus_width);
+    }
+#endif
 #endif
     String ssid, password;
 

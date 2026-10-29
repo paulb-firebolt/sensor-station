@@ -15,26 +15,10 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include "esp32-hal-hosted.h"
-#include "esp_hosted_transport_config.h"
-#include "../network.h"
-
-// SDIO clock. The prebuilt default is 40 MHz, which jumper/breadboard wiring
-// may not sustain. The Arduino HAL always takes the library default, so the
-// env links with -Wl,--wrap=esp_hosted_get_default_sdio_config and this
-// wrapper lowers the clock. Override: PLATFORMIO_BUILD_FLAGS=-DC6_SDIO_CLOCK_KHZ=10000
-#ifndef C6_SDIO_CLOCK_KHZ
-#define C6_SDIO_CLOCK_KHZ 20000
-#endif
-
-extern "C" struct esp_hosted_sdio_config __real_esp_hosted_get_default_sdio_config(void);
-extern "C" struct esp_hosted_sdio_config __wrap_esp_hosted_get_default_sdio_config(void) {
-    struct esp_hosted_sdio_config conf = __real_esp_hosted_get_default_sdio_config();
-    conf.clock_freq_khz = C6_SDIO_CLOCK_KHZ;
-#ifdef C6_SDIO_BUS_WIDTH
-    conf.bus_width = C6_SDIO_BUS_WIDTH;  // diagnostic: 1 isolates D0/D1 from D2/D3
-#endif
-    return conf;
+extern "C" {
+#include "esp_hosted_transport_config.h"  // C header without extern "C" guards
 }
+#include "../network.h"
 
 static const unsigned long CONNECT_TIMEOUT_MS = 20000;
 static const unsigned long STATUS_INTERVAL_MS = 5000;
@@ -80,9 +64,11 @@ void setup() {
     Serial.begin(115200);
     delay(2000);
     Serial.println("\n=== ESP32-C6 esp-hosted link test ===");
-    Serial.printf("Pins: CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RST=%d, SDIO clock %d kHz\n",
+    // Goes through the --wrap in hosted_sdio_config.cpp, so this is what the HAL will use
+    struct esp_hosted_sdio_config sdio = esp_hosted_get_default_sdio_config();
+    Serial.printf("Pins: CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d RST=%d, SDIO %lu kHz %u-bit\n",
                   C6_SDIO_CLK, C6_SDIO_CMD, C6_SDIO_D0, C6_SDIO_D1, C6_SDIO_D2, C6_SDIO_D3,
-                  C6_RESET, C6_SDIO_CLOCK_KHZ);
+                  C6_RESET, (unsigned long)sdio.clock_freq_khz, sdio.bus_width);
 
     if (!WiFi.setPins(C6_SDIO_CLK, C6_SDIO_CMD, C6_SDIO_D0, C6_SDIO_D1, C6_SDIO_D2, C6_SDIO_D3,
                       C6_RESET)) {
