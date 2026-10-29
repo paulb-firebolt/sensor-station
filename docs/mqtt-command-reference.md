@@ -1,7 +1,7 @@
 ---
 title: MQTT Command Reference
 created: 2026-03-24T00:00:00Z
-lastModified: 2026-03-24T00:00:00Z
+lastModified: 2026-10-30T01:00:00Z
 ---
 
 All commands are sent as JSON to the device command topic:
@@ -22,15 +22,16 @@ on the action.
 ### `ota` — trigger a firmware update
 
 ```json
-{"action":"ota","url":"http://192.168.2.1:8080/firmware.bin","version":"0.0.14"}
+{"action":"ota","url":"https://192.168.2.1:8443/firmware.bin","version":"0.0.14","sha256":"<sha256sum firmware.bin>"}
 ```
 
 | Field      | Required | Description |
 |------------|----------|-------------|
 | `action`   | yes      | `"ota"` |
-| `url`      | no       | HTTP/HTTPS URL to the firmware binary. If omitted, mDNS discovery of `_ota._tcp` is attempted (RMII builds only). |
+| `url`      | no       | HTTPS URL to the firmware binary. `http://` is refused. The server's certificate is not verified (self-signed is fine); `sha256` protects the image. If omitted, mDNS discovery of `_ota._tcp` is attempted (always as `https://`). |
 | `version`  | no       | Target semver string. Update is skipped if the device is already on this version or newer. |
-| `sha256`   | no       | Expected SHA-256 hex digest for verification. |
+| `sha256`   | yes      | `sha256sum` of the firmware binary (64 hex chars). The device refuses to boot an image that doesn't match. |
+| `force`    | no       | `true` skips the version check (re-flash or downgrade). |
 
 Response published to `{prefix}/{device_id}/ota_status`.
 
@@ -42,7 +43,7 @@ Response published to `{prefix}/{device_id}/ota_status`.
 {"action":"rollback"}
 ```
 
-Boots from the previous OTA partition if one exists. No additional fields.
+Switches to the previous OTA partition and reboots into it, if that partition holds a valid image. No additional fields.
 
 ---
 

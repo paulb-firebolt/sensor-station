@@ -299,7 +299,7 @@ bool discoverMQTTBroker(String& host, uint16_t& port) {
 // Query mDNS for an OTA firmware server (_ota._tcp).
 // Constructs a URL from the discovered IP and port.
 // Checks the TXT record "path" key; falls back to /firmware/<hostname>.bin.
-// Uses http:// unless port is 443.
+// Always https:// (TLS only; the image is checked by the command's sha256).
 bool discoverOTAServer(String& url) {
     LOG_I("[mDNS] Querying for _ota._tcp...");
     int n = MDNS.queryService("ota", "tcp");
@@ -313,8 +313,7 @@ bool discoverOTAServer(String& url) {
     if (path.length() == 0) {
         path = "/firmware/" + getHostname() + ".bin";
     }
-    String scheme = (svcPort == 443) ? "https" : "http";
-    url = scheme + "://" + ip + ":" + String(svcPort) + path;
+    url = "https://" + ip + ":" + String(svcPort) + path;
     LOG_I("[mDNS] Discovered OTA server: %s", url.c_str());
     return true;
 }

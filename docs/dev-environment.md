@@ -1,7 +1,7 @@
 ---
 title: Local Development Environment
 created: 2026-03-17T14:30:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-30T01:00:00Z
 ---
 
 How to run a local DHCP server and MQTT broker for development and testing
@@ -253,48 +253,49 @@ certs to `docs/certs/`, update `src/certs.h`, and reflash.
 
 ---
 
-## OTA Firmware Updates (HTTP test server)
+## OTA Firmware Updates (HTTPS test server)
 
-OTA updates are triggered via MQTT. The device downloads firmware from a plain
-HTTP server — Python's built-in server is all you need for local testing.
+OTA updates are triggered via MQTT. The device only downloads over HTTPS but
+doesn't verify the server's certificate; the `sha256` in the command is what
+protects the image. Any certificate will do, so the bench uses a throwaway
+self-signed one. The `mosquitto_pub` commands below assume the device is on the
+bench broker (`192.168.2.1`, compiled-in certs).
 
-### Directory layout
-
-Keep firmware binaries in an `ota/` folder, one subfolder per build env:
-
-```text
-~/Documents/PlatformIO/Projects/basic-network/ota/
-└── m5tab5-esp32p4/
-    ├── firmware_0.0.9.bin
-    └── firmware_0.1.0.bin
-```
-
-### 1. Build and copy firmware
+### 1. Make a throwaway certificate
 
 ```bash
 cd ~/Documents/PlatformIO/Projects/basic-network
-
-# Build
-pio run -e m5tab5-esp32p4
-
-# Copy with version-stamped name
-cp .pio/build/m5tab5-esp32p4/firmware.bin \
-   ota/m5tab5-esp32p4/firmware_0.1.0.bin
+mkdir -p ota
+openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=ota-bench \
+  -keyout ota/server.key -out ota/server.crt
 ```
 
-### 2. Start the HTTP server
+`ota/` is gitignored.
 
-Serve from the `ota/` directory:
+### 2. Build, copy and hash the firmware
 
 ```bash
-cd ~/Documents/PlatformIO/Projects/basic-network/ota
-python -m http.server 8080
+pio run -e esp32s3-poe-eth
+cp .pio/build/esp32s3-poe-eth/firmware.bin ota/firmware_0.1.0.bin
+sha256sum ota/firmware_0.1.0.bin
 ```
 
-Firmware is now available at
-`http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin`.
+### 3. Start the HTTPS server
 
-### 3. Trigger OTA via MQTT
+```bash
+python3 - <<'EOF'
+import http.server, ssl, functools
+h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="ota")
+s = http.server.ThreadingHTTPServer(("192.168.2.1", 8443), h)
+c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain("ota/server.crt", "ota/server.key")
+s.socket = c.wrap_socket(s.socket, server_side=True)
+s.serve_forever()
+EOF
+```
+
+Check it's served: `curl -kI https://192.168.2.1:8443/firmware_0.1.0.bin`.
+
+### 4. Trigger OTA via MQTT
 
 ```bash
 mosquitto_pub \
@@ -302,11 +303,12 @@ mosquitto_pub \
   --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
   --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
   --key    ~/docker/mosquitto/mqtt/certs/client.key \
-  -t 'sensors/esp32/sensor-91A0ED30/command' \
-  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
+  -t 'sensors/esp32/sensor-D906AA31/command' \
+  -m '{"action":"ota","url":"https://192.168.2.1:8443/firmware_0.1.0.bin","version":"0.1.0","sha256":"<from step 2>"}'
 ```
 
-The device will download, flash, and reboot automatically. Monitor progress:
+The device downloads, checks the hash, and reboots into the new image. A wrong
+hash leaves it on the running firmware. Monitor progress:
 
 ```bash
 mosquitto_sub \
@@ -319,19 +321,8 @@ mosquitto_sub \
 
 ### Force update (bypass version check)
 
-If the NVS version is out of sync with the flashed firmware, add `"force":true`:
-
-```bash
-mosquitto_pub \
-  -h 192.168.2.1 -p 8883 \
-  --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
-  --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
-  --key    ~/docker/mosquitto/mqtt/certs/client.key \
-  -t 'sensors/esp32/sensor-91A0ED30/command' \
-  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.0.9.bin","version":"0.0.9","force":true}'
-```
-
-This also allows flashing an older version if needed.
+Add `"force":true` to re-flash the same version or go back to an older one. The
+`sha256` is still required.
 
 ---
 
@@ -350,9 +341,7 @@ docker compose up -d
 cd ~/docker/mosquitto
 docker compose up -d
 
-# 4. Start OTA HTTP server (terminal 3)
-cd ~/Documents/PlatformIO/Projects/basic-network/ota
-python -m http.server 8080
+# 4. Start OTA HTTPS server (terminal 3): see "OTA Firmware Updates" above
 
 # 5. Monitor MQTT traffic (terminal 4)
 mosquitto_sub -h 192.168.2.1 -p 8883 \

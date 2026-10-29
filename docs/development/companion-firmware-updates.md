@@ -2,7 +2,7 @@
 title: Design Note — Keeping the P4, C6 and CC1312 Firmware Current
 description: Internal proposal for production firmware updates on a three-chip base station. The P4 is the only update target and carries matching C6 and CC1312 images, which it flashes on boot.
 created: 2026-10-29T12:00:00Z
-lastModified: 2026-10-29T12:00:00Z
+lastModified: 2026-10-30T01:00:00Z
 ---
 
 **Status:** discussion and proposal. Internal only, not a requirement.
@@ -28,7 +28,7 @@ If the chips are updated independently, a mismatched set will eventually happen.
 
 | Chip | Update mechanism | State |
 | --- | --- | --- |
-| P4 | `ota_manager`: HTTP or HTTPS download, SHA-256 check, A/B partitions, rollback after a crash loop, driven over MQTT | Done |
+| P4 / S3 | `ota_manager`: HTTPS-only download (server certificate not verified), required SHA-256 check before boot, A/B partitions, rollback (manual or after a crash loop), driven over MQTT | Done; tested on the S3 |
 | C6 | esp-hosted slave OTA over SDIO (`hostedBeginUpdate`, `hostedWriteUpdate`, `hostedEndUpdate`, `hostedActivateUpdate`). The C6 writes its spare partition and switches only when the image is complete. | Library support exists. Not implemented: plan step 7. |
 | CC1312 | None. The P4 can already read the coordinator version (`CC1312Manager::coordinatorVersion()`). | Not started |
 

@@ -1,16 +1,16 @@
 ---
 title: ESP32 OTA Firmware Update System
 created: 2026-03-17T19:09:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-30T01:00:00Z
 ---
 
 **Project:** Thermal Occupancy Counter with Ethernet + WiFi
 
-**Device:** ESP32-P4 (M5Stack Unit PoE P4). The ESP32-S3 + W5500 target this guide also covered was removed on 2026-10-29; see [Ethernet TLS — W5500 Limitation](/ETHERNET_TLS_LIMITATION).
+**Devices:** Waveshare ESP32-S3-POE-ETH (`esp32s3-poe-eth`, the main target) and ESP32-P4 (M5Stack Unit PoE P4, `m5tab5-esp32p4`). Both use `default_16MB.csv` and the same OTA code.
 
 **Date:** March 2026
 
-**Version:** 2.0
+**Version:** 3.0 (HTTPS only, SHA-256 required)
 
 ---
 
@@ -31,13 +31,14 @@ lastModified: 2026-10-29T21:00:00Z
 
 ## Overview
 
-The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. New firmware is downloaded over HTTP/HTTPS from a web server, verified, and installed without physical USB access.
+The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. New firmware is downloaded over HTTPS from a web server, checked against the SHA-256 in the command, and installed without physical USB access.
 
 ### Key Features
 
 - **MQTT-Triggered**: Control updates via MQTT publish to `command` topic
-- **HTTP & HTTPS Support**: Test with plain HTTP, deploy with HTTPS
-- **Works Over WiFi or RMII Ethernet**: `NetworkClient`/`NetworkClientSecure` uses LwIP regardless of interface
+- **HTTPS only**: `http://` URLs are refused. The server's certificate is not verified, so self-signed, a public CA or a CDN all work.
+- **SHA-256 required**: the command carries `sha256sum firmware.bin`; the device hashes the written image and refuses to boot it on a mismatch. This, not the server certificate, is what protects the image
+- **Works Over WiFi or Ethernet** (W5500 MAC-raw or RMII): `NetworkClientSecure` uses lwIP regardless of interface
 - **Boot Counter Watchdog**: Detects crash loops (>5 failed boots = auto-rollback)
 - **Version Tracking**: Stores current and previous firmware versions in NVS
 - **Dual OTA Partitions**: Hardware-level fallback if new firmware fails to boot
@@ -70,24 +71,24 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 │  ┌───────────────▼─────────────────────┐ │
 │  │ OTA Manager                         │ │
 │  │ - Version comparison                │ │
-│  │ - Pre-save new version to NVS       │ │
-│  │ - Download firmware via HTTP(S)     │ │
+│  │ - Download firmware via HTTPS       │ │
 │  │ - Flash to OTA partition            │ │
-│  │ - Trigger reboot                    │ │
+│  │ - Check SHA-256, save version       │ │
+│  │ - Reboot                            │ │
 │  └───────────────┬─────────────────────┘ │
 │                  │                       │
 │  ┌───────────────▼─────────────────────┐ │
 │  │ NetworkClient / NetworkClientSecure │ │
-│  │ - HTTP: plain connection            │ │
-│  │ - HTTPS: TLS verification           │ │
-│  │ - Works over WiFi + RMII Ethernet   │ │
+│  │ - TLS (server not verified)         │ │
+│  │ - Works over WiFi + Ethernet        │ │
+│  │                                     │ │
 │  └───────────────┬─────────────────────┘ │
 │                  │                       │
 └──────────────────┼───────────────────────┘
                    │
                    ▼
       ┌───────────────────────────┐
-      │ Web Server (HTTP/HTTPS)   │
+      │ Web Server (HTTPS)        │
       │ - Serves firmware.bin     │
       │ - Any location accessible │
       └───────────────────────────┘
@@ -95,11 +96,11 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 
 ### Partition Layout
 
-**ESP32-P4** uses `default_16MB.csv` (6.25 MB OTA slots — required for larger P4 firmware):
+Both targets use `default_16MB.csv` (6.25 MB OTA slots):
 
 ```text
 ┌──────────────────────────────────────────┐
-│ ESP32-P4 Flash Memory (16 MB)            │
+│ Flash Memory (16 MB)                     │
 ├──────────────────────────────────────────┤
 │ NVS                           0x9000     │
 ├──────────────────────────────────────────┤
@@ -113,7 +114,7 @@ The OTA (Over-The-Air) system allows remote firmware updates via MQTT commands. 
 └──────────────────────────────────────────┘
 ```
 
-When new firmware is downloaded, it goes into **app1**. Bootloader (otadata) tracks which partition is active.
+New firmware is written to whichever slot is not running. Bootloader (otadata) tracks which partition is active.
 
 ---
 
@@ -129,8 +130,8 @@ When new firmware is downloaded, it goes into **app1**. Bootloader (otadata) tra
 | ------------------------------------- | --------------------------------------------------------------- |
 | `begin()`                             | Initialize OTA system, load versions from NVS, check boot count |
 | `handleOTACommand(JsonDocument)`      | Parse MQTT command, trigger update                              |
-| `updateFromURL(url, version, sha256)` | Download and flash firmware                                     |
-| `rollbackToPrevious()`                | (Stub) Manual rollback trigger                                  |
+| `updateFromURL(url, version, sha256)` | Download, flash, verify SHA-256, reboot                         |
+| `rollbackToPrevious()`                | Switch boot slot and swap versions (caller reboots)             |
 | `getCurrentVersion()`                 | Get current firmware version                                    |
 | `getPreviousVersion()`                | Get previous firmware version                                   |
 | `isFirstBoot()`                       | Check if device has never been updated                          |
@@ -148,7 +149,7 @@ Namespace: "ota_config"
 
 ### 2. MQTT Integration
 
-**Topic**: `devices/{device-id}/command`
+**Topic**: `sensors/esp32/{device-id}/command`
 
 **Subscription**: Device subscribes at startup
 
@@ -172,24 +173,16 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 }
 ```
 
-### 3. Network Clients
+### 3. Network Client
 
-OTA downloads use `NetworkClient` / `NetworkClientSecure` (not `WiFiClient`). These bind to the LwIP stack, so they work identically over WiFi or RMII Ethernet.
-
-**HTTP** (local testing):
+OTA downloads use `NetworkClientSecure` (not `WiFiClientSecure`). It binds to the lwIP stack, so it works the same over WiFi, W5500 MAC-raw Ethernet or RMII Ethernet.
 
 ```cpp
-NetworkClient client;  // Plain, unencrypted
+NetworkClientSecure client;
+client.setInsecure();  // encrypted; server identity not checked
 ```
 
-**HTTPS** (production):
-
-```cpp
-NetworkClientSecure client;  // TLS/SSL encrypted
-// Optional: client.setInsecure() for self-signed certs (dev only)
-```
-
-Selection is automatic based on URL scheme (`http://` vs `https://`).
+There is no plain-HTTP path: the old firmware could not do TLS at all, and new firmware uses TLS everywhere. The server certificate is deliberately not verified, because field servers may be self-signed or use any CA. That costs little: the image is accepted only if it matches the `sha256` in the command, which arrives over mutual-TLS MQTT. Someone who intercepts the download can block the update but cannot get a different image booted. What is given up is privacy of the binary in transit; the flash isn't encrypted, so anyone holding a device can read it anyway.
 
 ---
 
@@ -197,9 +190,8 @@ Selection is automatic based on URL scheme (`http://` vs `https://`).
 
 ### Step 1: Partition Table
 
-**ESP32-P4 (M5Stack Unit PoE P4)**: Must set `board_build.partitions = default_16MB.csv`.
-The ESP32-P4 firmware is larger than the default 1.25 MB OTA slot; without this you get
-a "firmware too large" error at flash time.
+Both envs must set `board_build.partitions = default_16MB.csv`. The firmware is larger than
+the default 1.25 MB OTA slot; without this you get a "firmware too large" error at flash time.
 
 ### Step 2: PlatformIO Configuration
 
@@ -242,9 +234,8 @@ void setup() {
     // Initialize OTA
     otaManager.begin();
 
-    // Initialize firmware version on first boot
-    if (otaManager.isFirstBoot()) {
-        Serial.println("[Setup] First boot - initializing version");
+    // Keep NVS in step with the compiled-in version (first boot, USB flash)
+    if (otaManager.getCurrentVersion() != FIRMWARE_VERSION) {
         otaManager.saveVersionInfo(FIRMWARE_VERSION);
     }
 
@@ -260,22 +251,22 @@ void setup() {
 ### Build Firmware Binary
 
 ```bash
-# Build (creates .pio/build/m5tab5-esp32p4/firmware.bin)
-platformio run -e m5tab5-esp32p4
+# Build (creates .pio/build/esp32s3-poe-eth/firmware.bin)
+platformio run -e esp32s3-poe-eth
 
-# Or with verbose output
-platformio run -e m5tab5-esp32p4 -v
+# The hash that goes in the OTA command
+sha256sum .pio/build/esp32s3-poe-eth/firmware.bin
 ```
 
 ### Host on Web Server
 
 ```bash
-# Copy to web-accessible location
-cp .pio/build/m5tab5-esp32p4/firmware.bin /var/www/html/firmware_0.0.2.bin
+# Copy to the HTTPS server's document root
+cp .pio/build/esp32s3-poe-eth/firmware.bin /var/www/html/firmware_0.0.2.bin
 
-# Verify accessibility
-curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
-# HTTP/1.1 200 OK
+# Verify it's served (-k: the device doesn't check the certificate either)
+curl -kI https://192.168.2.1:8443/firmware_0.0.2.bin
+# HTTP/1.0 200 OK
 ```
 
 ### Monitor Boot Count
@@ -308,8 +299,9 @@ The device ID is derived from the last 4 bytes of the chip's efuse MAC — e.g. 
 ```json
 {
   "action": "string",
-  "url": "string (for ota)",
-  "version": "string (for ota)"
+  "url": "https://... (for ota)",
+  "version": "string (for ota)",
+  "sha256": "64 hex chars (for ota, required)"
 }
 ```
 
@@ -322,7 +314,7 @@ mosquitto_pub \
   --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
   --key    ~/docker/mosquitto/mqtt/certs/client.key \
   -t 'sensors/esp32/sensor-91A0ED30/command' \
-  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
+  -m '{"action":"ota","url":"https://192.168.2.1:8443/firmware_0.1.0.bin","version":"0.1.0","sha256":"<sha256sum of the file>"}'
 ```
 
 Device only updates if `version` is numerically greater than the current version (major.minor.patch comparison — `"0.0.10"` correctly beats `"0.0.9"`).
@@ -330,13 +322,23 @@ Device only updates if `version` is numerically greater than the current version
 **Serial Output**:
 
 ```text
-[OTA] Command received - Version: 0.1.0
+[OTA] Command received - Version: 0.1.0, URL: https://192.168.2.1:8443/firmware_0.1.0.bin
 [OTA] Starting firmware update...
-[OTA] Using HTTP client
-[OTA] Pre-saving new version to NVS...
+[OTA] Image SHA-256: 1e641f12...f76fc79 (1368784 bytes)
+[OTA] Update verified! Rebooting...
 [OTA] Version saved: 0.1.0
-[OTA] Update successful! Rebooting...
 ```
+
+Refusals:
+
+```text
+ERROR: [OTA] ERROR: "sha256" (64 hex chars, sha256sum of firmware.bin) is required
+ERROR: [OTA] ERROR: URL must be https://
+ERROR: [OTA] SHA-256 mismatch — keeping the running firmware
+```
+
+On a mismatch the image has already been written to the spare slot, so the device points
+the boot partition back at the running slot and carries on. NVS versions are untouched.
 
 ### Command 2: Force Update (Bypass Version Check)
 
@@ -350,7 +352,7 @@ mosquitto_pub \
   --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
   --key    ~/docker/mosquitto/mqtt/certs/client.key \
   -t 'sensors/esp32/sensor-91A0ED30/command' \
-  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.0.9.bin","version":"0.0.9","force":true}'
+  -m '{"action":"ota","url":"https://192.168.2.1:8443/firmware_0.0.9.bin","version":"0.0.9","sha256":"<sha256sum>","force":true}'
 ```
 
 ```text
@@ -386,7 +388,7 @@ mosquitto_pub \
 }
 ```
 
-Manually switches to the previous firmware partition (same logic as auto-rollback on crash loop).
+Switches to the previous firmware partition and reboots into it (same logic as auto-rollback on crash loop).
 Only works if the alternate OTA partition contains a valid firmware image (magic byte 0xE9 present)
 — i.e. at least one successful OTA update has been performed since USB flash.
 
@@ -429,28 +431,34 @@ platformio run -e m5tab5-esp32p4 -t upload
 # 1. Update FIRMWARE_VERSION in main.cpp
 #    #define FIRMWARE_VERSION "0.1.0"
 
-# 2. Build
-pio run -e m5tab5-esp32p4
+# 2. Build and hash
+pio run -e esp32s3-poe-eth
+mkdir -p ota && cp .pio/build/esp32s3-poe-eth/firmware.bin ota/firmware_0.1.0.bin
+sha256sum ota/firmware_0.1.0.bin
 
-# 3. Copy binary into the ota/ directory, named by device and version
-cp .pio/build/m5tab5-esp32p4/firmware.bin \
-   ota/m5tab5-esp32p4/firmware_0.1.0.bin
+# 3. Serve ota/ over HTTPS with a throwaway self-signed cert
+openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=ota-bench \
+  -keyout ota/server.key -out ota/server.crt
+python3 - <<'EOF'
+import http.server, ssl, functools
+h = functools.partial(http.server.SimpleHTTPRequestHandler, directory="ota")
+s = http.server.ThreadingHTTPServer(("192.168.2.1", 8443), h)
+c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain("ota/server.crt", "ota/server.key")
+s.socket = c.wrap_socket(s.socket, server_side=True)
+s.serve_forever()
+EOF
+# Firmware now at: https://192.168.2.1:8443/firmware_0.1.0.bin
 
-# 4. Start HTTP server from ota/ directory
-cd ota
-python -m http.server 8080
-# Firmware now at: http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin
-
-# 5. Publish MQTT command (from another terminal)
+# 4. Publish MQTT command (from another terminal)
 mosquitto_pub \
   -h 192.168.2.1 -p 8883 \
   --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
   --cert   ~/docker/mosquitto/mqtt/certs/client.crt \
   --key    ~/docker/mosquitto/mqtt/certs/client.key \
   -t 'sensors/esp32/sensor-91A0ED30/command' \
-  -m '{"action":"ota","url":"http://192.168.2.1:8080/m5tab5-esp32p4/firmware_0.1.0.bin","version":"0.1.0"}'
+  -m '{"action":"ota","url":"https://192.168.2.1:8443/firmware_0.1.0.bin","version":"0.1.0","sha256":"<from step 2>"}'
 
-# 6. Monitor MQTT traffic
+# 5. Monitor MQTT traffic
 mosquitto_sub \
   -h 192.168.2.1 -p 8883 \
   --cafile ~/docker/mosquitto/mqtt/certs/ca.crt \
@@ -459,7 +467,9 @@ mosquitto_sub \
   -t 'sensors/#' -v
 ```
 
-See `docs/dev-environment.md` for full dev environment setup (DHCP server, Mosquitto broker, OTA HTTP server).
+See `docs/dev-environment.md` for full dev environment setup (DHCP server, Mosquitto broker).
+
+The commands above assume the device is on the bench broker (`192.168.2.1`, compiled-in certs). Otherwise publish through whichever broker it uses.
 
 ---
 
@@ -537,13 +547,10 @@ If NVS has no previous version at all:
 
 ### 2. Dual OTA Partitions
 
-**Hardware Protection**: If new firmware (app1) crashes during boot:
-
-1. Bootloader detects crash (watchdog timeout)
-2. Bootloader reverts to previous firmware (app0)
-3. Device continues running old firmware
-
-**This is transparent** - no code intervention needed.
+The running slot is never overwritten, so a failed or refused download leaves the device as it was.
+There is no bootloader-level rollback: this firmware does not enable or call ESP-IDF's app rollback
+(`esp_ota_mark_app_valid_cancel_rollback`). A new image that crashes is caught by the boot counter
+above, which needs five crashing boots.
 
 ### 3. Version Comparison (Numeric Semver)
 
@@ -564,21 +571,16 @@ static bool isNewerVersion(const String& a, const String& b) {
 
 Add `"force":true` to the MQTT command to bypass this check and re-flash or downgrade.
 
-### 4. Pre-Save Before Reboot
+### 4. SHA-256 Before Reboot
 
-Version is saved to NVS **before** HTTPUpdate reboots:
+HTTPUpdate's own reboot is turned off (`rebootOnUpdate(false)`). After the download the device
+hashes the image in the new slot (`esp_image_get_metadata()` gives its length, which equals the
+file size) and compares it with the command's `sha256`. Only on a match does it save the new
+version to NVS and reboot. A failed download or mismatch leaves NVS untouched.
 
-```cpp
-// Pre-save new version
-saveVersionInfo(version);
-
-// Then download and flash
-ret = httpUpdate.update(client, url, currentVersion);
-
-// If successful, reboot happens - version is already saved
-```
-
-Ensures correct version is reported after reboot.
+The command arrives over mutual-TLS MQTT, so the hash is authenticated even though the file
+server's certificate isn't checked, and even if the server is compromised. This is integrity, not code signing: anyone who can publish to the command topic
+can still push firmware.
 
 ---
 
@@ -601,38 +603,25 @@ platformio run -e m5tab5-esp32p4 --target clean
 platformio run -e m5tab5-esp32p4 -v
 ```
 
-### Issue: HTTP Download Fails
+### Issue: Download Fails
 
-**Symptom**: `[391819][E][HTTPUpdate.cpp:263] handleUpdate(): HTTP error: connection refused`
+**Symptom**: `[OTA] Update failed, error: -1` with `start_ssl_client` errors
 
-**Cause**: URL not reachable or wrong scheme
+**Cause**: Server unreachable, not speaking TLS, or the path is wrong
 
 **Fix**:
 
 ```bash
-# Verify URL is accessible
-curl -I http://192.168.0.94:8080/firmware_0.0.2.bin
-# Should return: HTTP/1.1 200 OK
-
-# Check scheme: must be http:// or https://
-# Not: http192.168.0.94 (missing ://)
+curl -kI https://192.168.2.1:8443/firmware_0.0.2.bin
+# Should return 200
 ```
 
-### Issue: Device boots with old version after OTA
+### Issue: SHA-256 mismatch
 
-**Symptom**: Serial shows `[OTA] Current version: 0.0.1` after sending 0.0.2 update
+**Symptom**: `[OTA] SHA-256 mismatch — keeping the running firmware`
 
-**Cause**: Version not saved before reboot (old code)
-
-**Fix**: Ensure latest code with `saveVersionInfo()` called **before** HTTPUpdate:
-
-```cpp
-// Pre-save new version
-saveVersionInfo(version);
-
-// Then download
-ret = httpUpdate.update(client, url, currentVersion);
-```
+**Cause**: The command's hash isn't `sha256sum` of the file being served (often a rebuild after
+hashing). The log line before it shows the hash the device computed.
 
 ### Issue: Boot count keeps incrementing
 
@@ -646,19 +635,19 @@ ret = httpUpdate.update(client, url, currentVersion);
 
 ```bash
 # Monitor serial output during OTA
-# Look for: [OTA] Update successful! Rebooting...
+# Look for: [OTA] Update verified! Rebooting...
 
 # If not seen, check MQTT messages
-mosquitto_sub -v -h 192.168.0.94 -t "devices/sensor-*/command"
+mosquitto_sub -v -h 192.168.2.1 -p 8883 --cafile ca.crt --cert client.crt --key client.key -t "sensors/esp32/+/command"
 ```
 
 ### Issue: Firmware too large for partition
 
 **Symptom**: Build error `firmware too large: 1,317,872 bytes (maximum is 1,310,720)`
 
-**Cause**: Default partition table has ~1.25 MB OTA slots — too small for ESP32-P4 firmware
+**Cause**: Default partition table has ~1.25 MB OTA slots — too small for this firmware
 
-**Fix**: Add to `platformio.ini` for the P4 environment:
+**Fix**: Add to `platformio.ini` for the environment:
 
 ```ini
 board_build.partitions = default_16MB.csv
@@ -703,29 +692,6 @@ event. If the cable is plugged in after boot, the device acquires an IP and anno
 No reboot required. If this is not happening, verify the event handler is registered before
 `ETH.begin()` in `network.cpp`.
 
-### Issue: HTTPS Certificate Error (Production)
-
-**Symptom**: `[E][NetworkClientSecure.cpp:159] connect(): start_ssl_client: connect failed`
-
-**Cause**: Self-signed certificate or missing CA
-
-**Fix for self-signed certs** (development only):
-
-```cpp
-// In ota_manager.cpp, temporarily:
-NetworkClientSecure client;
-client.setInsecure();  // ⚠️ NOT for production!
-ret = httpUpdate.update(client, url, currentVersion);
-```
-
-**Fix for production**: Use valid SSL certificate or pin CA:
-
-```cpp
-NetworkClientSecure client;
-client.setCACert(ca_cert);  // Your CA certificate PEM
-ret = httpUpdate.update(client, url, currentVersion);
-```
-
 ---
 
 ## File Reference
@@ -737,7 +703,6 @@ ret = httpUpdate.update(client, url, currentVersion);
 | `src/ota_manager.h`   | OTA Manager header, public API               |
 | `src/ota_manager.cpp` | OTA Manager implementation                   |
 | `src/main.cpp`        | Application entry, OTA initialization        |
-| `partitions_ota.csv`  | Flash partition layout (2 OTA slots)         |
 | `platformio.ini`      | PlatformIO config, partition table reference |
 
 ### Key Code Sections in main.cpp
@@ -767,7 +732,7 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
 ```cpp
 void setup() {
     otaManager.begin();
-    if (otaManager.isFirstBoot()) {
+    if (otaManager.getCurrentVersion() != FIRMWARE_VERSION) {
         otaManager.saveVersionInfo(FIRMWARE_VERSION);
     }
     mqttManager.setMessageCallback(handleMQTTMessage);
@@ -791,15 +756,15 @@ if (mqttManager.isConnected()) {
 The OTA system is production-ready with:
 
 - [x]  MQTT-triggered updates
-- [x]  HTTP/HTTPS support (auto-detect by URL scheme)
-- [x]  Works over WiFi **and** RMII Ethernet (NetworkClient/NetworkClientSecure)
+- [x]  HTTPS only (server certificate not verified; the SHA-256 protects the image)
+- [x]  SHA-256 of the image checked before it can boot
+- [x]  Works over WiFi **and** Ethernet (NetworkClientSecure); tested on the S3 2026-10-29
 - [x]  Boot counter watchdog — auto-rollback on crash loop
 - [x]  Rollback safety — validates target partition before switching
-- [x]  Dual partition failsafe (hardware bootloader protection)
 - [x]  Version tracking in NVS (current + previous)
 - [x]  Numeric semver comparison — `0.0.10` > `0.0.9`
 - [x]  Force flag — re-flash or downgrade on demand
 - [x]  DHCP reconnect on cable plug without reboot (RMII)
-- [x] Correct 16 MB partition table for ESP32-P4
+- [x]  16 MB partition table on both targets
 
 Deploy with confidence via MQTT commands to individual devices.
