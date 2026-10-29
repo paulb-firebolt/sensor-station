@@ -262,9 +262,8 @@ bool MQTTManager::saveConfig(bool en, const String& brk, uint16_t prt, const Str
         mqttClient.setServer(broker.c_str(), port);
     }
 
-    // Reset reconnect timer and backoff so update() triggers a connection attempt immediately
-    lastReconnectAttempt = 0;
-    reconnectAttempts = 0;
+    // Drop the live session too, or it stays on the old broker until it fails
+    reconnectNow();
     connected = false;
 
     return true;

@@ -1,6 +1,6 @@
 /**
  * @file ota_manager.h
- * @brief HTTP/HTTPS OTA firmware update manager with crash-loop detection and partition rollback.
+ * @brief HTTPS OTA firmware update manager with crash-loop detection and partition rollback.
  *
  * Provides firmware update from a URL, SHA-256 integrity validation, boot-count-based
  * crash-loop detection with automatic rollback, and NVS-backed version tracking across reboots.
@@ -9,7 +9,6 @@
 #define OTA_MANAGER_H
 
 #include <Arduino.h>
-#include <NetworkClient.h>
 #include <NetworkClientSecure.h>
 #include <HTTPClient.h>
 #include <HTTPUpdate.h>
@@ -53,7 +52,7 @@ public:
      * @brief Parse and execute an OTA JSON command received from MQTT.
      *
      * Recognised fields: @c action (@c "ota", @c "rollback", @c "status"),
-     * @c url, @c version, @c sha256, and @c force.  Calls @c updateFromURL()
+     * @c url, @c version, @c sha256 (required) and @c force.  Calls @c updateFromURL()
      * after extracting the relevant fields.  If @c url is
      * absent the method attempts mDNS discovery of the @c _ota._tcp service
      * to determine the URL automatically.
@@ -67,18 +66,17 @@ public:
     /**
      * @brief Download firmware from a URL and flash it to the inactive OTA partition.
      *
-     * Supports both plain HTTP and HTTPS targets.  The target version string is
-     * written to NVS before flashing begins so that it survives the subsequent
-     * reboot even if the device resets mid-flash.
+     * HTTPS only, but the server certificate is not verified (field servers may
+     * be self-signed). Integrity comes from the SHA-256, which must match the hash
+     * in the command (delivered over mutual-TLS MQTT) before the device boots it.
+     * The version is written to NVS only after the image is verified.
      *
-     * @param url      HTTP or HTTPS URL of the firmware binary.
+     * @param url      HTTPS URL of the firmware binary.
      * @param version  Version string to record in NVS for the new image.
-     * @param sha256   Optional expected SHA-256 hex digest; passed to
-     *                 @c validateSHA256() after download.
-     * @return @c true if the firmware was flashed and the device is about to
-     *         reboot, @c false if the update failed.
+     * @param sha256   Expected SHA-256 hex digest of the firmware binary.
+     * @return @c false if the update failed; on success the device reboots.
      */
-    bool updateFromURL(const String& url, const String& version, const String& sha256 = "");
+    bool updateFromURL(const String& url, const String& version, const String& sha256);
 
     /**
      * @brief Switch the boot partition to the non-running OTA slot and swap NVS version strings.
@@ -107,15 +105,16 @@ public:
     bool isFirstBoot(void);
 
     /**
-     * @brief Perform a SHA-256 integrity check on the running firmware image.
+     * @brief Check the SHA-256 of the firmware image in an app partition.
      *
-     * @note Not yet implemented; always returns @c true.
+     * Hashes the image as written (the same bytes as @c firmware.bin), so the
+     * expected value is @c sha256sum of the file.
      *
-     * @param expectedHash  Hex-encoded SHA-256 digest to verify against.
-     * @return @c true if the digest matches (or validation is skipped),
-     *         @c false on mismatch.
+     * @param part          App partition holding the downloaded image.
+     * @param expectedHash  Hex-encoded SHA-256 digest (case-insensitive).
+     * @return @c true if the digest matches.
      */
-    bool validateSHA256(const String& expectedHash);
+    bool validateSHA256(const esp_partition_t* part, const String& expectedHash);
 
     /**
      * @brief Return a JSON string describing the current OTA state.
@@ -156,8 +155,6 @@ private:
     void loadVersionInfo(void);
     void incrementBootCount(void);
     void resetBootCount(void);
-    bool verifyFirmwareSignature(void);
-    String calculateSHA256(const uint8_t* data, size_t len);
 };
 
 #endif // OTA_MANAGER_H

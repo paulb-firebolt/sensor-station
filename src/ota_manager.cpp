@@ -1,7 +1,8 @@
 // ota_manager.cpp
 #include "ota_manager.h"
 #include "network.h"
-#include <mbedtls/md.h>
+#include <mbedtls/sha256.h>
+#include <esp_image_format.h>
 #include "log.h"
 
 OTAManager::OTAManager()
@@ -139,6 +140,10 @@ bool OTAManager::handleOTACommand(const JsonDocument& command) {
 
     String version = command["version"].is<String>() ? command["version"].as<String>() : "unknown";
     String sha256 = command["sha256"].is<String>() ? command["sha256"].as<String>() : "";
+    if (sha256.length() != 64) {
+        LOG_E("[OTA] ERROR: \"sha256\" (64 hex chars, sha256sum of firmware.bin) is required\n");
+        return false;
+    }
 
     LOG_I("[OTA] Command received - Version: %s, URL: %s\n", version.c_str(), url.c_str());
 
@@ -166,35 +171,35 @@ bool OTAManager::updateFromURL(const String& url, const String& version, const S
     LOG_I("[OTA] URL: %s\n", url.c_str());
     LOG_I("[OTA] Target version: %s\n", version.c_str());
 
-    // Save new version BEFORE update (so it persists after reboot)
-    LOG_I("[OTA] Pre-saving new version to NVS...\n");
-    saveVersionInfo(version);
-
-    // Detect HTTP vs HTTPS and create appropriate client
-    t_httpUpdate_return ret;
-
-    if (url.startsWith("https://")) {
-        LOG_I("[OTA] Using HTTPS client\n");
-        NetworkClientSecure client;
-        // client.setInsecure();  // uncomment for self-signed certs (dev only)
-        ret = httpUpdate.update(client, url, currentVersion);
-    } else if (url.startsWith("http://")) {
-        LOG_I("[OTA] Using HTTP client\n");
-        NetworkClient client;
-        ret = httpUpdate.update(client, url, currentVersion);
-    } else {
-        LOG_E("[OTA] ERROR: Invalid URL scheme (must be http:// or https://)\n");
+    // Reboot ourselves once the image is verified, not inside httpUpdate
+    httpUpdate.rebootOnUpdate(false);
+    if (!url.startsWith("https://")) {
+        LOG_E("[OTA] ERROR: URL must be https://\n");
         updateInProgress = false;
         return false;
     }
+    // Encrypted, but the server isn't verified: field servers may be self-signed or
+    // any CA. Integrity comes from the sha256 in the mTLS-delivered command instead.
+    NetworkClientSecure client;
+    client.setInsecure();
+    t_httpUpdate_return ret = httpUpdate.update(client, url, currentVersion);
 
     switch (ret) {
-        case HTTP_UPDATE_OK:
-            LOG_I("[OTA] Update successful! Rebooting...\n");
-            // Version already saved above, just reset boot count
-            resetBootCount();
-            // ESP32 will reboot automatically
+        case HTTP_UPDATE_OK: {
+            // Update.end() has already made the new image the boot partition
+            const esp_partition_t* running = esp_ota_get_running_partition();
+            if (!validateSHA256(esp_ota_get_boot_partition(), sha256)) {
+                LOG_E("[OTA] SHA-256 mismatch — keeping the running firmware\n");
+                esp_ota_set_boot_partition(running);
+                updateInProgress = false;
+                return false;
+            }
+            LOG_I("[OTA] Update verified! Rebooting...\n");
+            saveVersionInfo(version);
+            delay(500);
+            ESP.restart();
             return true;
+        }
 
         case HTTP_UPDATE_NO_UPDATES:
             LOG_I("[OTA] No update available (same version)\n");
@@ -330,13 +335,30 @@ void OTAManager::checkBootStability(void) {
     }
 }
 
-bool OTAManager::validateSHA256(const String& expectedHash) {
-    // This would require reading back the OTA partition and hashing it
-    // For now, we rely on HTTPUpdate's built-in CRC
-    // A full implementation would:
-    // 1. Read the OTA partition
-    // 2. Calculate SHA256 using mbedtls
-    // 3. Compare with expected hash
-    LOG_D("[OTA] SHA256 validation not yet implemented\n");
-    return true;  // Accept for now
+bool OTAManager::validateSHA256(const esp_partition_t* part, const String& expectedHash) {
+    // image_len covers the whole file as built: segments, checksum and appended digest
+    const esp_partition_pos_t pos = {part->address, part->size};
+    esp_image_metadata_t meta;
+    if (esp_image_get_metadata(&pos, &meta) != ESP_OK) {
+        LOG_E("[OTA] ERROR: Downloaded image is not a valid app image\n");
+        return false;
+    }
+
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0);
+    uint8_t buf[1024];
+    for (uint32_t off = 0; off < meta.image_len; off += sizeof(buf)) {
+        size_t n = min((uint32_t)sizeof(buf), meta.image_len - off);
+        esp_partition_read(part, off, buf, n);
+        mbedtls_sha256_update(&ctx, buf, n);
+    }
+    uint8_t digest[32];
+    mbedtls_sha256_finish(&ctx, digest);
+    mbedtls_sha256_free(&ctx);
+
+    char hex[65];
+    for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
+    LOG_I("[OTA] Image SHA-256: %s (%u bytes)\n", hex, (unsigned)meta.image_len);
+    return expectedHash.equalsIgnoreCase(hex);
 }

@@ -1,5 +1,5 @@
 // Define your firmware version at the top of main.cpp
-#define FIRMWARE_VERSION "0.0.15"
+#define FIRMWARE_VERSION "0.0.16"
 
 #include <Arduino.h>
 #include <nvs_flash.h>
@@ -296,7 +296,10 @@ void handleMQTTMessage(char* topic, byte* payload, unsigned int length) {
             otaManager.handleOTACommand(doc);
         } else if (action == "rollback") {
             LOG_I("[MQTT] Rollback command detected!\n");
-            otaManager.rollbackToPrevious();
+            if (otaManager.rollbackToPrevious()) {
+                delay(500);
+                ESP.restart();  // the version swap is only true once the other slot runs
+            }
         } else if (action == "status") {
             LOG_I("[MQTT] Status command detected!\n");
             String status = otaManager.getOTAStatus();

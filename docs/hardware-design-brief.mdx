@@ -2,7 +2,7 @@
 title: Sensor Station v3 — Hardware Design Brief
 description: Starting brief for a hardware design partner covering the v3 base station and battery PIR sensor node.
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-10-29T23:00:00Z
+lastModified: 2026-10-30T01:00:00Z
 ---
 
 :::info
@@ -410,7 +410,7 @@ source. Arbitration between PoE and USB-C must never back-feed VBUS.
 | Item | PoC | Production need |
 | --- | --- | --- |
 | Host flash and PSRAM | ESP32-P4NRW32 (32 MB in-package PSRAM) with 16 MB external flash on the M5Stack board; current firmware images are about 1.2 MB | Room for two firmware images (OTA with rollback) plus certificates; sizes to confirm |
-| Host OTA | Triggered over MQTT; downloads over HTTPS (HTTP also accepted), checks SHA256, supports rollback | Keep, HTTPS only (`SEC-1`) |
+| Host OTA | Triggered over MQTT; HTTPS only (server certificate not verified, so self-signed works), SHA-256 required and checked before boot, rollback. Tested on the ESP32-S3 2026-10-29 | Done (`SEC-1`) |
 | CC1312 update | No reflash path on the PoC yet | Required: host-driven reflash through the ROM bootloader (`PLT-2`). The ROM bootloader has no rollback, so the host keeps the last good image and reflashes it on failure. A bad write to the CC1312's configuration area (CCFG) can disable the bootloader, so cJTAG pads stay as the recovery path. |
 | C6 update | ESP-Hosted-MCU supports updating the C6 from the host | Keep, if the C6 is used |
 | Sensor update | Not implemented | To decide; it may need external SPI flash on the sensor |
