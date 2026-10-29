@@ -155,10 +155,30 @@ String generateHostname(void) {
 
 // Event handler for RMII Ethernet link/IP changes.
 // LwIP fires these automatically on cable plug/unplug and DHCP completion.
+static unsigned long linkUpSince = 0;  // millis() of the last link-up, 0 while down
+
+// mDNS on Arduino 3.x serves every netif from one begin() and follows their
+// address changes, so it starts once, from initNetwork() on the main task.
+// Repeat begin()/addService calls only produced "Service already exists" errors.
+static void startMdns(void) {
+    static bool started = false;
+    if (started || hostname.length() == 0) {
+        return;
+    }
+    started = MDNS.begin(hostname.c_str());
+    if (started) {
+        MDNS.addService("http", "tcp", 80);
+        LOG_I("[mDNS] Responder started: %s.local", hostname.c_str());
+    } else {
+        LOG_W("[mDNS] Failed to start");
+    }
+}
+
 static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
     switch (event) {
         case ARDUINO_EVENT_ETH_CONNECTED:
             LOG_I("[ETH] Link UP — waiting for DHCP...");
+            linkUpSince = millis() | 1;  // never 0
             break;
         case ARDUINO_EVENT_ETH_GOT_IP:
             // applyAutoIP()'s static config fires this too; it is not a lease.
@@ -169,14 +189,10 @@ static void onEthEvent(arduino_event_id_t event, arduino_event_info_t info) {
             usingAutoIP = false;
             dhcpRetryStart = 0;
             ethernetInitialized = true;
-            // Re-announce mDNS on the new IP
-            if (hostname.length() > 0) {
-                MDNS.begin(hostname.c_str());
-                MDNS.addService("http", "tcp", 80);
-            }
             break;
         case ARDUINO_EVENT_ETH_DISCONNECTED:
             LOG_I("[ETH] Link DOWN");
+            linkUpSince = 0;
             ethernetInitialized = false;
             dhcpRetryStart = 0;
             closeDhcpProbe();
@@ -219,24 +235,22 @@ bool initEthernet(void) {
     LOG_I("Ethernet MAC: %s", getMACAddress().c_str());
     LOG_I("Hostname (from ETH MAC): %s.local", hostname.c_str());
 
-    // Wait for DHCP / link at boot (non-fatal if cable not present yet)
+    // Wait up to ETH_LINK_WAIT_MS for the link, then DHCP_TIMEOUT from link-up for a
+    // lease (non-fatal if the cable isn't present yet). Timing DHCP from link-up
+    // matters on the W5500, whose autonegotiation takes a couple of seconds.
     LOG_I("Waiting for DHCP");
-    unsigned long timeout = millis() + DHCP_TIMEOUT;
-    while (!ETH.hasIP() && millis() < timeout) {
+    unsigned long start = millis();
+    while (!ETH.hasIP() && (linkUpSince ? millis() - linkUpSince < DHCP_TIMEOUT
+                                        : millis() - start < ETH_LINK_WAIT_MS)) {
         delay(200);
         LOG_D(".");
     }
     LOG_I("\n");
 
     if (!ETH.hasIP()) {
-        applyAutoIP();
+        // No lease: checkNetworkStatus() applies AutoIP once the link has been up
+        // DHCP_TIMEOUT, on its first pass or after a later plug-in.
         ethernetInitialized = true;
-
-        if (hostname.length() > 0) {
-            MDNS.begin(hostname.c_str());
-            MDNS.addService("http", "tcp", 80);
-            LOG_W("[ETH] mDNS started on AutoIP: %s.local", hostname.c_str());
-        }
         return true;
     }
 
@@ -426,19 +440,6 @@ bool initWiFi(WiFiManager& wifiMgr) {
         return false;
     }
 
-    // Start WiFi mDNS
-    LOG_I("Starting mDNS over WiFi...");
-    if (MDNS.begin(hostname.c_str())) {
-        LOG_I("WiFi mDNS responder started: %s.local", hostname.c_str());
-        LOG_I("Advertising IP: %s", WiFi.localIP().toString().c_str());
-
-        // Add HTTP service for discovery
-        MDNS.addService("http", "tcp", 80);
-        LOG_I("WiFi service registered: _http._tcp on port 80");
-    } else {
-        LOG_W("WARNING: WiFi mDNS failed to start");
-    }
-
     return true;
 #endif // !HAS_WIFI
 }
@@ -461,6 +462,7 @@ bool initNetwork(WiFiManager& wifiMgr) {
 
     // Initialize Ethernet first
     bool ethSuccess = initEthernet();
+    startMdns();  // hostname is set by initEthernet(); covers WiFi too
     if (!ethSuccess) {
         LOG_W("WARNING: Ethernet initialization failed");
         LOG_W("Continuing with WiFi only...\n");
@@ -523,6 +525,13 @@ void checkNetworkStatus(void) {
     // Update WiFi mDNS (ESP mDNS handles updates automatically, but we can check connection)
     if (wifiInitialized && wifiManagerPtr) {
         wifiManagerPtr->checkConnection();
+    }
+
+    // Link up for DHCP_TIMEOUT with no lease (at boot, or after a cable move to a
+    // network without DHCP): fall back to AutoIP.
+    if (!usingAutoIP && !dhcpRetryStart && linkUpSince && !ETH.hasIP() &&
+        currentMillis - linkUpSince >= DHCP_TIMEOUT) {
+        applyAutoIP();
     }
 
     // While on AutoIP, probe for a DHCP server that started after us (e.g. after

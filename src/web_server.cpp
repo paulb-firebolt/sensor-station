@@ -46,16 +46,10 @@ void DeviceWebServer::begin(void) {
     // Load admin password from NVS
     loadAdminPassword();
 
-    // Check if Ethernet-only mode is configured
-    Preferences netPrefs;
-    bool ethernetOnly = false;
-    if (netPrefs.begin("network_config", true)) {  // Read-only
-        ethernetOnly = netPrefs.getBool("ethernet_only", false);
-        netPrefs.end();
-    }
-
-    // Only start WiFi web server if NOT in Ethernet-only mode
-    if (!ethernetOnly) {
+    // One lwIP web server serves every interface, so it always starts, including
+    // in Ethernet-only mode. (Skipping it there dated from the W5500, which had a
+    // separate Ethernet server; on lwIP boards it left the device with no web UI.)
+    {
         // Setup WiFi WebServer routes
         webServer.on("/", HTTP_GET, [this]() { handleRoot(); });
         webServer.on("/api/findme", HTTP_POST, [this]() { handleFindMe(); });
@@ -63,6 +57,7 @@ void DeviceWebServer::begin(void) {
         webServer.on("/api/setup", HTTP_POST, [this]() { handleDeviceSetup(); });
 #endif
 #if HAS_WIFI
+        webServer.on("/wifi", HTTP_GET, [this]() { handleWiFiPage(); });
         webServer.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
         webServer.on("/api/save", HTTP_POST, [this]() { handleSave(); });
 #endif
@@ -84,7 +79,7 @@ void DeviceWebServer::begin(void) {
         webServer.collectHeaders(headers, 3);
 
         webServer.begin();
-        LOG_I("[Web] WiFi server started on port 80\n");
+        LOG_I("[Web] Web server started on port 80\n");
 
         // Start DNS server for captive portal if in AP mode
         if (wifiManager.isAPActive()) {
@@ -93,8 +88,6 @@ void DeviceWebServer::begin(void) {
             dnsActive = true;
             LOG_I("[DNS] Captive portal DNS started\n");
         }
-    } else {
-        LOG_I("[Web] Ethernet-only mode - WiFi web server disabled\n");
     }
 
 }
@@ -199,6 +192,15 @@ void DeviceWebServer::handleRoot(void) {
 #endif
     // Normal mode - show read-only status page
     webServer.send(200, "text/html", generateStatusPage());
+}
+
+// WiFi settings after setup: the provisioning form, admin-only outside AP mode.
+// It posts to /api/save, which has the same rule.
+void DeviceWebServer::handleWiFiPage(void) {
+    if (!wifiManager.isAPActive() && !requireAuth()) {
+        return;
+    }
+    webServer.send(200, "text/html", generateProvisioningPage());
 }
 
 // Handle WiFi scan request
@@ -418,6 +420,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
 </head>
 <body>
   <div class="container">
+    <p style="margin-bottom:10px;"><a href="/" style="color:#667eea;text-decoration:none;">&#8592; Status</a></p>
     <h1>Sensor Setup</h1>
     <p class="subtitle">Configure WiFi network connection</p>
 
@@ -454,7 +457,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
 
       <div class="form-group">
         <label>Admin Password (for /mqtt configuration)</label>
-        <input type="password" id="admin-password" name="admin_password" placeholder="Secure MQTT settings access">
+        <input type="password" id="admin-password" name="admin_password" placeholder="Leave blank to keep the current password">
       </div>
 
       <div class="form-group">
@@ -463,7 +466,7 @@ String DeviceWebServer::generateProvisioningPage(void) {
       </div>
 
       <div class="info">
-        ℹ️ Admin password protects MQTT configuration page. Leave empty for no authentication.
+        ℹ️ The admin password protects the MQTT and WiFi settings. Leave it blank to keep the current one; only a factory reset removes it.
       </div>
 
       <button type="submit">Save & Reboot</button>
@@ -720,6 +723,9 @@ String DeviceWebServer::generateStatusPage(void) {
       <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <button onclick="fetch('/api/findme',{method:'POST'})" style="padding:10px 20px;background:#667eea;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">Find Me</button>
         <a href="/mqtt" style="padding:10px 20px;background:#764ba2;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">MQTT</a>)HTML"
+#if HAS_WIFI
+        R"HTML(<a href="/wifi" style="padding:10px 20px;background:#175f7e;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">WiFi</a>)HTML"
+#endif
 #if ENABLE_CC1312
         R"HTML(<a href="/cc1312" style="padding:10px 20px;background:#28a745;color:white;border-radius:6px;font-size:14px;font-weight:600;text-decoration:none;">Sub-1GHz</a>)HTML"
 #endif

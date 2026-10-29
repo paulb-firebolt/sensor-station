@@ -1,7 +1,7 @@
 ---
 title: ESP32-C6 WiFi Co-processor — Pin Plan and Code Changes
 created: 2026-09-28T00:00:00Z
-lastModified: 2026-10-29T20:00:00Z
+lastModified: 2026-10-30T00:00:00Z
 ---
 
 Plan for adding an external ESP32-C6 to the M5Stack Unit PoE P4 so the P4 can
@@ -365,7 +365,7 @@ What changed from this plan:
 
 ## Suggested order of work
 
-Steps 1–5 are done (2026-10-29). Next is step 6.
+Steps 1–6 are done (2026-10-29). Next is step 7.
 
 1. Measure the grey-pin I/O voltage and choose Option A or B.
 2. Flash the esp-hosted slave 2.11.x onto the C6. Wire it with pull-ups.
@@ -376,7 +376,9 @@ Steps 1–5 are done (2026-10-29). Next is step 6.
    Ethernet-only behaviour is unchanged when the C6 is unplugged.
 5. Interface policy and MQTT reconnect (change 3). Tested by switching the WiFi
    access point off and on with Ethernet on a DHCP lease.
-6. Web UI WiFi section, status JSON, then docs.
+6. Web UI WiFi section, status JSON, then docs. Done: `/wifi` (admin-only) reuses
+   the provisioning form. Tested on the ESP32-S3 by moving to another network and
+   then recovering over Ethernet.
 7. C6 OTA over MQTT (change 5).
 
 ## Open questions

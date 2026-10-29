@@ -70,7 +70,8 @@
 #endif // WIFI_HOSTED
 
 // Network configuration
-const unsigned long DHCP_TIMEOUT = 5000; // 5 s: AutoIP-only sites want a quick fallback
+const unsigned long ETH_LINK_WAIT_MS = 3000; // boot: wait this long for the Ethernet link
+const unsigned long DHCP_TIMEOUT = 5000; // 5 s from link-up: AutoIP-only sites want a quick fallback
 const unsigned long DHCP_PROBE_INTERVAL_MS = 30000; // DHCP server probe interval while on AutoIP
 
 /**

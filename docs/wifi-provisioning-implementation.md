@@ -1,7 +1,7 @@
 ---
 title: WiFi Provisioning Implementation - Complete Guide
 created: 2025-12-15T14:18:00Z
-lastModified: 2026-10-29T21:00:00Z
+lastModified: 2026-10-30T00:00:00Z
 ---
 
 ## Overview
@@ -184,6 +184,45 @@ if (linkStatus == LinkON && lastLinkStatus == LinkOFF) {
 - A press counts only on the first edge after the line has been quiet for 50 ms, so contact bounce on release doesn't add presses.
 
 **Key Learning:** check what the board hardware does with a button before giving it a long-press function.
+
+### 6. Changing WiFi After Setup
+
+**Implementation:** `GET /wifi`, linked as the **WiFi** button on the status page.
+It serves the same form as the provisioning AP: scanned network dropdown,
+password, Ethernet-only option and an optional admin password change.
+
+- **Admin login required** outside AP provisioning. The same rule applies to
+  `/api/scan` and `/api/save`, which the page calls.
+- **Blank admin password fields keep the current password.** Only a factory
+  reset removes it.
+- **Saving reboots the device** onto the new network. If that network is wrong
+  or unreachable, the device is still reachable over Ethernet (a DHCP lease, or
+  AutoIP with DHCP probing), so `/wifi` can fix it from there.
+
+### 7. Finding the Device on Site
+
+The device advertises `sensor-XXXXXXXX.local` with `_http._tcp` on port 80
+over both Ethernet and WiFi. mDNS starts once at boot and follows address
+changes by itself.
+
+**Ethernet addressing:**
+
+- **DHCP:** the device waits 5 seconds after the link comes up. This applies at
+  boot and when the cable is moved, with no reboot needed.
+- **No DHCP answer:** the device takes an AutoIP address (169.254.x.x). It
+  sends a DHCP DISCOVER every 30 seconds and moves to DHCP only once a server
+  replies. On the bench the lease arrived 25 seconds after dnsmasq started.
+
+**From an engineer's laptop on an AutoIP-only network**, run
+`avahi-browse -rt _http._tcp`. The laptop needs a link-local address
+(169.254.x.x) of its own:
+
+- Set the NetworkManager connection to **Link-Local Only**.
+- Make sure the laptop has **no other address on that port**.
+
+The device ignores mDNS queries and HTTP requests from off-subnet addresses. A
+laptop with a static 192.168.x.x address can see the device answer ARP but
+cannot resolve or open it.
 
 ## Lessons Learned
 
