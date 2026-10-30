@@ -383,12 +383,15 @@ public:
     void update() {
         // Re-arm on a HIGH observation so we only trigger on falling edges.
         // This prevents re-reading the same frame while DRDY is still asserted.
-        if (digitalRead(CC1312_DRDY_PIN) == HIGH) {
+        // Also re-arm if DRDY has stayed LOW for 1 s after a read: the frame was
+        // missed or the transfer failed, and the coordinator is still waiting.
+        if (digitalRead(CC1312_DRDY_PIN) == HIGH || millis() - _drdyReadAt > 1000) {
             _drdyArmed = true;
         }
 
         if (_drdyArmed && digitalRead(CC1312_DRDY_PIN) == LOW) {
             _drdyArmed = false;  // disarm until DRDY goes high again
+            _drdyReadAt = millis();
             _drdyTriggers++;
             _spi.beginTransaction(SPISettings(CC1312_SPI_FREQ, MSBFIRST, SPI_MODE1));
             digitalWrite(CC1312_CS_PIN, LOW);
@@ -442,7 +445,8 @@ public:
                                   triggers, errors, _lastErrorByte, newBytes, _pendingCount);
                 } else if ((now - _lastByteAt) > 35000) {
                     // Only warn once the silence window exceeds 35 s
-                    LOG_W("[CC1312] No data in 35s — check DRDY (G12), CS (G11), SPI wiring and 3V3\n");
+                    LOG_W("[CC1312] No data in 35s — DRDY (GPIO%d) is %s; check CS (GPIO%d), SPI wiring and 3V3\n",
+                          CC1312_DRDY_PIN, digitalRead(CC1312_DRDY_PIN) ? "high" : "LOW", CC1312_CS_PIN);
                 }
 
                 _lastByteCount = _bytesSeen;
@@ -613,6 +617,7 @@ private:
     MQTTManager* _mqtt;
 
     bool _drdyArmed;  // true = ready to read on next DRDY falling edge
+    uint32_t _drdyReadAt = 0;  // millis() of the last DRDY-triggered read
     uint32_t _bytesSeen;
     unsigned long _lastByteAt;
     uint32_t _drdyTriggers;
