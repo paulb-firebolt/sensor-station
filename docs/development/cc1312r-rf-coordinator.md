@@ -435,7 +435,7 @@ Header-only class. Constructor takes `MQTTManager&`. No `.cpp` file.
 
 - `begin()` — initialises the SPI bus and sets CS high, DRDY as input.
 - `update()` — called every loop iteration; detects DRDY falling edge, reads one
-  frame per edge, runs the parser, fires deferred downlinks, publishes on the 10 s
+  frame per edge (and reads again if DRDY is still low 1 s later), runs the parser, fires deferred downlinks, publishes on the 10 s
   interval.
 - `handleCommand(action, doc)` — dispatches MQTT commands (accept_node, remove_node,
   discovery_on/off, sync_node_list, get_node_list, ping, get_status).
