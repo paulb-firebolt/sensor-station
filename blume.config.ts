@@ -23,7 +23,9 @@ export default defineConfig({
   feedback: false,
 
   navigation: {
-    // Doxygen HTML is copied into public/doxygen by `npm run api`.
+    // Doxygen HTML is copied into public/doxygen by `npm run api`. Blume checks nav targets
+    // against pages only, not public/ files, so it warns BLUME_NAV_MISSING_PAGE for this link;
+    // the link works.
     featured: [
       { label: "Firmware API (Doxygen)", href: "/doxygen/index.html", icon: "code" },
     ],

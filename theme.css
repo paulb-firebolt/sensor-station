@@ -1,0 +1,10 @@
+/* Blume design-token overrides (loaded last, after the defaults and blume.config.ts).
+ * Dark mode: softer than Blume's near-black default, Material-style greys. */
+:root[data-theme="dark"] {
+  --blume-background: #121212;
+  --blume-muted: #2a2a2a; /* callouts, table headers and other surfaces */
+  --blume-code-background: #2a2a2a;
+  --blume-foreground: #e0e0e0;
+  --blume-muted-foreground: #b0b0b0; /* secondary text */
+  --blume-border: #3a3a3a;
+}
