@@ -229,25 +229,42 @@ ThingsBoard RPC into publishes on `…/command`. That converter should follow
 IoT Core is the broker, so Mosquitto and the gateway drop out. Stations keep the
 same topics and the same factory certificate.
 
-- Register the intermediate CA(s) with AWS IoT, with a **just-in-time provisioning
-  (JITP)** template that, for each new certificate:
-  - creates a thing named after its CN;
+- Register each intermediate CA with AWS IoT, with automatic registration enabled
+  and a **just-in-time provisioning (JITP)** template attached. JITP runs for any
+  certificate signed by a registered CA, so it is the issuing intermediate that must
+  be registered. For each new certificate the template:
+  - creates a thing named after its CN (`AWS::IoT::Certificate::CommonName`);
+  - activates the certificate and attaches it to the thing;
   - attaches a policy allowing `sensors/esp32/${iot:Connection.Thing.ThingName}/*`.
-- A station's first connection is refused while AWS registers it. The station's
-  normal reconnect succeeds a few seconds later. No registration code is needed in
-  the firmware.
+- Register each intermediate when it is created. AWS's default registration mode
+  needs a verification certificate signed with the CA's key, which is impossible
+  once the key is destroyed at the end of its signing window. (`SNI_ONLY` mode needs
+  no verification certificate.)
+- Every parameter the template references must be present in the station
+  certificate's subject, or provisioning fails. Reference only the CN, plus
+  `AWS::IoT::Certificate::Id`, which AWS generates itself.
+- No registration code is needed in the firmware. Whether the first connection is
+  refused while AWS provisions the station is not stated in AWS's JITP
+  documentation; the station's reconnect with backoff covers it either way. Confirm
+  on the first test.
+- JITP calls AWS control-plane APIs that are subject to account throttling quotas.
+  Many stations connecting for the first time together (a site going live) may be
+  throttled; AWS support can raise the quotas.
 - Routing to storage or processing is done with IoT rules on our topics.
+
+Reference: [AWS IoT just-in-time provisioning](https://docs.aws.amazon.com/iot/latest/developerguide/jit-provisioning.html).
 
 Constraints the firmware must meet, all configuration:
 
-| Setting           | Mosquitto             | AWS IoT Core                                        |
-| ----------------- | --------------------- | --------------------------------------------------- |
-| Endpoint          | our broker            | account IoT endpoint                                |
-| Server CA         | our root              | Amazon Root CA                                      |
-| Client ID         | certificate CN        | certificate CN (= thing name)                       |
-| Username/password | none                  | none                                                |
-| Chain sent        | device + intermediate | device + intermediate (check against AWS JITP docs) |
-| QoS               | 0/1                   | 0/1 only                                            |
+| Setting           | Mosquitto             | AWS IoT Core                                |
+| ----------------- | --------------------- | ------------------------------------------- |
+| Endpoint          | our broker            | account IoT endpoint                        |
+| Server CA         | our root              | Amazon Root CA                              |
+| Client ID         | certificate CN        | certificate CN (= thing name)               |
+| Username/password | none                  | none                                        |
+| Chain sent        | device + intermediate | device; the CA certificate is optional      |
+| SNI               | not needed            | required (sent when connecting by hostname) |
+| QoS               | 0/1                   | 0/1 only                                    |
 
 ## Revocation
 
