@@ -1,7 +1,7 @@
 ---
 title: CC1312R SPI Interaction — Function-Level Sequence Diagrams
 created: 2026-03-25T00:00:00Z
-lastModified: 2026-03-25T00:00:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 This document maps every major interaction between the CC1312R coordinator firmware
@@ -379,22 +379,38 @@ stateDiagram-v2
 
     RX_CANCEL --> TX_ARMED : spiTransferCallback()\nstartSpiTxTransfer()
 
-    TX_COMPLETE --> RX_ARMED : serviceSpiTransport()\nno more TX frames\nstartSpiRxTransfer()
+    TX_COMPLETE --> RX_ARMED : queue empty\ncallback already armed RX\nmode stays 1, no resubmit
 ```
 
+When a TX completes with the frame queue empty, `spiTransferCallback()` arms the next
+RX itself. `serviceSpiTransport()` then clears `spiTransferMode` only if it still equals
+the completed mode, so it does not submit that RX a second time.
+
+This matters because `SPICC26X2DMA` takes a `DISALLOW_STANDBY` power constraint on every
+`SPI_transfer()` and releases it once per completed transaction. Before the fix (coordinator
+commit `5824eb1`), each TX submitted the same RX twice, leaking one constraint per TX. The
+constraint count is 8 bits, so it wrapped to zero after about 190 telemetry packets
+(roughly 30 minutes with a node sending every 10 s). The device then entered standby in
+the middle of an RF receive, and the RF core stayed in RX with the command `ACTIVE`, ignoring
+aborts, until a reset.
+
+Any change to this state machine must keep one `SPI_transfer()` per transaction. The count
+can be checked at run time with
+`Power_getConstraintCount(PowerCC26XX_DISALLOW_STANDBY)`: it should stay constant (3 on
+the current build) however many frames pass.
 
 ---
 
 ## Key Timing Constants
 
-| Constant | Value | Where set | Meaning |
-|---|---|---|---|
-| Heartbeat interval | 30 s | `HEARTBEAT_INTERVAL_RAT` | CC1312R periodic uplink |
-| Node-list retry (empty) | 10 s | `NODE_LIST_EMPTY_RETRY_RAT` | Retry when `acceptedNodeCount == 0` |
-| Node-list keepalive | 300 s | `NODE_LIST_KEEPALIVE_RAT` | Keepalive once list is populated |
-| DRDY-to-downlink delay | 80 ms | `_pendingListSyncAt` | ESP32-P4 defers sync after list request |
-| RF RX window | ~50 ms | `RF_RX_TIMEOUT` | CC1312R `RF_runCmd()` blocking window |
-| DRDY no-data alarm | 35 s | diagnostic block | ESP32-P4 warns if DRDY silent |
-| Status poll (first) | 30 s | `CC1312_STATUS_POLL_INITIAL_MS` | ESP32-P4 first GET_STATUS |
-| Status poll (repeat) | 300 s | `CC1312_STATUS_POLL_INTERVAL_MS` | ESP32-P4 periodic GET_STATUS |
-| Discovery auto-off | 300 s | `handleCommand("discovery_on")` | ESP32-P4 auto-disables discovery |
+| Constant                | Value  | Where set                        | Meaning                                 |
+| ----------------------- | ------ | -------------------------------- | --------------------------------------- |
+| Heartbeat interval      | 30 s   | `HEARTBEAT_INTERVAL_RAT`         | CC1312R periodic uplink                 |
+| Node-list retry (empty) | 10 s   | `NODE_LIST_EMPTY_RETRY_RAT`      | Retry when `acceptedNodeCount == 0`     |
+| Node-list keepalive     | 300 s  | `NODE_LIST_KEEPALIVE_RAT`        | Keepalive once list is populated        |
+| DRDY-to-downlink delay  | 80 ms  | `_pendingListSyncAt`             | ESP32-P4 defers sync after list request |
+| RF RX window            | ~50 ms | `RF_RX_TIMEOUT`                  | CC1312R `RF_runCmd()` blocking window   |
+| DRDY no-data alarm      | 35 s   | diagnostic block                 | ESP32-P4 warns if DRDY silent           |
+| Status poll (first)     | 30 s   | `CC1312_STATUS_POLL_INITIAL_MS`  | ESP32-P4 first GET_STATUS               |
+| Status poll (repeat)    | 300 s  | `CC1312_STATUS_POLL_INTERVAL_MS` | ESP32-P4 periodic GET_STATUS            |
+| Discovery auto-off      | 300 s  | `handleCommand("discovery_on")`  | ESP32-P4 auto-disables discovery        |

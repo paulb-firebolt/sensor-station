@@ -1,7 +1,7 @@
 ---
 title: CC1312R Sub-1GHz RF Coordinator
 created: 2026-03-19T00:00:00Z
-lastModified: 2026-03-26T00:00:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 ## Overview
@@ -86,15 +86,15 @@ See the migration document for the full trade-off analysis and bring-up notes.
 The CC1312R LaunchPad XL connects to the Unit PoE P4 via the **Hat2-Bus** (2.54mm
 16P) connector.
 
-| Signal             | Hat2-Bus | ESP32-P4 GPIO | CC1312R DIO | Notes                         |
-| ------------------ | -------- | ------------- | ----------- | ----------------------------- |
-| MOSI               | G8       | GPIO 8        | DIO11       | ESP32-P4 → CC1312R SSI_RX     |
-| MISO               | G9       | GPIO 9        | DIO9        | CC1312R SSI_TX → ESP32-P4     |
-| CLK                | G10      | GPIO 10       | DIO10       | Master clock, ESP32-P4 drives |
-| CS                 | G11      | GPIO 11       | DIO8        | Active-low chip select        |
-| DRDY               | G12      | GPIO 12       | DIO12       | CC1312R asserts low = ready   |
-| Power              | 3V3      | —             | —           | 3.3 V logic rail              |
-| Ground             | GND      | —             | —           | Common ground                 |
+| Signal | Hat2-Bus | ESP32-P4 GPIO | CC1312R DIO | Notes                         |
+| ------ | -------- | ------------- | ----------- | ----------------------------- |
+| MOSI   | G8       | GPIO 8        | DIO11       | ESP32-P4 → CC1312R SSI_RX     |
+| MISO   | G9       | GPIO 9        | DIO9        | CC1312R SSI_TX → ESP32-P4     |
+| CLK    | G10      | GPIO 10       | DIO10       | Master clock, ESP32-P4 drives |
+| CS     | G11      | GPIO 11       | DIO8        | Active-low chip select        |
+| DRDY   | G12      | GPIO 12       | DIO12       | CC1312R asserts low = ready   |
+| Power  | 3V3      | —             | —           | 3.3 V logic rail              |
+| Ground | GND      | —             | —           | Common ground                 |
 
 MOSI/MISO naming is from the master (ESP32-P4) perspective. In TI SysConfig, the
 master MOSI connects to the slave SSI_RX; the master MISO connects to the slave SSI_TX.
@@ -122,12 +122,12 @@ after the SPI migration.
 
 ### LaunchPad XL DIO Assignment
 
-| Signal        | DIO   | Notes                                    |
-| ------------- | ----- | ---------------------------------------- |
-| SSI_CLK       | DIO10 | Configured via SysConfig                 |
-| SSI_FSS (CS)  | DIO8  | Active-low, driven by ESP32-P4           |
-| SSI_TX (MISO) | DIO9  | CC1312R transmit output in slave mode    |
-| SSI_RX (MOSI) | DIO11 | CC1312R receive input in slave mode      |
+| Signal        | DIO   | Notes                                       |
+| ------------- | ----- | ------------------------------------------- |
+| SSI_CLK       | DIO10 | Configured via SysConfig                    |
+| SSI_FSS (CS)  | DIO8  | Active-low, driven by ESP32-P4              |
+| SSI_TX (MISO) | DIO9  | CC1312R transmit output in slave mode       |
+| SSI_RX (MOSI) | DIO11 | CC1312R receive input in slave mode         |
 | DRDY          | DIO12 | GPIO output, active-low, asserted before TX |
 
 The XDS110 back-channel UART jumpers (`TXD>>` / `RXD<<`) connect DIO2/DIO3 to the
@@ -142,15 +142,15 @@ The binary frame format is unchanged from the original UART PoC:
 [0xAA] [LEN] [MSG_TYPE] [NODE_ADDR × 8] [RSSI] [...payload...] [CRC8]
 ```
 
-| Byte      | Field     | Description                                                      |
-| --------- | --------- | ---------------------------------------------------------------- |
-| 0         | Start     | Always `0xAA`                                                    |
-| 1         | LEN       | Byte count of MSG_TYPE + NODE_ADDR + RSSI + payload (excl. CRC) |
-| 2         | MSG_TYPE  | Message type (see below)                                         |
-| 3–10      | NODE_ADDR | 64-bit node address, big-endian                                  |
-| 11        | RSSI      | int8, RF signal strength in dBm at the coordinator              |
-| 12…(1+LEN)| Payload   | Message-type-specific bytes (see below)                          |
-| 2+LEN     | CRC8      | Dallas/Maxim CRC8 over [MSG_TYPE + NODE_ADDR + RSSI + payload]  |
+| Byte       | Field     | Description                                                     |
+| ---------- | --------- | --------------------------------------------------------------- |
+| 0          | Start     | Always `0xAA`                                                   |
+| 1          | LEN       | Byte count of MSG_TYPE + NODE_ADDR + RSSI + payload (excl. CRC) |
+| 2          | MSG_TYPE  | Message type (see below)                                        |
+| 3–10       | NODE_ADDR | 64-bit node address, big-endian                                 |
+| 11         | RSSI      | int8, RF signal strength in dBm at the coordinator              |
+| 12…(1+LEN) | Payload   | Message-type-specific bytes (see below)                         |
+| 2+LEN      | CRC8      | Dallas/Maxim CRC8 over [MSG_TYPE + NODE_ADDR + RSSI + payload]  |
 
 NODE_ADDR is 8 bytes, big-endian (network byte order). All payload multi-byte values
 are little-endian.
@@ -174,16 +174,16 @@ frames travel ESP32-P4 → CC1312R. Both directions use the same frame structure
 
 #### Uplink (CC1312R → ESP32-P4)
 
-| MSG_TYPE | Name              | NODE_ADDR          | Payload after RSSI                      |
-| -------- | ----------------- | ------------------ | --------------------------------------- |
-| 0x01     | NODE_STATUS       | source node        | addr_low32(4) tx_count(4) [fw(3) sc(1)] |
-| 0x02     | SENSOR_READING    | source node        | sensor_class(1) + sensor-specific bytes |
-| 0x03     | SENSOR_EVENT      | source node        | sensor_class(1) + sensor-specific bytes |
-| 0x04     | NODE_SEEN         | seen node          | none — discovery mode only              |
-| 0x05     | NODE_LIST_REQUEST | coordinator addr   | none — CC1312R asking for its node list |
-| 0x06     | HEARTBEAT         | coordinator addr   | fw_major(1) fw_minor(1) fw_patch(1)     |
-| 0x07     | PONG              | coordinator addr   | optional echoed payload                 |
-| 0x24     | CONFIG_RESPONSE   | source node        | result(1) domain(1) param(1) flags(1) value_LE(4) |
+| MSG_TYPE | Name              | NODE_ADDR        | Payload after RSSI                                |
+| -------- | ----------------- | ---------------- | ------------------------------------------------- |
+| 0x01     | NODE_STATUS       | source node      | addr_low32(4) tx_count(4) [fw(3) sc(1)]           |
+| 0x02     | SENSOR_READING    | source node      | sensor_class(1) + sensor-specific bytes           |
+| 0x03     | SENSOR_EVENT      | source node      | sensor_class(1) + sensor-specific bytes           |
+| 0x04     | NODE_SEEN         | seen node        | none — discovery mode only                        |
+| 0x05     | NODE_LIST_REQUEST | coordinator addr | none — CC1312R asking for its node list           |
+| 0x06     | HEARTBEAT         | coordinator addr | fw_major(1) fw_minor(1) fw_patch(1)               |
+| 0x07     | PONG              | coordinator addr | optional echoed payload                           |
+| 0x24     | CONFIG_RESPONSE   | source node      | result(1) domain(1) param(1) flags(1) value_LE(4) |
 
 NODE_LIST_REQUEST is sent on boot and every 10 s while the accepted list is empty,
 then every 300 s as a keepalive once populated.
@@ -195,19 +195,19 @@ independently of node traffic.
 
 RSSI is always `0x00` in downlink frames.
 
-| MSG_TYPE | Name                | NODE_ADDR      | Payload |
-| -------- | ------------------- | -------------- | ------- |
-| 0x10     | CMD_NODE_LIST_ENTRY | accepted node  | none    |
-| 0x11     | CMD_NODE_LIST_END   | 0 (ignored)    | none    |
-| 0x12     | CMD_ACCEPT_NODE     | node to add    | none    |
-| 0x13     | CMD_REMOVE_NODE     | node to remove | none    |
-| 0x14     | CMD_DISCOVERY_ON    | 0 (ignored)    | none    |
-| 0x15     | CMD_DISCOVERY_OFF   | 0 (ignored)    | none    |
-| 0x16     | CMD_PING            | echoed in pong | optional payload |
-| 0x20     | CMD_GET_STATUS      | target node    | none    |
-| 0x22     | CMD_GET_CONFIG      | target node    | domain(1) param_id(1) |
+| MSG_TYPE | Name                | NODE_ADDR      | Payload                           |
+| -------- | ------------------- | -------------- | --------------------------------- |
+| 0x10     | CMD_NODE_LIST_ENTRY | accepted node  | none                              |
+| 0x11     | CMD_NODE_LIST_END   | 0 (ignored)    | none                              |
+| 0x12     | CMD_ACCEPT_NODE     | node to add    | none                              |
+| 0x13     | CMD_REMOVE_NODE     | node to remove | none                              |
+| 0x14     | CMD_DISCOVERY_ON    | 0 (ignored)    | none                              |
+| 0x15     | CMD_DISCOVERY_OFF   | 0 (ignored)    | none                              |
+| 0x16     | CMD_PING            | echoed in pong | optional payload                  |
+| 0x20     | CMD_GET_STATUS      | target node    | none                              |
+| 0x22     | CMD_GET_CONFIG      | target node    | domain(1) param_id(1)             |
 | 0x23     | CMD_SET_CONFIG      | target node    | domain(1) param_id(1) value_LE(4) |
-| 0x25     | CMD_RESET_CONFIG    | target node    | domain(1) param_id_or_FF(1) |
+| 0x25     | CMD_RESET_CONFIG    | target node    | domain(1) param_id_or_FF(1)       |
 
 In response to NODE_LIST_REQUEST, the ESP32-P4 sends all CMD_NODE_LIST_ENTRY frames
 followed by CMD_NODE_LIST_END **in a single CS assertion** (batch send). This is
@@ -224,13 +224,13 @@ request inside that node's short post-telemetry RX window.
 
 ### CONFIG_RESPONSE Payload
 
-| Bytes | Field    | Type   | Description |
-| ----- | -------- | ------ | ----------- |
-| 0     | result   | uint8  | `0x00` success, otherwise error code |
-| 1     | domain   | uint8  | Config domain ID |
-| 2     | param_id | uint8  | Parameter ID, or `0xFF` for whole-domain reset |
+| Bytes | Field    | Type   | Description                                                                                                                        |
+| ----- | -------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | result   | uint8  | `0x00` success, otherwise error code                                                                                               |
+| 1     | domain   | uint8  | Config domain ID                                                                                                                   |
+| 2     | param_id | uint8  | Parameter ID, or `0xFF` for whole-domain reset                                                                                     |
 | 3     | flags    | uint8  | Bitfield: `0x01` supported, `0x02` current value equals default, `0x04` restart required, `0x08` persisted to non-volatile storage |
-| 4–7   | value    | uint32 | Applied/current value, little-endian |
+| 4–7   | value    | uint32 | Applied/current value, little-endian                                                                                               |
 
 This uplink is both the normal response to `GET_CONFIG` and the ACK for
 `SET_CONFIG` / `RESET_CONFIG`.
@@ -276,10 +276,10 @@ The first byte of a SENSOR_READING or SENSOR_EVENT payload identifies the sensor
 The coordinator forwards the raw RF payload with no sensor-class prefix. The first
 byte is the event type.
 
-| body[0] | Event type | Remaining bytes                                           |
-| ------- | ---------- | --------------------------------------------------------- |
-| 0x10    | Trigger    | trigger_kind(1) event_count_LE(4) flags(1)                |
-| 0x11    | Dwell      | dwell_seconds_LE(2) event_count_LE(4)                     |
+| body[0] | Event type | Remaining bytes                            |
+| ------- | ---------- | ------------------------------------------ |
+| 0x10    | Trigger    | trigger_kind(1) event_count_LE(4) flags(1) |
+| 0x11    | Dwell      | dwell_seconds_LE(2) event_count_LE(4)      |
 
 `trigger_kind`: 0x01 = single detection, 0x02 = dual detection.
 
@@ -426,8 +426,89 @@ cc1312/command  — inbound commands (subscribed by ESP32-P4)
 All pending messages are upserted by `(node_addr, msg_type, sensor_class)`. For PIR
 events, `data[0]` (the event subtype: `0x10` trigger or `0x11` dwell) is also included
 in the key so that trigger and dwell occupy separate slots and are both published in the
-same batch. For all other sensor classes, if the same node sends the same type and
-sensor class multiple times between publishes, only the most recent reading is retained.
+same batch. If the same node sends the same key more than once between publishes, only
+the most recent message is retained. This applies to PIR events of the same subtype too.
+
+`event_count` is cumulative, so a merged PIR event still tells the backend how many
+triggers happened. What is lost is the earlier message's own `age_ms` and `rssi_dbm`.
+Anything that counts lost packets from `event_count` gaps will report merges as losses.
+For example, a node sending every 10 s against the 10 s publish interval drifts in and out
+of phase, giving bursts of apparent loss of about 2% with no RF loss at all.
+
+## Coordinator Fault Recovery and Diagnostics
+
+The coordinator firmware recovers from hangs and faults by itself, and reports why it
+reset through its own `SENSOR_READING` frames.
+
+### Recovery
+
+| Mechanism         | Trigger                                            | Action                                                       |
+| ----------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| Stall monitor     | Main loop makes no progress for 2 s (500 ms clock) | Saves a stall record, resets                                 |
+| Fault handler     | HardFault or other CPU exception                   | Saves an exception record, resets                            |
+| Trap              | Unrecoverable driver error (table below)           | Blinks the red LED `code` times, saves a trap record, resets |
+| Hardware watchdog | Main loop stops kicking it for ~10 s               | Resets. No record is saved                                   |
+
+The watchdog is the backstop for hangs that also freeze the stall monitor's clock
+interrupt. It only counts while the MCU is out of standby, so the firmware disallows
+standby. The coordinator is powered by the station, so standby saves nothing. This
+internal watchdog does not replace the host-to-CC1312 reset line in the hardware brief
+(`PLT-3`).
+
+Trap codes:
+
+| Code | Cause                                    |
+| ---- | ---------------------------------------- |
+| 1    | SPI RX `SPI_transfer()` refused          |
+| 2    | SPI TX `SPI_transfer()` refused          |
+| 3    | `SPI_open()` failed                      |
+| 4    | `SPI_control()` failed                   |
+| 5    | RF data queue could not be created       |
+| 6    | Unexpected RX termination reason         |
+| 7    | Unexpected RX command status             |
+| 8    | Stall monitor clock could not be created |
+
+### Crash records
+
+A record is written to a reserved flash page (`.crashlog`, 0x54000) just before the reset.
+At the next boot the coordinator loads and erases it, then sends it alternately as two
+frames over the next 20 heartbeats (10 minutes). Both are `SENSOR_READING` frames from
+the coordinator's own address with body class `0xFF`, so they are published in
+`cc1312/nodes` as `"sensor": "raw"`. The `data` string omits the `FF` class byte:
+
+| `data`  | Layout (little-endian)  |
+| ------- | ----------------------- |
+| `CE01…` | `pc(4) lr(4) excNum(1)` |
+| `CE02…` | `cfsr(4) hfsr(4)`       |
+
+| Kind      | `excNum`                             | Fields                                                                                                                                                                                        |
+| --------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exception | CPU exception number (3 = HardFault) | `pc`, `lr` from the exception frame; `cfsr`, `hfsr` are the fault status registers                                                                                                            |
+| Stall     | `0xFF`                               | `pc = 0x57A11000 \| 0x10 if the RF core is powered \| loop stage (1–5)`; `lr` = RX command status; `cfsr = nRxNok << 16 \| nRxOk`; `hfsr = nRxBufFull << 16 \| nRxStopped << 8 \| nRxIgnored` |
+| Trap      | `0xFE`                               | `pc = 0x7EA90000 \| trap code`; other fields 0                                                                                                                                                |
+
+Only the first record is kept until it has been loaded. A record is reported only once,
+after the reboot that follows it, so if MQTT is down during those 10 minutes it is lost.
+A watchdog reset leaves no record. It shows up only as the debug counters below
+restarting.
+
+### Debug counter frame
+
+When any counter changes, and no crash record is being reported, the coordinator sends a
+second raw frame from its own address. Its `data` is six `uint16` LE counters since boot:
+
+| Bytes | Counter                                      |
+| ----- | -------------------------------------------- |
+| 0–1   | PIR dual-trigger telemetry packets received  |
+| 2–3   | PIR dwell packets received                   |
+| 4–5   | Dwell packets rejected by the decoder        |
+| 6–7   | Dwell packets queued for SPI                 |
+| 8–9   | Dwell packets dropped (telemetry queue full) |
+| 10–11 | Dwell packets forwarded to SPI               |
+
+With the LaunchPad test sensor, which sends a dual trigger every 10 s, bytes 0–1 work
+as an uptime check. A count well below the elapsed time divided by 10 s means the
+coordinator reset.
 
 ## ESP32-P4 Driver — `src/cc1312_manager.h`
 
@@ -626,8 +707,8 @@ This keeps CC1310, CC1312, and ESP32 teams aligned on one temporary debug contra
 
 ## Relationship to Other Documents
 
-| Document                                                               | Relationship                                         |
-| ---------------------------------------------------------------------- | ---------------------------------------------------- |
-| [cc1312r-uart-to-spi-migration.md](cc1312r-uart-to-spi-migration.md)  | Full bring-up history, timing analysis, and lessons  |
-| [cc1312r-spi-interaction.mdx](cc1312r-spi-interaction.mdx)               | Function-level sequence diagrams for every flow      |
-| [cc1312r-functional-test.md](cc1312r-functional-test.md)               | Test procedure (steps 2–3 need updating for SPI)     |
+| Document                                                             | Relationship                                        |
+| -------------------------------------------------------------------- | --------------------------------------------------- |
+| [cc1312r-uart-to-spi-migration.md](cc1312r-uart-to-spi-migration.md) | Full bring-up history, timing analysis, and lessons |
+| [cc1312r-spi-interaction.mdx](cc1312r-spi-interaction.mdx)           | Function-level sequence diagrams for every flow     |
+| [cc1312r-functional-test.md](cc1312r-functional-test.md)             | Test procedure (steps 2–3 need updating for SPI)    |
