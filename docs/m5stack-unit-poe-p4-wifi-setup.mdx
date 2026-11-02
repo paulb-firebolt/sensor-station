@@ -1,7 +1,7 @@
 ---
 title: M5Stack Unit PoE P4 — WiFi
 created: 2026-03-16T15:48:00Z
-lastModified: 2026-03-17T19:09:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 ## No WiFi Hardware
@@ -102,6 +102,8 @@ Because the P4 has no WiFi, there is no AP mode or captive portal. Initial devic
 
 ### Factory Reset
 
-Hold the **USR button** (GPIO 45) for **5 seconds**. The device clears all NVS settings (WiFi credentials, admin password, MQTT config, certificates) and reboots. On next boot, visiting `/` will show the Device Setup page again.
+Press the **USR button** (GPIO 45) **5 times within 4 seconds**. The device clears all NVS settings (WiFi credentials, admin password, MQTT config, certificates) and reboots. On next boot, visiting `/` will show the Device Setup page again.
+
+Don't hold the button. A 3-second hold makes the board hardware restart the P4 into ROM download mode, shown by the green LED. Power-cycle it to leave download mode.
 
 > The factory reset button was previously documented as GPIO 8. The correct GPIO is **45**, confirmed from the official demo project.
