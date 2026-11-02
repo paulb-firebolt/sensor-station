@@ -1,7 +1,7 @@
 ---
 title: WiFi Provisioning Implementation - Complete Guide
 created: 2025-12-15T14:18:00Z
-lastModified: 2026-10-30T00:00:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 ## Overview
@@ -397,8 +397,10 @@ const unsigned long WIFI_CONNECT_TIMEOUT = 30000;  // 30 seconds
 ### Factory Reset (main.cpp)
 
 ```cpp
-const int FACTORY_RESET_PIN = 0;                      // GPIO 0
-const unsigned long FACTORY_RESET_HOLD_TIME = 5000;   // 5 seconds
+#define FACTORY_RESET_PIN 45  // USR button on the Unit PoE P4 (0 = BOOT on the ESP32-S3-POE-ETH)
+const uint8_t FACTORY_RESET_PRESSES = 5;
+const unsigned long FACTORY_RESET_WINDOW_MS = 4000;
+const unsigned long FACTORY_RESET_DEBOUNCE_MS = 50;
 ```
 
 ## Troubleshooting Guide
@@ -490,7 +492,7 @@ const unsigned long FACTORY_RESET_HOLD_TIME = 5000;   // 5 seconds
 
 ### Factory Reset
 
-- [ ] Hold boot button for 5 seconds
+- [ ] Press the reset button 5 times within 4 seconds (don't hold it: 3 s enters download mode on the P4)
 - [ ] Serial shows "FACTORY RESET TRIGGERED!"
 - [ ] Credentials cleared from NVS
 - [ ] Device reboots into AP mode

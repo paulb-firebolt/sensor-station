@@ -1,7 +1,7 @@
 ---
 title: Device Certificates and Provisioning
 created: 2026-10-30T00:00:00Z
-lastModified: 2026-10-30T00:00:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 **Status: draft for review.** This note proposes how base stations get a unique
@@ -10,8 +10,9 @@ Edition now and on AWS IoT Core if the platform changes. Nothing here is built y
 
 ## Summary
 
-- Every base station gets its own X.509 client certificate and private key at
-  flash time. No two stations share a key.
+- Every base station gets its own X.509 client certificate at flash time. It
+  generates its own private key, which never leaves the chip. No two stations share
+  a key.
 - Certificates are signed by an **intermediate CA** held by the flash station. The
   **root CA** stays offline and only signs intermediates.
 - Stations connect over TLS with the certificate alone: no username, no password.
@@ -56,7 +57,7 @@ Two problems to fix before anything ships:
 
 ```text
 Root CA (offline)
- └── Intermediate CA "flash station 1" (pathlen:0, 1–2 years)
+ └── Intermediate CA "flash station 1" (pathlen:0, valid 15 years, signs for 2)
       ├── sensor-1A2B3C4D   (station certificate)
       ├── sensor-5E6F7081
       └── ...
@@ -69,14 +70,20 @@ Root CA (offline)
 - Created once, kept offline (encrypted media in a safe, with a backup copy held
   separately).
 - Used only to issue and revoke intermediates.
-- Long lifetime (20+ years).
+- Lifetime 30+ years: it must outlive the last intermediate it signs, and each
+  intermediate is valid for 15 years after it is issued.
 
 **Intermediate CA, one per flash station or production line**
 
 - Signs station certificates at flash time.
 - `basicConstraints = CA:true, pathlen:0`, so it cannot create further CAs.
-- Lifetime 1–2 years, then a new one is issued from the root. Rotating per year or
-  per production batch limits how many devices any one intermediate covers.
+- Valid for 15 years, but used to sign stations for only 2. Then its key is
+  destroyed and a new intermediate is issued from the root. Rotating limits how many
+  stations any one intermediate covers.
+- Destroying the key only stops new signing. The intermediate certificate is public,
+  stays in each station's chain and on the broker, and is needed to verify its stations
+  until it expires. The broker rejects a station whose chain contains an expired
+  certificate.
 - Key held in a hardware token (YubiKey PIV or similar) where practical, so it
   cannot be copied off the PC.
 
@@ -84,36 +91,76 @@ Root CA (offline)
 
 - Subject CN = the station's client ID (today `sensor-XXXXXXXX`; see open questions).
 - `extendedKeyUsage = clientAuth`.
-- Lifetime: long enough to outlive the hardware (10+ years) unless rotation by OTA
-  is built.
+- Expires on the same date as the intermediate that signed it, so a station gets
+  13–15 years depending on when in the 2-year signing window it was made. Every
+  station from one intermediate expires on one date.
+- The station does not check certificate dates (mbedTLS is built without
+  `CONFIG_MBEDTLS_HAVE_TIME_DATE`), but the broker does check the station's chain.
 - ECDSA P-256 keys: smaller and faster to handshake on the ESP32 than RSA-2048.
 
 ## Factory issuance
 
 This replaces today's step "read the device ID, call the ThingsBoard API", at the
-same point in the flashing process.
+same point in the flashing process, over the same USB connection.
+
+**Decided: the station generates its own key (option B), and the certificate is
+issued over USB.** The private key never leaves the chip. Physical presence on the
+flash station's USB port is what authenticates the request, so no enrolment service is
+exposed on a network.
 
 1. Flash the firmware.
-2. Read the station's ID.
-3. Get a key pair, by one of two options:
-   - **Option A (simpler):** the flash station generates the key pair.
-   - **Option B (better):** the station generates its own key pair on first boot
-     and returns only a certificate signing request (CSR), so the private key never
-     leaves the chip. This needs a small firmware addition.
-4. Sign a certificate for that ID with the intermediate CA.
-5. Write into the station's NVS:
+2. Read the station's ID from the chip.
+3. Serial command `csr`: the station generates an ECDSA P-256 key pair into NVS (if
+   it has none) and returns a certificate signing request (CSR) with CN = its ID.
+4. Check that the CSR's CN matches the ID read in step 2.
+5. Sign the CSR with the intermediate CA.
+6. Serial command `cert`: write into the station's NVS:
    - its certificate;
    - the intermediate certificate (the chain);
-   - its key (option A only);
    - the broker CA, endpoint and port.
-6. Record serial number, station ID, intermediate and time in the issuance log.
+7. Record serial number, station ID, intermediate and time in the issuance log.
    The log is needed for revocation decisions.
-7. Optionally create the device in the platform: the ThingsBoard HTTP API call as
+8. Optionally create the device in the platform: the ThingsBoard HTTP API call as
    today, or nothing on AWS (see below).
 
-With option A, the private key exists briefly on the flash PC, so that PC must be
-treated as sensitive. Either way, the CA key must be readable only by the signing
-step.
+The CA key must be readable only by the signing step, ideally held on a hardware token.
+
+### Cost on the station
+
+P-256 key generation and CSR creation use mbedTLS, which the firmware already carries
+for TLS. Both run in well under a second on the ESP32-S3 and the ESP32-P4, once per
+station. RSA-2048 key generation can take tens of seconds and is not used.
+
+### Flash station
+
+The flash station is a script around the existing flashing tools, not a service:
+
+```text
+esptool write-flash <firmware>                 (as today)
+serial: csr          → CSR, CN = sensor-XXXXXXXX
+check CN against the ID read from the chip
+sign with the intermediate CA                  (openssl or step CLI, key on a token)
+serial: cert <certificate + chain + broker settings>
+append to the issuance log
+optional: ThingsBoard API call                 (as today)
+```
+
+The certificate steps take about 5 s per station; plugging and unplugging dominates,
+at roughly 20–30 s per station on one port. A powered USB hub with one script instance
+per port handles a row of stations at a time. With 10 ports, 600 stations take about
+an hour.
+
+### Alternatives considered
+
+- **Flash station generates the key (option A).** Simpler firmware, but the private key
+  exists on the flash PC, which then has to be treated as sensitive. Rejected in favour
+  of option B.
+- **Enrolment over a closed bench network.** Stations on an isolated network send their
+  CSR over HTTPS to an enrolment server at an address fixed in the firmware, verified
+  against a CA pinned in the firmware. The server signs only IDs on the production list,
+  once each, and returns the certificate in the response. This avoids cabling each
+  station to USB, but needs the enrolment server, the pinned CA and the allowlist. Use it
+  if stations must be issued certificates where USB handling is impractical.
 
 ## Storage on the station
 
@@ -122,6 +169,13 @@ step.
   taken off a wall cannot have its key read out of flash.
 - Remove the compiled-in client certificate and key from `src/certs.h`. A station
   with no provisioned identity should fail to connect, not borrow a shared one.
+- Keep the identity (key, certificate, chain) out of reach of factory reset. Today a
+  factory reset clears all of NVS, which would leave a station with no identity until
+  it goes back to a flash station. Store the identity in its own NVS namespace or
+  partition that factory reset does not erase.
+- To check: the ESP32-P4 may be able to hold the key in eFuse through its ECDSA
+  peripheral, so software can never read it. The ESP32-S3's signing peripheral is
+  RSA-only, as far as is known, so on the S3 flash encryption is the protection.
 
 ## Broker: Mosquitto for ThingsBoard CE
 
@@ -186,14 +240,14 @@ same topics and the same factory certificate.
 
 Constraints the firmware must meet, all configuration:
 
-| Setting | Mosquitto | AWS IoT Core |
-|---|---|---|
-| Endpoint | our broker | account IoT endpoint |
-| Server CA | our root | Amazon Root CA |
-| Client ID | certificate CN | certificate CN (= thing name) |
-| Username/password | none | none |
-| Chain sent | device + intermediate | device + intermediate (check against AWS JITP docs) |
-| QoS | 0/1 | 0/1 only |
+| Setting           | Mosquitto             | AWS IoT Core                                        |
+| ----------------- | --------------------- | --------------------------------------------------- |
+| Endpoint          | our broker            | account IoT endpoint                                |
+| Server CA         | our root              | Amazon Root CA                                      |
+| Client ID         | certificate CN        | certificate CN (= thing name)                       |
+| Username/password | none                  | none                                                |
+| Chain sent        | device + intermediate | device + intermediate (check against AWS JITP docs) |
+| QoS               | 0/1                   | 0/1 only                                            |
 
 ## Revocation
 
@@ -218,13 +272,15 @@ Constraints the firmware must meet, all configuration:
 4. Remove the compiled-in client certificate and key from `src/certs.h`, and drop
    the shared-identity fallback.
 5. Keep reconnect with backoff, which already exists; JITP relies on it.
-6. Optional (option B): generate the key pair on the device and expose a CSR to the
-   flashing tool.
+6. Serial commands for the flash station: `csr` (generate the P-256 key if absent,
+   return a CSR) and `cert` (store the certificate, chain and broker settings).
+7. Keep the identity across factory reset (see Storage on the station).
 
 ## Production changes
 
 1. Create the root CA and the first intermediate.
-2. Add steps 2–6 of the factory issuance to the flashing script.
+2. Add steps 2–8 of the factory issuance to the flashing script, with one instance
+   per port on a powered USB hub.
 3. Keep or drop the ThingsBoard API call: the gateway can create devices on first
    message, but pre-creating them lets staff attach customer and site details.
 4. Keep the issuance log somewhere backed up.
@@ -234,11 +290,12 @@ Constraints the firmware must meet, all configuration:
 - **Station ID.** Today the client ID is derived from the MAC (`sensor-XXXXXXXX`).
   Should the certificate CN use that, or the ID the production process already
   reads and registers in ThingsBoard? They should be the same thing.
-- **Key generation.** Is option B (on-device key, CSR) worth the extra firmware work
-  over option A?
 - **Who flashes.** If stations will ever be flashed by a contract manufacturer,
-  they get their own intermediate, or the key and CSR step moves to first boot.
-- **Certificate lifetime.** Long-lived certificates, or rotation over OTA?
+  they get their own intermediate and a copy of the flash station script, or
+  certificates are issued by closed-network enrolment (see Alternatives
+  considered).
+- **Expiry on AWS.** Check how AWS IoT Core treats an expired device or registered CA
+  certificate. Mosquitto rejects them.
 - **Gateway ownership.** The ThingsBoard IoT Gateway and its converter become a
   service someone runs, monitors and updates.
 - **Legacy fleet.** Existing ESP8266 stations stay on plain MQTT to ThingsBoard's

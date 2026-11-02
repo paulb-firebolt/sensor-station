@@ -1,7 +1,7 @@
 ---
 title: Ethernet TLS and Security — Implementation Notes
 created: 2025-12-15T15:31:00Z
-lastModified: 2026-10-29T23:00:00Z
+lastModified: 2026-11-02T00:00:00Z
 ---
 
 > **2026-10-29:** the ESP32-S3 and W5500 target was removed from the code, because
@@ -121,5 +121,5 @@ After running `setup.sh`:
 
 - Certificates are write-only via the web interface — never returned in API responses
 - Admin password protects `/mqtt` configuration routes (HTTP Basic Auth)
-- Factory reset (hold boot button 5s) clears all NVS including certs and credentials
+- Factory reset (5 presses of the reset button within 4 s) clears all NVS including certs and credentials
 - Physical security is the primary defense — device is not internet-exposed
