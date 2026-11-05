@@ -100,8 +100,19 @@ void MQTTManager::update(void) {
         return;
     }
 
+    // A link coming up is when the broker most likely became reachable again: drop the backoff
+    // and retry in MQTT_RECONNECT_INTERVAL, which also gives DHCP time to finish
+    bool wifiUp = wifiManager->isConnectedStation();
+    bool ethernetUp = isEthernetConnected();
+    if ((wifiUp && !wifiWasUp) || (ethernetUp && !ethernetWasUp)) {
+        reconnectAttempts = 0;
+        lastReconnectAttempt = millis();
+    }
+    wifiWasUp = wifiUp;
+    ethernetWasUp = ethernetUp;
+
     // Check if any network is available
-    if (!wifiManager->isConnectedStation() && !isEthernetConnected()) {
+    if (!wifiUp && !ethernetUp) {
         if (connected) {
             LOG_W("[MQTT] Network disconnected, MQTT unavailable\n");
             connected = false;
