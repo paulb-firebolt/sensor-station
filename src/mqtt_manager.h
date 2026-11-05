@@ -240,6 +240,8 @@ private:
     unsigned long lastConnectedTime;
     unsigned int reconnectAttempts;
     bool everAttemptedConnect;
+    bool wifiWasUp = false;
+    bool ethernetWasUp = false;
 
     // Helper methods
     bool connectToBroker(void);
