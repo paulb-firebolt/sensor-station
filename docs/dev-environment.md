@@ -23,16 +23,28 @@ them at the beginning of a bench session.
 ### 1. Assign a static IP to your Ethernet interface
 
 The DHCP server needs the host interface to already have an IP in the subnet.
-The address is added by hand and is lost when the adapter is unplugged, so
-re-add it after a replug:
+Set the address in the adapter's NetworkManager profile, so it survives a replug and the laptop
+sleeping. Link-local stays enabled alongside it for AutoIP testing:
 
 ```bash
 # Find your USB-Ethernet interface name (e.g. enp85s0u2u4). It changes with the USB port.
 ip -br link
+nmcli -t -f NAME,DEVICE con show        # the profile on that interface
 
+nmcli con mod "Wired connection 3" ipv4.method manual ipv4.addresses 192.168.2.1/24 \
+  ipv4.link-local enabled
+nmcli con up "Wired connection 3"
+```
+
+Without that, add it by hand (lost on replug or sleep):
+
+```bash
 sudo ip addr add 192.168.2.1/24 dev enp85s0u2u4
 sudo ip link set enp85s0u2u4 up
 ```
+
+For a soak test left running, stop the laptop suspending on idle, or the broker goes with it:
+`systemd-inhibit --what=sleep:idle --who=soak --why="soak test" <command>`.
 
 ### 2. Config files
 
@@ -79,11 +91,11 @@ the device's IP.
 
 ### Troubleshooting
 
-| Symptom (`docker logs dnsmasq`) | Cause | Fix |
-| --- | --- | --- |
+| Symptom (`docker logs dnsmasq`)                                 | Cause                                                                                                                                   | Fix                                                                       |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `failed to create listening socket for port 53: Address in use` | `dnsmasq.conf` isn't mounted, so the image's default config (with DNS) runs. Its entrypoint ignores `command:` flags such as `--port 0` | Mount `./dnsmasq.conf:/etc/dnsmasq.conf:ro` and keep `port=0` in the file |
-| `failed to bind DHCP server socket: Address in use` | libvirt's dnsmasq instances hold `:67` on `virbr*`, and a wildcard bind collides | Add `bind-interfaces` to `dnsmasq.conf` |
-| Container up but the device still gets `169.254.x.x` | Wrong `interface=` (the USB NIC was renamed) or no static IP on the host | Check `ip -br addr` and re-add `192.168.2.1/24` |
+| `failed to bind DHCP server socket: Address in use`             | libvirt's dnsmasq instances hold `:67` on `virbr*`, and a wildcard bind collides                                                        | Add `bind-interfaces` to `dnsmasq.conf`                                   |
+| Container up but the device still gets `169.254.x.x`            | Wrong `interface=` (the USB NIC was renamed) or no static IP on the host                                                                | Check `ip -br addr` and re-add `192.168.2.1/24`                           |
 
 After a config change, run `docker compose up -d --force-recreate`. The P4
 only requests an address at boot, so reset it afterwards.
@@ -329,7 +341,7 @@ Add `"force":true` to re-flash the same version or go back to an older one. The
 ## Typical Dev Session
 
 ```bash
-# 1. Set up host network interface (re-add after replugging the adapter)
+# 1. Host network interface: only needed if the NetworkManager profile above is not set
 sudo ip addr add 192.168.2.1/24 dev enp85s0u2u4
 sudo ip link set enp85s0u2u4 up
 
@@ -366,16 +378,16 @@ ESP32-C6-DEV-KIT-N8 on a breadboard, jumper-wired to the Unit PoE P4.
 
 ### Wiring
 
-| Signal | P4 | C6 (fixed in silicon) | 10 kΩ pull-up to the C6's 3V3 |
-| --- | --- | --- | --- |
-| CLK | G43 | IO19 | no |
-| CMD | G44 | IO18 | yes |
-| D0 | G39 | IO20 | yes |
-| D1 | G40 | IO21 | yes |
-| D2 | G41 | IO22 | yes |
-| D3 | G42 | IO23 | yes |
-| Reset | G13 | RST (EN) | no (on the board) |
-| GND | GND | GND | — |
+| Signal | P4  | C6 (fixed in silicon) | 10 kΩ pull-up to the C6's 3V3 |
+| ------ | --- | --------------------- | ----------------------------- |
+| CLK    | G43 | IO19                  | no                            |
+| CMD    | G44 | IO18                  | yes                           |
+| D0     | G39 | IO20                  | yes                           |
+| D1     | G40 | IO21                  | yes                           |
+| D2     | G41 | IO22                  | yes                           |
+| D3     | G42 | IO23                  | yes                           |
+| Reset  | G13 | RST (EN)              | no (on the board)             |
+| GND    | GND | GND                   | —                             |
 
 - **CLK is IO19 and CMD is IO18.** They sit next to each other on the C6
   header and are easy to swap. Swapped, card init fails outright.
@@ -442,13 +454,13 @@ errors at every clock.
 
 ### Troubleshooting
 
-| Symptom on the P4 | Meaning | Fix |
-| --- | --- | --- |
-| `sdmmc_card_init failed`, repeating | The C6 doesn't answer at all | CLK/CMD order, power, C6 firmware flashed? |
-| `failed to read registers`, then `SW_CPU_RESET` | Init works but full-speed transfers don't | Pull-ups, then 1-bit and a lower clock |
-| `0x109` (CRC) at every clock speed | Clock-edge timing, not noise | C6 built with `NSEND_PSAMPLE`; 1-bit on jumpers |
-| `Failed to send data: 265` on writes, 4-bit only | 4-bit on jumpers | Use 1-bit |
-| `WiFi disabled until power cycle` | The circuit breaker tripped after 2 restarts during bring-up | Fix the link, then power-cycle the P4 |
+| Symptom on the P4                                | Meaning                                                      | Fix                                             |
+| ------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------- |
+| `sdmmc_card_init failed`, repeating              | The C6 doesn't answer at all                                 | CLK/CMD order, power, C6 firmware flashed?      |
+| `failed to read registers`, then `SW_CPU_RESET`  | Init works but full-speed transfers don't                    | Pull-ups, then 1-bit and a lower clock          |
+| `0x109` (CRC) at every clock speed               | Clock-edge timing, not noise                                 | C6 built with `NSEND_PSAMPLE`; 1-bit on jumpers |
+| `Failed to send data: 265` on writes, 4-bit only | 4-bit on jumpers                                             | Use 1-bit                                       |
+| `WiFi disabled until power cycle`                | The circuit breaker tripped after 2 restarts during bring-up | Fix the link, then power-cycle the P4           |
 
 Main firmware behaviour on the bench:
 
@@ -477,6 +489,7 @@ After flashing the firmware to a fresh or factory-reset P4:
 8. The status LED turns **green** once MQTT connects.
 
 To test the setup worked:
+
 ```bash
 mosquitto_sub \
   -h 192.168.2.1 -p 8883 \

@@ -71,6 +71,7 @@ export default defineConfig({
               "/development/pirw-phase-1-behavior-capture",
               "/development/pirw-phase-2-cc1312-team-handoff",
               "/development/pirw-phase-2-launchpad-simulated-telemetry",
+              "/development/rais2-stock-retrofit",
               "/development/sensor-event-batching",
               "/development/companion-firmware-updates",
             ],
@@ -84,7 +85,7 @@ export default defineConfig({
       },
       {
         label: "RF",
-        items: ["/bidirectional-rf-migration"],
+        items: ["/bidirectional-rf-migration", "/dx-lr02-serial-guide"],
       },
     ],
   },
