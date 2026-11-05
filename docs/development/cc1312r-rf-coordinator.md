@@ -489,26 +489,7 @@ the coordinator's own address with body class `0xFF`, so they are published in
 
 Only the first record is kept until it has been loaded. A record is reported only once,
 after the reboot that follows it, so if MQTT is down during those 10 minutes it is lost.
-A watchdog reset leaves no record. It shows up only as the debug counters below
-restarting.
-
-### Debug counter frame
-
-When any counter changes, and no crash record is being reported, the coordinator sends a
-second raw frame from its own address. Its `data` is six `uint16` LE counters since boot:
-
-| Bytes | Counter                                      |
-| ----- | -------------------------------------------- |
-| 0–1   | PIR dual-trigger telemetry packets received  |
-| 2–3   | PIR dwell packets received                   |
-| 4–5   | Dwell packets rejected by the decoder        |
-| 6–7   | Dwell packets queued for SPI                 |
-| 8–9   | Dwell packets dropped (telemetry queue full) |
-| 10–11 | Dwell packets forwarded to SPI               |
-
-With the LaunchPad test sensor, which sends a dual trigger every 10 s, bytes 0–1 work
-as an uptime check. A count well below the elapsed time divided by 10 s means the
-coordinator reset.
+A watchdog reset leaves no record.
 
 ## ESP32-P4 Driver — `src/cc1312_manager.h`
 
@@ -641,69 +622,12 @@ decode, ignoring the extra trailing flags byte when present.
   - `event="trigger"`, `trigger_kind="dual"`, `event_count=49`
   - `event="dwell"`, `dwell_seconds=2`, `event_count=50`
 
-### Temporary Dwell Debug Frames (2026-03-26)
+### Dwell debug frames (removed)
 
-During bring-up, the coordinator emitted temporary debug frames so the CC1312 and
-ESP32 teams could determine where dwell was being lost.
-
-These frames are carried as normal `SENSOR_READING` uplinks with sensor class
-`Raw / other (0xFF)` so the ESP32 can relay them without needing a new message type.
-
-#### Current temporary coordinator debug frame
-
-- `MSG_TYPE = 0x02` (`SENSOR_READING`)
-- `NODE_ADDR = coordinator address`
-- `RSSI = 0`
-- `payload[0] = 0xFF` to force `reading/raw`
-- payload length = `13`
-
-Payload layout:
-
-```text
-byte 0:  0xFF raw/debug marker
-byte 1:  dual_trigger_count[0]   little-endian
-byte 2:  dual_trigger_count[1]
-byte 3:  dwell_seen_count[0]
-byte 4:  dwell_seen_count[1]
-byte 5:  dwell_reject_count[0]
-byte 6:  dwell_reject_count[1]
-byte 7:  dwell_queued_count[0]
-byte 8:  dwell_queued_count[1]
-byte 9:  dwell_queue_drop_count[0]
-byte 10: dwell_queue_drop_count[1]
-byte 11: dwell_forwarded_count[0]
-byte 12: dwell_forwarded_count[1]
-```
-
-Interpretation:
-
-- `dual > 0`, `seen = 0` → no dwell-like RF telemetry reached the coordinator
-- `seen > 0`, `reject > 0` → coordinator received dwell but rejected payload shape
-- `queued > 0`, `forwarded = 0` → coordinator accepted dwell but did not emit it to SPI
-- `forwarded > 0` → dwell left the coordinator; any remaining bug is downstream
-
-Example from a successful post-fix capture:
-
-```text
-data="010001000000010000000100"
-```
-
-Decoded:
-
-- `dual=1`
-- `seen=1`
-- `reject=0`
-- `queued=1`
-- `queue_drop=0`
-- `forwarded=1`
-
-**Team coordination note:** If any future temporary node-side analog debug subtype is
-added, it should either:
-
-- be translated by the coordinator into the same `reading/raw` host format, or
-- be documented here before the ESP32 parser is expected to consume it directly
-
-This keeps CC1310, CC1312, and ESP32 teams aligned on one temporary debug contract.
+During bring-up (2026-03) the coordinator sent a raw frame from its own address with six
+counters that traced dwell packets from RF reception to SPI. It was removed on 2026-11-05,
+once dwell was confirmed end to end. Node payloads whose first byte is `0xFF` are still
+passed through and published as `reading/raw`.
 
 ## Relationship to Other Documents
 
